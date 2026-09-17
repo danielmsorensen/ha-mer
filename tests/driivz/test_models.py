@@ -56,6 +56,8 @@ def test_active_transaction_tolerates_missing_duration() -> None:
 
 def test_parse_start_time_prefers_absolute_then_elapsed() -> None:
     now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
+    # a bare epoch (not wrapped in a dict) is still accepted directly
+    assert parse_start_time(1789554866000, now) == datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
     # an absolute timestamp still wins, for portals that send one
     assert parse_start_time({"startOn": 1789554866000}, now) == datetime(
         2026, 9, 16, 10, 34, 26, tzinfo=UTC
@@ -190,6 +192,12 @@ def test_session_estimate_still_reads_alternative_spellings() -> None:
     assert est.cost == 0.8
     assert est.duration is None
     assert est.rate_estimation is None
+    assert est.currency is None
+    # totalEnergy and energyConsumed are watt-hours, converted with the 1000.0 divisor
+    est2 = SessionEstimate.from_dict({"totalEnergy": 12345, "cost": 1.5, "currency": "GBP"})
+    assert est2.energy_kwh == 12.345
+    assert est2.cost == 1.5
+    assert est2.currency == "GBP"
 
 
 def test_socket_from_dict_minimal() -> None:
