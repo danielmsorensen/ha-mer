@@ -135,7 +135,21 @@
       "socket_price": { "name": "{socket} price" },
       "socket_max_power": { "name": "{socket} max power" },
       "site_available_sockets": { "name": "Available sockets" },
-      "site_sockets_in_use": { "name": "Sockets in use" }
+      "site_sockets_in_use": { "name": "Sockets in use" },
+      "active_station": { "name": "Active session charger" },
+      "active_started": { "name": "Active session started" },
+      "active_energy": { "name": "Active session energy" },
+      "active_cost": { "name": "Active session cost" },
+      "active_duration": { "name": "Active session duration" },
+      "active_socket": { "name": "Active session socket" },
+      "last_energy": { "name": "Last session energy" },
+      "last_cost": { "name": "Last session cost" },
+      "last_started": { "name": "Last session started" },
+      "wallet_balance": { "name": "Wallet balance" },
+      "station_session_energy": { "name": "Session energy" },
+      "station_session_cost": { "name": "Session cost" },
+      "station_session_started": { "name": "Session started" },
+      "station_session_duration": { "name": "Session duration" }
     },
     "binary_sensor": {
       "socket_available": { "name": "{socket} available" },
