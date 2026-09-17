@@ -9,6 +9,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
 from homeassistant.const import EntityCategory, UnitOfPower
 from homeassistant.core import HomeAssistant
@@ -17,7 +18,7 @@ from homeassistant.helpers.typing import StateType
 
 from .coordinator import MerConfigEntry, MerCoordinator
 from .driivz.models import Socket, Station
-from .entity import STATUS_OPTIONS, MerSocketEntity, MerStationEntity, status_option
+from .entity import STATUS_OPTIONS, MerSiteEntity, MerSocketEntity, MerStationEntity, status_option
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -83,6 +84,35 @@ SOCKET_SENSORS: tuple[MerSocketSensorDescription, ...] = (
 )
 
 
+@dataclass(frozen=True, kw_only=True)
+class MerSiteSensorDescription(SensorEntityDescription):
+    """Sensor aggregating the configured stations."""
+
+    value_fn: Callable[[list[Station]], StateType]
+
+
+SITE_SENSORS: tuple[MerSiteSensorDescription, ...] = (
+    MerSiteSensorDescription(
+        key="available_sockets",
+        translation_key="site_available_sockets",
+        icon="mdi:ev-plug-type2",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda stations: sum(
+            1 for station in stations for socket in station.sockets if socket.is_available
+        ),
+    ),
+    MerSiteSensorDescription(
+        key="sockets_in_use",
+        translation_key="site_sockets_in_use",
+        icon="mdi:ev-plug-type2",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda stations: sum(
+            1 for station in stations for socket in station.sockets if socket.is_in_use
+        ),
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: MerConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
@@ -99,6 +129,7 @@ async def async_setup_entry(
                 MerSocketSensor(coordinator, station.id, socket.id, description)
                 for description in SOCKET_SENSORS
             )
+    entities.extend(MerSiteSensor(coordinator, description) for description in SITE_SENSORS)
     async_add_entities(entities)
 
 
@@ -143,3 +174,13 @@ class MerSocketSensor(MerSocketEntity, SensorEntity):
         if self.entity_description.unit_fn is not None and socket is not None:
             return self.entity_description.unit_fn(socket)
         return self.entity_description.native_unit_of_measurement
+
+
+class MerSiteSensor(MerSiteEntity, SensorEntity):
+    """A sensor aggregating all configured chargers at the site."""
+
+    entity_description: MerSiteSensorDescription
+
+    @property
+    def native_value(self) -> StateType:
+        return self.entity_description.value_fn(self.coordinator.configured_stations())

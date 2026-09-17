@@ -133,7 +133,15 @@
         }
       },
       "socket_price": { "name": "{socket} price" },
-      "socket_max_power": { "name": "{socket} max power" }
+      "socket_max_power": { "name": "{socket} max power" },
+      "site_available_sockets": { "name": "Available sockets" },
+      "site_sockets_in_use": { "name": "Sockets in use" }
+    },
+    "binary_sensor": {
+      "socket_available": { "name": "{socket} available" },
+      "site_any_available": { "name": "Any socket available" },
+      "account_charging": { "name": "Charging" },
+      "station_session_here": { "name": "My session here" }
     }
   },
   "exceptions": {
