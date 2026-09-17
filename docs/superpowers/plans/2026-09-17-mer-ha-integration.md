@@ -610,13 +610,13 @@ def test_clean_caption_strips_prefix_and_code() -> None:
 
 
 def test_ms_to_datetime() -> None:
-    assert ms_to_datetime(1789554866000) == datetime(2026, 9, 16, 12, 34, 26, tzinfo=UTC)
+    assert ms_to_datetime(1789554866000) == datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
     assert ms_to_datetime(None) is None
     assert ms_to_datetime("bad") is None
 
 
 def test_parse_start_time_accepts_int_or_dict() -> None:
-    expected = datetime(2026, 9, 16, 12, 34, 26, tzinfo=UTC)
+    expected = datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
     assert parse_start_time(1789554866000) == expected
     assert parse_start_time({"startOn": 1789554866000}) == expected
     assert parse_start_time({"startTime": 1789554866000}) == expected
@@ -722,8 +722,8 @@ def test_transaction_from_dict() -> None:
     assert tx.id == 9084600
     assert tx.station_id == 6041
     assert tx.display_name == "Business Durham - NETPark 4 - Explorer 2"
-    assert tx.started_at == datetime(2026, 9, 16, 12, 34, 26, tzinfo=UTC)
-    assert tx.stopped_at == datetime(2026, 9, 16, 17, 27, 47, tzinfo=UTC)
+    assert tx.started_at == datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
+    assert tx.stopped_at == datetime(2026, 9, 16, 15, 27, 47, tzinfo=UTC)
     assert tx.duration_s == 17601
     assert tx.energy_kwh == 32.408
     assert tx.cost == 0
@@ -1722,7 +1722,7 @@ async def test_transaction_start_time_and_estimate(client: DriivzDriverClient) -
         estimate = await client.find_current_transaction_estimate(11241)
         start_call = m.requests[("POST", URL(url(start_path)))][0]
         est_call = m.requests[("POST", URL(url(est_path)))][0]
-    assert started == datetime(2026, 9, 16, 12, 34, 26, tzinfo=UTC)
+    assert started == datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
     assert start_call.kwargs["data"] == {"stationSocketId": "11241"}
     assert est_call.kwargs["data"] == {"socketId": "11241"}
     assert estimate is not None
@@ -2119,7 +2119,7 @@ def mock_client() -> Generator[MagicMock]:
         )
         client.find_last_active_charge_socket = AsyncMock(return_value=None)
         client.find_current_transaction_start_time = AsyncMock(
-            return_value=datetime(2026, 9, 16, 12, 34, 26, tzinfo=UTC)
+            return_value=datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
         )
         client.find_current_transaction_estimate = AsyncMock(
             return_value=SessionEstimate(energy_kwh=12.345, cost=0.0, currency="GBP")
@@ -4253,8 +4253,11 @@ async def test_start_charge_button(
     polls_before = mock_client.find_stations_by_ids.await_count
     await press(hass, entity_id)
     mock_client.start_charge.assert_awaited_once_with(11243)
-    # refresh is scheduled a few seconds later
+    # the refresh is scheduled ~5 s later, then debounced by the coordinator (~10 s)
     freezer.tick(timedelta(seconds=6))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=11))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
     assert mock_client.find_stations_by_ids.await_count == polls_before + 1
@@ -4437,7 +4440,7 @@ async def test_account_sensors_idle(
     assert last_energy.attributes["unit_of_measurement"] == "kWh"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_last_cost").state == "0.0"
     last_started = state_by_unique_id(hass, "sensor", f"{eid}_account_last_started")
-    assert last_started.state == "2026-09-16T12:34:26+00:00"
+    assert last_started.state == "2026-09-16T10:34:26+00:00"
     assert last_started.attributes["device_class"] == "timestamp"
     assert last_started.attributes["station"] == "Business Durham - NETPark 4 - Explorer 2"
 
@@ -4458,7 +4461,7 @@ async def test_account_sensors_charging(
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_cost").state == "0.0"
     assert (
         state_by_unique_id(hass, "sensor", f"{eid}_account_active_started").state
-        == "2026-09-16T12:34:26+00:00"
+        == "2026-09-16T10:34:26+00:00"
     )
 ```
 
