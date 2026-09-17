@@ -10,7 +10,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mer.const import DOMAIN
-from custom_components.mer.driivz.models import Socket
+from custom_components.mer.driivz.models import Socket, SocketPrice
 from tests.helpers import setup_integration
 
 
@@ -106,3 +106,35 @@ def test_socket_label_fallbacks() -> None:
     assert socket_label(Socket(id=1, name="Left")) == "Left"
     assert socket_label(Socket(id=1, identity_key="2")) == "Socket 2"
     assert socket_label(Socket(id=77)) == "Socket 77"
+
+
+def _price(currency: str | None) -> SocketPrice:
+    return SocketPrice(
+        billing_plan_id=None,
+        billing_plan_code=None,
+        kwh_price=0.3,
+        plug_in_minute_rate=None,
+        transaction_fee=None,
+        currency=currency,
+    )
+
+
+def test_socket_price_unit_follows_tariff_currency() -> None:
+    """The price sensor's unit must track the socket's own tariff currency.
+
+    This portal serves both GBP (UK) and EUR (Republic of Ireland) tenants, so a
+    hardcoded unit would mislabel an Irish driver's price as pounds.
+    """
+    from custom_components.mer.sensor import SOCKET_SENSORS
+
+    price_description = next(d for d in SOCKET_SENSORS if d.key == "price")
+    assert price_description.unit_fn is not None
+
+    gbp_socket = Socket(id=11243, prices=(_price("GBP"),))
+    assert price_description.unit_fn(gbp_socket) == "GBP/kWh"
+
+    eur_socket = Socket(id=99, prices=(_price("EUR"),))
+    assert price_description.unit_fn(eur_socket) == "EUR/kWh"
+
+    no_tariff_socket = Socket(id=100)
+    assert price_description.unit_fn(no_tariff_socket) == "GBP/kWh"

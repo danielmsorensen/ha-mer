@@ -32,6 +32,13 @@ class MerSocketSensorDescription(SensorEntityDescription):
     """Sensor reading a Socket."""
 
     value_fn: Callable[[Socket], StateType]
+    unit_fn: Callable[[Socket], str | None] | None = None
+
+
+def _socket_price_unit(socket: Socket) -> str:
+    """Return the tariff currency's unit, falling back to the tenant's default."""
+    currency = socket.prices[0].currency if socket.prices else None
+    return f"{currency}/kWh" if currency else "GBP/kWh"
 
 
 STATION_SENSORS: tuple[MerStationSensorDescription, ...] = (
@@ -61,9 +68,9 @@ SOCKET_SENSORS: tuple[MerSocketSensorDescription, ...] = (
     MerSocketSensorDescription(
         key="price",
         translation_key="socket_price",
-        native_unit_of_measurement="GBP/kWh",
         suggested_display_precision=2,
         value_fn=lambda socket: socket.price_per_kwh,
+        unit_fn=_socket_price_unit,
     ),
     MerSocketSensorDescription(
         key="max_power",
@@ -129,3 +136,10 @@ class MerSocketSensor(MerSocketEntity, SensorEntity):
     def native_value(self) -> StateType:
         socket = self.socket
         return self.entity_description.value_fn(socket) if socket else None
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        socket = self.socket
+        if self.entity_description.unit_fn is not None and socket is not None:
+            return self.entity_description.unit_fn(socket)
+        return self.entity_description.native_unit_of_measurement
