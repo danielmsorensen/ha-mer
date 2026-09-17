@@ -142,6 +142,11 @@
       "site_any_available": { "name": "Any socket available" },
       "account_charging": { "name": "Charging" },
       "station_session_here": { "name": "My session here" }
+    },
+    "button": {
+      "socket_start_charge": { "name": "{socket} start charge" },
+      "account_stop_charge": { "name": "Stop charge" },
+      "station_stop_charge": { "name": "Stop charge" }
     }
   },
   "exceptions": {
@@ -150,6 +155,9 @@
     },
     "no_active_session": {
       "message": "There is no active charging session to stop"
+    },
+    "session_not_here": {
+      "message": "This charger is not running your charging session"
     }
   }
 }
