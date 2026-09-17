@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import logging
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -90,7 +92,9 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._wallet: Wallet | None = None
         self._last_transaction: Transaction | None = None
         self._customer_id: int | None = None
-        self._details_refreshed: datetime | None = None
+        # Per station, not one timestamp for the whole set: the hourly detail work is
+        # staggered so at most one charger is refreshed per cycle. See `_stations_due`.
+        self._station_refreshed: dict[int, datetime] = {}
         self._wallet_refreshed: datetime | None = None
         self._skip_next = False
         self._rate_warned_at: datetime | None = None
@@ -124,9 +128,13 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             stations = {s.id: s for s in await self.client.find_stations_by_ids(self.station_ids)}
             active = await self._fetch_active()
             if self._due(self._wallet_refreshed, WALLET_REFRESH, now):
-                await self._refresh_account(now)
-            if self._due(self._details_refreshed, DETAIL_REFRESH, now):
-                await self._refresh_details(now)
+                await self._refresh_optional("account", self._refresh_account(now))
+                self._wallet_refreshed = now
+            for station_id in self._stations_due(now):
+                await self._refresh_optional(
+                    f"charger {station_id} detail", self._refresh_station(station_id)
+                )
+                self._station_refreshed[station_id] = now
         except AuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except RateLimitError as err:
@@ -171,12 +179,73 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             or (self._wallet.currency if self._wallet else None),
         )
 
+    async def _refresh_optional(self, what: str, work: Coroutine[Any, Any, None]) -> None:
+        """Await one of the slower periodic refreshes without letting it fail the cycle.
+
+        The per-minute station poll is what this integration exists for, so a persistently
+        failing endpoint in the slower optional work -- wallet, history, station detail or
+        the newest and least-exercised of them, the notify-me subscription check -- must
+        not take every entity unavailable, including the socket availability sensors that
+        are still being fetched perfectly well.
+
+        `AuthError` and `RateLimitError` still propagate, because those mean something the
+        coordinator itself has to act on (reauthenticate, or skip the next cycle) and only
+        its own handlers in `_async_update_data` can do that. Every other `DriivzError` is
+        logged at debug and swallowed; the caller then stamps this work's timestamp anyway,
+        so it backs off to its next window instead of retrying every single cycle and
+        turning hourly traffic into per-minute traffic.
+
+        Nothing is swallowed on the very first cycle, though. There are no entities yet to
+        keep available, so tolerance buys nothing there, and coming up half-populated would
+        permanently bake missing socket names, device models and serial numbers into the
+        entity and device registries -- those are composed once, when the platforms are set
+        up. Failing instead gives `ConfigEntryNotReady` and an ordinary setup retry.
+        """
+        try:
+            await work
+        except (AuthError, RateLimitError):
+            raise
+        except DriivzError as err:
+            if self.data is None:
+                raise
+            _LOGGER.debug(
+                "Mer %s refresh failed (%s: %s); keeping the last known values "
+                "until its next scheduled window",
+                what,
+                type(err).__name__,
+                err,
+            )
+
+    def _stations_due(self, now: datetime) -> list[int]:
+        """Which chargers' hourly detail refresh should run this cycle.
+
+        The first cycle primes every configured charger. Entity names, device models,
+        serial numbers and socket labels are all composed once, when the platforms are set
+        up, from whatever detail is cached at that moment -- a charger left undetailed on
+        the first cycle would keep "Socket 11241" as its socket's name for the lifetime of
+        the config entry.
+
+        After that, at most one charger per cycle. Refreshing all of them in the same tick
+        is what makes the worst-case burst grow with the number of selected chargers
+        (6 + 2N calls: 22 at eight chargers), against an `X-Rate-Limit-Remaining` observed
+        at 9 at rest and a refill window nobody has measured. One per cycle keeps the
+        steady-state worst case a constant 8 however many chargers are selected, and each
+        charger is still refreshed once an hour -- just not all in the same tick.
+        """
+        due = [
+            station_id
+            for station_id in self.station_ids
+            if self._due(self._station_refreshed.get(station_id), DETAIL_REFRESH, now)
+        ]
+        return due if not self._station_refreshed else due[:1]
+
     async def _refresh_account(self, now: datetime) -> None:
         """Fetch wallet and history, then commit both atomically.
 
         Every call below must succeed before any `self.*` attribute is written, so a
         client error partway through never leaves the cached wallet/customer id/last
-        transaction ahead of the last successfully published cycle.
+        transaction ahead of the last successfully published cycle. The `_wallet_refreshed`
+        stamp is set by the caller, which stamps on a swallowed failure too.
         """
         wallet = await self.client.find_wallet()
         customer_id = wallet.customer_id
@@ -189,34 +258,33 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._wallet = wallet
         self._customer_id = customer_id
         self._last_transaction = last_transaction
-        self._wallet_refreshed = now
 
-    async def _refresh_details(self, now: datetime) -> None:
-        """Fetch every configured station's details, then commit them atomically.
+    async def _refresh_station(self, station_id: int) -> None:
+        """Fetch one charger's detail and subscription state, then commit both atomically.
 
-        Built up in a local dict so a client error partway through the loop leaves
-        `self._details` untouched rather than half-updated.
+        Both client calls happen before either `self.*` assignment, so a failure in the
+        subscription check -- the newest and flakiest of the two -- cannot leave the
+        details cache ahead of the last published data.
 
-        The subscription fetch is a separate loop, guarded by `_notify_lock` end to end
-        (every awaited fetch plus the trailing commit), so it can never interleave with
-        `async_set_availability_subscription`. Locking only the final assignment would
-        not be enough: the staleness this guards against is introduced while *fetching*
-        each station's answer, not while writing the dict back, so a toggle that lands
-        after this loop has already fetched (now-stale) data for its station but before
-        the loop commits must be blocked out entirely, not just raced at the assignment.
+        `_notify_lock` spans the subscription fetch *and* its commit, so this can never
+        interleave with `async_set_availability_subscription`. Locking only the assignment
+        would not be enough: the staleness this guards against is introduced while
+        *fetching* the answer, not while writing it back, so a toggle that lands after the
+        fetch has read a now-stale value but before the commit must be blocked out
+        entirely, not merely raced at the assignment.
+
+        Staggering does not weaken that: the lock's scope is per call, and holding it
+        around one station's fetch-and-commit is exactly the window it needs to cover. The
+        `self._details` write is deliberately outside the lock -- the lock exists for
+        `_notify`, which is the only state a toggle also writes -- and it happens after the
+        lock is released so that the whole method still commits nothing until both calls
+        have succeeded.
         """
-        details = dict(self._details)
-        for station_id in self.station_ids:
-            details[station_id] = await self.client.find_station_by_id(station_id)
-        self._details = details
-
+        detail = await self.client.find_station_by_id(station_id)
         async with self._notify_lock:
-            notify = dict(self._notify)
-            for station_id in self.station_ids:
-                notify[station_id] = await self.client.is_subscribed_to_availability(station_id)
-            self._notify = notify
-
-        self._details_refreshed = now
+            subscribed = await self.client.is_subscribed_to_availability(station_id)
+            self._notify = {**self._notify, station_id: subscribed}
+        self._details = {**self._details, station_id: detail}
 
     def _check_rate_limit(self, now: datetime) -> None:
         remaining = self.client.rate_limit_remaining
@@ -264,11 +332,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         value immediately rather than waiting up to an hour for the next detail refresh.
 
         Both the client call and the cache write happen under `_notify_lock`, the same
-        lock `_refresh_details` holds for its whole subscription fetch-and-commit loop.
-        That serializes the two writers completely: a toggle either finishes entirely
-        before a refresh's subscription loop starts, or waits for it to finish first, so
-        the refresh's trailing whole-dict assignment can never overwrite a toggle that
-        landed while the refresh was still fetching.
+        lock `_refresh_station` holds across its subscription fetch and commit. That
+        serializes the two writers completely: a toggle either finishes entirely before a
+        refresh's subscription fetch starts, or waits for it to finish first, so the
+        refresh's commit can never overwrite a toggle that landed while it was fetching.
         """
         async with self._notify_lock:
             if subscribed:

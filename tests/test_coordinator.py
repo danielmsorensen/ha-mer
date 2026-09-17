@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import timedelta
 from unittest.mock import MagicMock
 
@@ -22,6 +23,11 @@ from custom_components.mer.driivz.exceptions import (
 )
 from custom_components.mer.driivz.models import Socket
 from tests.helpers import setup_integration
+
+# Stamped onto a station detail by a test so it can tell a committed refresh from a
+# discarded one; the conftest hands back the same Station object every call, so identity
+# comparison would not show the difference.
+_COMMIT_MARKER = "committed by _refresh_station"
 
 
 async def _tick(hass: HomeAssistant, freezer: FrozenDateTimeFactory, seconds: int) -> None:
@@ -57,8 +63,125 @@ async def test_idle_cycle_request_budget(
     assert mock_client.find_transactions.await_count == 2
     assert mock_client.find_station_by_id.await_count == 2
 
+    # The hourly per-charger work is staggered: both chargers are due again after an hour,
+    # but only one is refreshed in this tick, and the other in the next one. This test used
+    # to assert both went out together (await_count jumping 2 -> 4 in one tick), which is
+    # the behaviour that made the worst-case burst 6 + 2N calls and grow without bound with
+    # the number of selected chargers.
     await _tick(hass, freezer, 60 * 60)
+    assert mock_client.find_station_by_id.await_count == 3
+    assert mock_client.is_subscribed_to_availability.await_count == 3
+    await _tick(hass, freezer, 61)
     assert mock_client.find_station_by_id.await_count == 4
+    assert mock_client.is_subscribed_to_availability.await_count == 4
+    assert [c.args[0] for c in mock_client.find_station_by_id.await_args_list] == [
+        6042,
+        6041,
+        6042,
+        6041,
+    ]
+    # ...and with both freshly refreshed, the next cycle does no detail work at all.
+    await _tick(hass, freezer, 61)
+    assert mock_client.find_station_by_id.await_count == 4
+
+
+async def test_optional_refresh_failure_does_not_fail_the_cycle(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A persistently broken optional endpoint must not blank every entity, or hot-loop.
+
+    The station poll is the whole point of the integration; the hourly notify-me check is
+    the newest and least-exercised call on the branch. Awaiting them in the same `try` made
+    the second able to kill the first, and because the timestamp was only written on full
+    success, the hourly work then retried every cycle -- a sixtyfold traffic increase
+    triggered by nothing but portal flakiness.
+    """
+    await setup_integration(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data
+    coordinator.async_add_listener(lambda: None)
+    calls_after_setup = mock_client.is_subscribed_to_availability.await_count
+
+    # Tag every detail the client hands back from here on, so we can see exactly when a
+    # `_refresh_station` committed one.
+    unstaged = mock_client.find_station_by_id.side_effect
+    mock_client.find_station_by_id.side_effect = lambda station_id, billing_plan_id=None: replace(
+        unstaged(station_id), model_name=_COMMIT_MARKER
+    )
+    # Break the notify-me check, then let the hourly window come round. The stagger means
+    # 6042 is refreshed in this cycle and 6041 in the next one; both will fail.
+    mock_client.is_subscribed_to_availability.side_effect = DriivzConnectionError("notify down")
+    await _tick(hass, freezer, 60 * 60)
+
+    # The cycle still succeeded, and the live station data the integration exists to
+    # publish is there -- including the source of the socket availability sensors.
+    assert coordinator.last_update_success is True
+    assert coordinator.get_station(6042) is not None
+    assert coordinator.data.stations.keys() == {6042, 6041}
+    # And nothing from the failed refresh was committed: `find_station_by_id` succeeded,
+    # but its result is discarded rather than left ahead of the published notify state.
+    assert coordinator.data.details[6042].model_name != _COMMIT_MARKER
+    assert mock_client.find_station_by_id.await_count == 3
+    assert mock_client.is_subscribed_to_availability.await_count == calls_after_setup + 1
+
+    await _tick(hass, freezer, 61)  # 6041's turn, also fails
+    assert mock_client.is_subscribed_to_availability.await_count == calls_after_setup + 2
+    assert coordinator.data.details[6041].model_name != _COMMIT_MARKER
+
+    # Both failures are stamped anyway, so the work backs off to its next window instead of
+    # retrying every single cycle.
+    await _tick(hass, freezer, 61)
+    assert mock_client.is_subscribed_to_availability.await_count == calls_after_setup + 2
+    assert mock_client.find_stations_by_ids.await_count == 4  # the poll kept running
+    assert coordinator.last_update_success is True
+
+    # When it recovers at its next window, both halves commit together as normal.
+    mock_client.is_subscribed_to_availability.side_effect = lambda station_id: station_id == 6042
+    await _tick(hass, freezer, 60 * 60)
+    assert coordinator.data.details[6042].model_name == _COMMIT_MARKER
+    assert coordinator.data.notify_subscriptions[6042] is True
+
+
+async def test_first_cycle_does_not_come_up_half_populated(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """The very first cycle still fails hard, so setup retries instead of degrading.
+
+    Tolerating an optional failure is only worth it once entities exist to keep available.
+    On the first cycle there are none, and entity names, device models, serial numbers and
+    socket labels are all composed once when the platforms are set up -- coming up without
+    a charger's detail would bake "Socket 11241" in as a socket's name for the lifetime of
+    the config entry. `ConfigEntryNotReady` and a normal setup retry is the better outcome.
+    """
+    mock_client.is_subscribed_to_availability.side_effect = DriivzConnectionError("notify down")
+    await setup_integration(hass, mock_config_entry)
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_optional_refresh_still_reports_auth_and_rate_limit(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """AuthError and RateLimitError from the optional work must reach their handlers."""
+    await setup_integration(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data
+    coordinator.async_add_listener(lambda: None)
+
+    mock_client.find_wallet.side_effect = RateLimitError("429")
+    await _tick(hass, freezer, 15 * 60)  # wallet is due again
+    assert coordinator.last_update_success is False
+    assert coordinator._skip_next is True
+
+    mock_client.find_wallet.side_effect = AuthError("SESSION_EXPIRED")
+    await _tick(hass, freezer, 61)  # skipped cycle, no portal contact
+    await _tick(hass, freezer, 61)
+    assert any(
+        f["context"].get("source") == "reauth" for f in hass.config_entries.flow.async_progress()
+    )
 
 
 async def test_charging_cycle_fetches_session(
@@ -163,18 +286,18 @@ async def test_toggle_during_refresh_is_not_clobbered(
 ) -> None:
     """A toggle that lands mid-refresh must win, not be overwritten by the refresh's commit.
 
-    `_refresh_details` snapshots `self._notify` into a local dict, fetches every station's
-    subscription state one await at a time, then assigns the whole dict back. If a toggle
-    for the same station lands after the refresh has already fetched its (now-stale) answer
-    but before that trailing assignment, an unguarded refresh would silently overwrite the
-    user's confirmed change. Station 6042 is first in `station_ids`, so its fetch is the one
-    parked here while the toggle runs.
+    `_refresh_station` fetches a station's subscription state and then writes it back into
+    `self._notify`. If a toggle for the same station lands after the refresh has already
+    fetched its (now-stale) answer but before that write, an unguarded refresh would
+    silently overwrite the user's confirmed change.
 
     The toggle is started as its own task, not awaited inline: with the fix in place, it
-    blocks on `_notify_lock` (held by the parked refresh) until the refresh's fetch-and-commit
-    loop finishes, so awaiting it directly here would deadlock against the still-parked
-    refresh. That ordering -- toggle forced to wait its turn rather than interleaving -- is
-    exactly the property under test.
+    blocks on `_notify_lock` (held by the parked refresh) until the refresh's fetch and
+    commit both finish, so awaiting it directly here would deadlock against the
+    still-parked refresh. That ordering -- toggle forced to wait its turn rather than
+    interleaving -- is exactly the property under test. Staggering the hourly work to one
+    charger per cycle does not change it: the lock's scope is one station's fetch and
+    commit, which is the whole window in which staleness can be introduced.
     """
     await setup_integration(hass, mock_config_entry)
     coordinator = mock_config_entry.runtime_data
@@ -194,7 +317,7 @@ async def test_toggle_during_refresh_is_not_clobbered(
 
     mock_client.is_subscribed_to_availability.side_effect = blocking_is_subscribed
 
-    refresh_task = asyncio.create_task(coordinator._refresh_details(dt_util.utcnow()))
+    refresh_task = asyncio.create_task(coordinator._refresh_station(6042))
     await parked.wait()  # the refresh is now parked inside the fetch for 6042
 
     toggle_task = asyncio.create_task(coordinator.async_set_availability_subscription(6042, False))
