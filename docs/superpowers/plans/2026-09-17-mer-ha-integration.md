@@ -2127,7 +2127,7 @@ def mock_config_entry() -> MockConfigEntry:
     """A configured entry monitoring Explorer 1 and 2."""
     return MockConfigEntry(
         domain=DOMAIN,
-        title=f"Mer – {SITE_NAME}",
+        title=f"Mer - {SITE_NAME}",
         unique_id="user@example.com",
         data={
             CONF_USERNAME: "user@example.com",
@@ -2870,7 +2870,7 @@ async def test_full_flow_creates_entry(hass: HomeAssistant, mock_client: MagicMo
         result["flow_id"], {CONF_STATION_IDS: ["6042", "6041"]}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Mer – Durham County Council - Business Durham NETPark"
+    assert result["title"] == "Mer - Durham County Council - Business Durham NETPark"
     assert result["data"] == {**CREDS, CONF_BASE_URL: DEFAULT_BASE_URL}
     assert result["options"] == {
         CONF_SITE_ID: 2877,
@@ -3228,7 +3228,7 @@ class MerConfigFlow(_SiteStationsMixin, ConfigFlow, domain=DOMAIN):
 
     async def _finish(self, site: Site, station_ids: list[int]) -> ConfigFlowResult:
         return self.async_create_entry(
-            title=f"Mer – {site.name}",
+            title=f"Mer - {site.name}",
             data=self._data,
             options={
                 CONF_SITE_ID: site.id,
