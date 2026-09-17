@@ -3947,7 +3947,332 @@ Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 
 ---
 
+### Task 7a: Correct the live-session shapes against the real portal
+
+**Why this task exists:** on 2026-09-17 a real charging session was captured from the live portal
+while the user was charging. Two of the three endpoints that Task 2 could only guess at return
+something quite different from the synthetic fixtures, and the parsers written for the guesses
+return `None` against the real payloads. Task 10 builds the session sensors on these parsers, so
+this correction lands first. The captured payloads are now the fixtures.
+
+**Files:**
+- Modify: `custom_components/mer/driivz/models.py` (`parse_start_time`, `SessionEstimate`)
+- Modify: `custom_components/mer/coordinator.py` (`ActiveSession`, `_fetch_active`)
+- Replace: `tests/fixtures/last_active_charging.json`, `tests/fixtures/transaction_start_time.json`, `tests/fixtures/transaction_estimate.json`
+- Modify: `tests/driivz/test_models.py`, `tests/driivz/test_client_methods.py`, `tests/test_coordinator.py`, `tests/conftest.py`
+- Test: the three test files above
+
+**Interfaces:**
+- Consumes: everything from Tasks 2-5.
+- Produces:
+  - `models.ActiveTransaction` — frozen dataclass with `transaction_id: int | None`, `elapsed: timedelta | None`, `boost_enabled: bool`, `from_dict`, and `started_at(now: datetime) -> datetime | None` returning `now - elapsed`.
+  - `models.parse_start_time(data, now)` — now takes the reference time and returns `datetime | None`, deriving the start from elapsed milliseconds when the payload carries no absolute timestamp.
+  - `SessionEstimate` gains `duration: timedelta | None` and `rate_estimation: float | None`, and reads energy from `totalKw`.
+  - `coordinator.ActiveSession` gains `transaction_id: int | None`, `duration: timedelta | None`, `socket_name: str | None`, `station_caption: str | None`.
+
+#### What the portal actually returns
+
+`POST stationFacade/findCurrentTransactionStartTime` with form `stationSocketId` — **no timestamp at all**:
+
+```json
+{"errors":[],"success":true,"data":{"boostEnabled":false,"transactionId":9088676,"txDuration":953622}}
+```
+
+`txDuration` is **milliseconds elapsed since the charge started**, confirmed by sampling twice 40 s
+apart: 953622 then 993382, a delta of 39760 ms. So the start time is `now - txDuration`.
+
+`POST stationFacade/findCurrentTransactionBillingChargingEstimation` with form `socketId`:
+
+```json
+{"errors":[],"success":true,"data":{"billingPlanDisplayCode":"Durham County Council - Netpark IP","cost":0,"currency":"GBP","customerDetailId":123456,"duration":953825,"rateEstimation":1.801,"receiveMemberNotification":false,"serviceProviderId":7,"totalKw":1.606}}
+```
+
+Energy is `totalKw`, and despite the name it is **kWh delivered**, not instantaneous power:
+1.606 kWh over 953 s on a 7.4 kW socket is a ~6 kW average, which is consistent. `duration` is
+elapsed milliseconds, matching `txDuration`. `rateEstimation` held at 1.801 across both samples
+while `totalKw` also held at 1.606, so meter values refresh less often than the duration counters;
+treat `rateEstimation` as an opaque diagnostic number and do not label it as power or as a price.
+
+`POST stationFacade/findLastActiveChargeSocket` returns a **superset** of the socket DTO Task 2
+already parses, and usefully includes the station's caption and the site name, so the active
+charger can be named without a second lookup:
+
+```json
+{"errors":[],"success":true,"data":{"blocked":false,"deleted":false,"dirty":false,"hasTeslaAdapter":false,"id":11242,"identityKey":"2","ignoreStatusNotification":false,"inMaintenance":false,"maximumPower":7.4,"name":"Right","rfidCardEnrollmentPending":false,"siteAddressAddress1":"Discovery Centre NETPark,","siteAddressCity":"Sedgefield, Stockton-on-Tees","siteAddressCountryName":"United Kingdom","siteAddressZipCode":"TS21 3FD","siteDisplayName":"Durham County Council - Business Durham NETPark","socketStatusId":"CHARGING","socketTariffsAreDirty":false,"stationAddressAddress1":"Discovery Centre NETPark,","stationAddressCity":"Sedgefield, Stockton-on-Tees","stationCaption":"(MER-FS-AD01372) Business Durham - NETPark 4 - Explorer 2","stationId":6041,"stationIdentityKey":"MER-FS-AD01372","stationInMaintenance":false,"stationIsManaged":true,"stationModelSocketChargingInstructions":"--lang=en\n1.| Swipe to Start Charge;2.| Connect Cable\n##Swipe this Bar;Then Connect","stationModelSocketChargingMode":"MODE3","stationModelSocketMaximumPower":22,"stationModelSocketSocketTypeId":"TYPE_2_MENNEKES","stationModelSocketVoltageType":"AC","teslaInMaintenance":false}}
+```
+
+- [ ] **Step 1: Replace the three fixtures**
+
+Write each of the three payloads above to its fixture file verbatim, as the whole envelope, with
+one change: `customerDetailId` becomes `123456` in the estimate fixture (it is already `123456`
+above). Everything else is portal metadata about a public charging site, not personal data.
+
+- [ ] **Step 2: Write the failing model tests**
+
+Add to `tests/driivz/test_models.py`:
+
+```python
+def test_active_transaction_from_dict_derives_start_from_elapsed() -> None:
+    from datetime import timedelta
+
+    from custom_components.mer.driivz.models import ActiveTransaction
+
+    now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
+    tx = ActiveTransaction.from_dict(load_json_fixture("transaction_start_time.json")["data"])
+    assert tx.transaction_id == 9088676
+    assert tx.boost_enabled is False
+    assert tx.elapsed == timedelta(milliseconds=953622)
+    assert tx.started_at(now) == now - timedelta(milliseconds=953622)
+
+
+def test_active_transaction_tolerates_missing_duration() -> None:
+    from custom_components.mer.driivz.models import ActiveTransaction
+
+    now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
+    tx = ActiveTransaction.from_dict({"transactionId": 1})
+    assert tx.elapsed is None
+    assert tx.started_at(now) is None
+
+
+def test_parse_start_time_prefers_absolute_then_elapsed() -> None:
+    now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
+    # an absolute timestamp still wins, for portals that send one
+    assert parse_start_time({"startOn": 1789554866000}, now) == datetime(
+        2026, 9, 16, 10, 34, 26, tzinfo=UTC
+    )
+    # the real Mer payload carries only elapsed milliseconds
+    assert parse_start_time(
+        load_json_fixture("transaction_start_time.json")["data"], now
+    ) == now - timedelta(milliseconds=953622)
+    assert parse_start_time(None, now) is None
+    assert parse_start_time({}, now) is None
+
+
+def test_session_estimate_reads_the_real_payload() -> None:
+    est = SessionEstimate.from_dict(load_json_fixture("transaction_estimate.json")["data"])
+    assert est.energy_kwh == 1.606
+    assert est.cost == 0
+    assert est.currency == "GBP"
+    assert est.duration == timedelta(milliseconds=953825)
+    assert est.rate_estimation == 1.801
+
+
+def test_session_estimate_still_reads_alternative_spellings() -> None:
+    est = SessionEstimate.from_dict({"energyKwh": 3.2, "totalCost": "0.80"})
+    assert est.energy_kwh == 3.2
+    assert est.cost == 0.8
+    assert est.duration is None
+    assert est.rate_estimation is None
+```
+
+Add `timedelta` to the datetime import in that file, and import `ActiveTransaction` alongside the
+other models. Delete the old `test_parse_start_time_accepts_int_or_dict` and the old
+`test_session_estimate_variants`, whose expectations the real payloads supersede — the two tests
+above cover the same ground plus the truth.
+
+- [ ] **Step 3: Run the tests to verify they fail**
+
+Run: `scripts/test tests/driivz/test_models.py -q`
+Expected: FAIL — `ImportError` for `ActiveTransaction`, and `parse_start_time` taking one argument.
+
+- [ ] **Step 4: Update `models.py`**
+
+Replace `parse_start_time` with:
+
+```python
+def _elapsed(data: Mapping[str, Any]) -> timedelta | None:
+    """Elapsed milliseconds, under either of the two spellings the portal uses."""
+    for key in ("txDuration", "duration"):
+        value = _float(data.get(key))
+        if value is not None:
+            return timedelta(milliseconds=value)
+    return None
+
+
+def parse_start_time(data: Any, now: datetime) -> datetime | None:
+    """When the charge started.
+
+    The Mer portal's findCurrentTransactionStartTime returns no timestamp — only how many
+    milliseconds the transaction has been running — so the start is derived from `now`. An
+    absolute epoch is still honoured first, in case another Driivz tenant sends one.
+    """
+    if isinstance(data, Mapping):
+        for key in ("startOn", "startTime", "startedOn", "transactionStartTime"):
+            if data.get(key) is not None:
+                return ms_to_datetime(data[key])
+        elapsed = _elapsed(data)
+        return now - elapsed if elapsed is not None else None
+    return ms_to_datetime(data)
+```
+
+Add `timedelta` to the `datetime` import. Add the dataclass:
+
+```python
+@dataclass(frozen=True, slots=True)
+class ActiveTransaction:
+    """The running transaction, as findCurrentTransactionStartTime reports it."""
+
+    transaction_id: int | None
+    elapsed: timedelta | None
+    boost_enabled: bool
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ActiveTransaction:
+        return cls(
+            transaction_id=_int(data.get("transactionId")),
+            elapsed=_elapsed(data),
+            boost_enabled=bool(data.get("boostEnabled", False)),
+        )
+
+    def started_at(self, now: datetime) -> datetime | None:
+        """The start time, derived from how long the charge has been running."""
+        return now - self.elapsed if self.elapsed is not None else None
+```
+
+In `SessionEstimate`, add `totalKw` as the first energy key with divisor 1.0, and add the two new
+fields:
+
+```python
+    _ENERGY_KEYS: ClassVar[tuple[tuple[str, float], ...]] = (
+        ("totalKw", 1.0),
+        ("energyKwh", 1.0),
+        ("totalEnergyKwh", 1.0),
+        ("energy", 1.0),
+        ("totalEnergy", 1000.0),
+        ("energyConsumed", 1000.0),
+    )
+```
+
+Add `duration: timedelta | None` and `rate_estimation: float | None` to the dataclass (before
+`raw`), and populate them in `from_dict` with `_elapsed(data)` and `_float(data.get("rateEstimation"))`.
+
+A note for whoever reads this later: `totalKw` is named as though it were power, but it is energy
+in kWh — verified against a live session where 1.606 over 953 s on a 7.4 kW socket implies a ~6 kW
+average draw. Put that note in the code as a comment on the key list.
+
+- [ ] **Step 5: Update the client method's return type**
+
+`find_current_transaction_start_time` currently returns `datetime | None` by calling
+`parse_start_time(data)`. It cannot call the new signature without inventing a clock, and the
+coordinator is the right place to hold one. Change it to return the parsed transaction instead:
+
+```python
+    async def find_current_transaction(self, socket_id: int) -> ActiveTransaction | None:
+        """The running transaction on this socket, or None when the payload is empty."""
+        data = await self._request(
+            "POST", PATH_TRANSACTION_START_TIME, data={"stationSocketId": socket_id}
+        )
+        return ActiveTransaction.from_dict(data) if isinstance(data, Mapping) else None
+```
+
+Remove `find_current_transaction_start_time` and import `ActiveTransaction`. In
+`tests/driivz/test_client_methods.py`, update the test that covered it: same form body assertion
+(`{"stationSocketId": "11241"}` stays, the fixture's socket id is irrelevant to the request), and
+assert the returned `ActiveTransaction` has `transaction_id == 9088676` and
+`elapsed == timedelta(milliseconds=953622)`.
+
+- [ ] **Step 6: Update the coordinator**
+
+`ActiveSession` gains four fields and `_fetch_active` fills them from the richer payloads:
+
+```python
+@dataclass(frozen=True, slots=True)
+class ActiveSession:
+    """The customer's running charge, if any."""
+
+    socket_id: int
+    station_id: int | None
+    socket_name: str | None
+    station_caption: str | None
+    transaction_id: int | None
+    started_at: datetime | None
+    duration: timedelta | None
+    energy_kwh: float | None
+    cost: float | None
+    currency: str | None
+```
+
+```python
+    async def _fetch_active(self) -> ActiveSession | None:
+        socket = await self.client.find_last_active_charge_socket()
+        if socket is None:
+            return None
+        transaction = await self.client.find_current_transaction(socket.id)
+        estimate = await self.client.find_current_transaction_estimate(socket.id)
+        now = dt_util.utcnow()
+        return ActiveSession(
+            socket_id=socket.id,
+            station_id=socket.station_id,
+            socket_name=socket.name,
+            station_caption=socket.station_caption,
+            transaction_id=transaction.transaction_id if transaction else None,
+            started_at=transaction.started_at(now) if transaction else None,
+            duration=(estimate.duration if estimate else None)
+            or (transaction.elapsed if transaction else None),
+            energy_kwh=estimate.energy_kwh if estimate else None,
+            cost=estimate.cost if estimate else None,
+            currency=(estimate.currency if estimate else None)
+            or (self._wallet.currency if self._wallet else None),
+        )
+```
+
+`socket.station_caption` requires one addition to `Socket`: a `station_caption: str | None = None`
+field parsed from `stationCaption`, which only the active-socket payload carries. Add it to
+`Socket` and its `from_dict`.
+
+Add `timedelta` to the coordinator's datetime import.
+
+- [ ] **Step 7: Update the conftest fake and the coordinator test**
+
+In `tests/conftest.py`, replace the `find_current_transaction_start_time` mock with
+`find_current_transaction`, returning
+`ActiveTransaction.from_dict(load_json_fixture("transaction_start_time.json")["data"])`, and make
+`find_current_transaction_estimate` return
+`SessionEstimate.from_dict(load_json_fixture("transaction_estimate.json")["data"])` so the fake
+speaks the real shapes. Keep the `charging_socket` fixture, which now parses the real payload.
+
+In `tests/test_coordinator.py`, `test_charging_cycle_fetches_session` asserts on the session. Update
+it to the real values: socket 11242, station 6041, socket name `Right`, station caption containing
+`Explorer 2`, `transaction_id == 9088676`, `energy_kwh == 1.606`, `cost == 0`, a `started_at` that
+is not None and is before `dt_util.utcnow()`, and `duration == timedelta(milliseconds=953825)`.
+Change the awaited-call assertions from `find_current_transaction_start_time` to
+`find_current_transaction`.
+
+- [ ] **Step 8: Run everything**
+
+Run: `scripts/test -q`
+Expected: the whole suite passes, with no xfailed tests.
+
+- [ ] **Step 9: Lint and commit**
+
+```bash
+scripts/format && scripts/lint
+git add -A
+git commit -m "fix(driivz): parse the real live-session payloads
+
+The portal's findCurrentTransactionStartTime returns elapsed milliseconds
+rather than a timestamp, and the charging estimate reports energy as
+totalKw, so the parsers written against synthetic fixtures both returned
+None against a real session. Captured a live charge and made the fixtures
+and parsers match it.
+
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 8: Binary sensors and site aggregate sensors
+
+> **Amendment (2026-09-17):** the user asked for the live charge to be visible on the charger
+> device they are actually using, not only on a top-level account device. Add one more binary
+> sensor to this task, on the **charger** device: key `session_here`, translation key
+> `station_session_here`, device class `BinarySensorDeviceClass.BATTERY_CHARGING`, on when
+> `coordinator.data.active` is not None and its `station_id` equals this station's id. Give it a
+> test alongside the others: on for charger 6041 and off for 6042 when the active session is the
+> captured one (socket 11242 on station 6041), and off for both when idle. Add
+> `"station_session_here": { "name": "My session here" }` to the `binary_sensor` translation block
+> in both JSON files.
+
 
 **Files:**
 - Modify: `custom_components/mer/binary_sensor.py` (replace stub), `custom_components/mer/sensor.py` (add site sensors), `strings.json` + `translations/en.json`
@@ -4246,6 +4571,19 @@ Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 
 ### Task 9: Start and stop charge buttons
 
+> **Amendment (2026-09-17):** the user asked for the charge controls to live on the charger device
+> they are using, so add a **second** stop button on the charger device in addition to the
+> account-level one. Key `stop_charge`, translation key `station_stop_charge`, name
+> `"Stop charge"`, built on `MerStationEntity`. Pressing it stops the active session only when
+> that session is on this charger: read `coordinator.data.active`, and if it is None or its
+> `station_id` is not this station's id, raise `HomeAssistantError` with translation key
+> `session_not_here` (add `"session_not_here": { "message": "This charger is not running your
+> charging session" }` to the `exceptions` block in both JSON files). Otherwise call
+> `stop_charge(active.socket_id)` and `schedule_refresh()` exactly as the account button does.
+> Factor the shared body into one helper rather than duplicating it. Test: pressing the button on
+> charger 6041 stops socket 11242; pressing it on charger 6042 raises and calls nothing.
+
+
 **Files:**
 - Modify: `custom_components/mer/button.py` (replace stub), `strings.json` + `translations/en.json`
 - Test: `tests/test_button.py`
@@ -4465,6 +4803,40 @@ Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ---
 
 ### Task 10: Account sensors (active session, last session, wallet)
+
+> **Amendment (2026-09-17):** two changes, both from the live-session capture and the user's
+> request that the running charge be visible on the charger device itself.
+>
+> 1. **`active_started` and `active_energy` now have real data behind them.** Task 7a corrected the
+>    parsers: the start time is derived from elapsed milliseconds and the energy comes from the
+>    payload's `totalKw` field. `ActiveSession` now also carries `transaction_id`, `duration`,
+>    `socket_name` and `station_caption`. Add two account sensors to the list below:
+>    `active_duration` (`translation_key` `active_duration`, `device_class`
+>    `SensorDeviceClass.DURATION`, unit `UnitOfTime.SECONDS`, value `active.duration.total_seconds()`
+>    when present) and `active_socket` (`translation_key` `active_socket`, value
+>    `active.socket_name`). Prefer `active.station_caption` over a `get_station` lookup in
+>    `_active_station_name`, falling back to the lookup and then to the socket id, because the
+>    portal's active-socket payload names the charger directly and that keeps the sensor working
+>    even for a charger the user did not select.
+> 2. **Mirror the session onto the charger device.** Add a parallel set of sensors built on
+>    `MerStationEntity`, populated only when `coordinator.data.active` is on that station and
+>    `None` otherwise: `session_energy`, `session_cost`, `session_started`, `session_duration`, with
+>    the same device classes and units as their account twins and translation keys prefixed
+>    `station_`. Define them as one description tuple with a predicate that resolves the active
+>    session for a given station id, so the account and charger variants share their value logic
+>    rather than duplicating it. Add the matching translation keys to the `sensor` block in both
+>    JSON files: `"active_duration": { "name": "Active session duration" }`,
+>    `"active_socket": { "name": "Active session socket" }`,
+>    `"station_session_energy": { "name": "Session energy" }`,
+>    `"station_session_cost": { "name": "Session cost" }`,
+>    `"station_session_started": { "name": "Session started" }`,
+>    `"station_session_duration": { "name": "Session duration" }`.
+>
+> Test both halves against the captured session: the account sensors report socket `Right`,
+> charger `Business Durham - NETPark 4 - Explorer 2`, energy 1.606, cost 0 and a duration of
+> 953.825 s; the charger-device sensors on 6041 report the same values while the ones on 6042 are
+> `unknown`.
+
 
 **Files:**
 - Modify: `custom_components/mer/sensor.py`, `strings.json` + `translations/en.json`
@@ -4894,7 +5266,12 @@ Replace `danielmsorensen` placeholders in `manifest.json` and `README.md` with t
 2. Confirm socket sensors match the portal map for both chargers; confirm `Any socket available`.
 3. Confirm `Wallet balance` and `Last session` values match the portal history.
 4. Ask the user for explicit go-ahead, then press **one** `start charge` on a free NETPark socket while they are at the charger, and verify: the button succeeds, the socket goes to `preparing`/`charging` within two polls, `Charging` turns on, `Active session energy` rises, `Stop charge` works.
-5. Record the real shapes of `findLastActiveChargeSocket`, `findCurrentTransactionStartTime` and `findCurrentTransactionBillingChargingEstimation` (from HA debug logs or the browser) and replace the synthetic fixtures `last_active_charging.json`, `transaction_start_time.json`, `transaction_estimate.json`; adjust `SessionEstimate.from_dict`/`parse_start_time` key lists if needed.
+5. The three live-session shapes were captured from a real charge on 2026-09-17 and are already
+   the fixtures (see Task 7a), so nothing needs recording here. Verify instead that the derived
+   values look right in the running integration: the session duration should advance in step with
+   the wall clock, the energy should climb, and `Active session charger` should name the charger you
+   are plugged into. Note that the portal refreshes energy less often than duration, so a flat
+   energy reading between two polls is expected rather than a bug.
 6. Tag `v0.1.0`, create a GitHub release.
 
 - [ ] **Step 6: Commit**
