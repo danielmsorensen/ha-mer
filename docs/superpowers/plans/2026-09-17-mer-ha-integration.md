@@ -4802,6 +4802,151 @@ Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 
 ---
 
+### Task 9a: Notify-me-when-available switch
+
+**Why this task exists:** the user tried the Mer app's "notify me when a charge point is available"
+and never heard anything. Reading the portal showed the subscription had registered correctly but
+that the feature is not governed by any of the account's notification preference rows, so they could
+not fix it from the app. The portal does expose the subscription itself through three driver-facing
+endpoints, so Home Assistant can own it — and, more usefully, own the alerting too.
+
+This is the only one of the extra portal capabilities that is reachable. `SET_CHARGE_CURRENT`,
+`CHARGE_FULL_SPEED`, `UNLOCK_SOCKET`, the charging-profile operations and boost all appear in the
+capabilities payload and in the account's permission list, but **none of them has an endpoint in the
+driver portal's own JavaScript** — they belong to the operator portal. They are deliberately out of
+scope rather than forgotten; adding them would mean guessing at unpublished operator endpoints.
+
+**Files:**
+- Modify: `custom_components/mer/driivz/const.py` (three paths), `custom_components/mer/driivz/client.py` (three methods)
+- Modify: `custom_components/mer/const.py` (add `Platform.SWITCH` to `PLATFORMS`)
+- Modify: `custom_components/mer/coordinator.py` (`MerData.notify_subscriptions`, fetched with the details refresh)
+- Create: `custom_components/mer/switch.py`
+- Modify: `custom_components/mer/strings.json` and `translations/en.json`
+- Modify: `tests/conftest.py` (three more mocked methods)
+- Test: `tests/driivz/test_client_methods.py` (append), `tests/test_switch.py` (new)
+
+**Interfaces:**
+- Consumes: `MerStationEntity`, `MerCoordinator`, the `_request` helper.
+- Produces:
+  - `client.is_subscribed_to_availability(station_id) -> bool`
+  - `client.subscribe_to_availability(station_id) -> None`
+  - `client.unsubscribe_from_availability(station_id) -> None`
+  - `MerData.notify_subscriptions: dict[int, bool]`
+  - One switch per configured charger, unique id `<entry_id>_station_<id>_notify_available`.
+
+#### The endpoints, as observed
+
+All three are form-encoded POSTs taking `stationId`, and all three sit on `customerFacade`:
+
+```
+customerFacade/isDriverSubscribedToNotifyMeWhenStationIsAvailable  ->  {"data": true|false}
+customerFacade/notifyMeWhenStationIsAvailable                     ->  bare success envelope
+customerFacade/unSubscribeFromNotifyMeWhenStationIsAvailable       ->  bare success envelope
+```
+
+Verified live on 2026-09-17: station 6042 returned `true` (the user's app subscription) and 6039,
+6040 and 6041 returned `false`.
+
+- [ ] **Step 1: Add the paths to `driivz/const.py`**
+
+```python
+PATH_IS_SUBSCRIBED_AVAILABLE = "customerFacade/isDriverSubscribedToNotifyMeWhenStationIsAvailable"
+PATH_NOTIFY_WHEN_AVAILABLE = "customerFacade/notifyMeWhenStationIsAvailable"
+PATH_UNSUBSCRIBE_WHEN_AVAILABLE = "customerFacade/unSubscribeFromNotifyMeWhenStationIsAvailable"
+```
+
+- [ ] **Step 2: Write the failing client tests**
+
+Append to `tests/driivz/test_client_methods.py`, following the file's existing `AiohttpClientMocker`
+pattern:
+
+```python
+async def test_availability_subscription_roundtrip(client: DriivzDriverClient, ...) -> None:
+    """is/subscribe/unsubscribe each post the station id as a form body."""
+```
+
+Assert that `is_subscribed_to_availability(6042)` returns `True` from a `{"data": true}` envelope
+and `False` from `{"data": false}`, that a missing `data` yields `False` rather than raising, and
+that all three methods send the form body `{"stationId": "6042"}` to their respective paths.
+
+- [ ] **Step 3: Run to verify failure, then add the client methods**
+
+```python
+    async def is_subscribed_to_availability(self, station_id: int) -> bool:
+        """Whether the driver is subscribed to be told when this charger frees up."""
+        data = await self._request(
+            "POST", PATH_IS_SUBSCRIBED_AVAILABLE, data={"stationId": station_id}
+        )
+        return bool(data)
+
+    async def subscribe_to_availability(self, station_id: int) -> None:
+        await self._request("POST", PATH_NOTIFY_WHEN_AVAILABLE, data={"stationId": station_id})
+
+    async def unsubscribe_from_availability(self, station_id: int) -> None:
+        await self._request(
+            "POST", PATH_UNSUBSCRIBE_WHEN_AVAILABLE, data={"stationId": station_id}
+        )
+```
+
+Import the three new paths.
+
+- [ ] **Step 4: Carry the subscriptions in the coordinator**
+
+Add `notify_subscriptions: dict[int, bool] = field(default_factory=dict)` to `MerData`, and a
+`self._notify: dict[int, bool] = {}` cache alongside `_details`. Refresh it inside
+`_refresh_details`, in the same atomic style that task already uses — build a local dict, fill it
+with one `is_subscribed_to_availability` call per configured station, and assign both locals at the
+end. Publish it in the returned `MerData`.
+
+This costs one extra call per station per hour, which the existing budget absorbs; do not poll it
+every cycle. Add an `async_set_availability_subscription(station_id, subscribed)` method on the
+coordinator that calls the right client method, updates `self._notify[station_id]` optimistically so
+the switch does not flick back, and then calls `schedule_refresh()`.
+
+- [ ] **Step 5: Write the failing switch test**
+
+`tests/test_switch.py`: with the conftest fake returning `True` for 6042 and `False` for 6041,
+assert the switch on 6042 is `on` and the one on 6041 is `off`; that turning 6041 on calls
+`subscribe_to_availability(6041)` and leaves the entity `on`; that turning 6042 off calls
+`unsubscribe_from_availability(6042)`; and that a `DriivzError` from either call surfaces as
+`HomeAssistantError` carrying the portal's error type, reusing the `command_failed` translation key
+the buttons already use.
+
+- [ ] **Step 6: Write `switch.py`**
+
+One `MerNotifyAvailableSwitch(MerStationEntity, SwitchEntity)` with
+`entity_category = EntityCategory.CONFIG`, `translation_key = "notify_available"`, `icon`
+`mdi:bell-ring-outline`, `is_on` reading `coordinator.data.notify_subscriptions.get(self.station_id, False)`,
+and `async_turn_on` / `async_turn_off` delegating to the coordinator method inside the same
+`DriivzError` to `HomeAssistantError` wrapper the buttons use. Add `Platform.SWITCH` to `PLATFORMS`.
+
+- [ ] **Step 7: Translations**
+
+Add to both JSON files, under `entity`:
+
+```json
+    "switch": {
+      "notify_available": { "name": "Notify me when available" }
+    }
+```
+
+- [ ] **Step 8: Run, lint, commit**
+
+Run `scripts/test -q`, then `scripts/format && scripts/lint`.
+
+```bash
+git add -A
+git commit -m "feat: switch for notify-me-when-available per charger
+
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
+```
+
+A caveat to put in the README when Task 12 writes it: this switch controls Mer's own subscription,
+and Mer's delivery of that notification was not working for this account, so the dependable way to
+be told a charger has freed up is an automation on the socket availability binary sensor.
+
+---
+
 ### Task 10: Account sensors (active session, last session, wallet)
 
 > **Amendment (2026-09-17):** two changes, both from the live-session capture and the user's
