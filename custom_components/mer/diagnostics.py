@@ -45,10 +45,15 @@ async def async_get_config_entry_diagnostics(
     coordinator = entry.runtime_data
     data = coordinator.data
     # `Transaction.id` identifies one person's specific past charge, same as
-    # `ActiveSession.transaction_id` -- but the field is spelled `id`, a name shared with
-    # Station/Socket/Wallet where it is just a non-identifying record pointer. Redact it only
-    # within this one sub-object, so every other `id` in the payload stays visible.
+    # `ActiveSession.transaction_id` -- but the field is spelled `id`, a name Station/Socket
+    # also use for a resource many people share. Redact it only within this one sub-object,
+    # so every other `id` in the payload stays visible.
     last_transaction = async_redact_data(_plain(data.last_transaction), TO_REDACT | {"id"})
+    # `Wallet.id` is a one-to-one primary key for a single customer's account -- structurally
+    # the same kind of per-account handle as `customer_id`/`member_id`/`account_number`, just
+    # spelled `id`. Unlike a station or socket id, no one else shares it, so it is redacted
+    # the same scoped way, leaving `balance`/`currency`/`timezone` visible.
+    wallet = async_redact_data(_plain(data.wallet), TO_REDACT | {"id"})
     return {
         "entry": async_redact_data(
             {
@@ -68,7 +73,7 @@ async def async_get_config_entry_diagnostics(
                 "details": _plain(data.details),
                 "notify_subscriptions": _plain(data.notify_subscriptions),
                 "active": _plain(data.active),
-                "wallet": _plain(data.wallet),
+                "wallet": wallet,
                 "last_transaction": last_transaction,
             },
             TO_REDACT,

@@ -26,7 +26,13 @@ async def test_diagnostics_redacts_secrets(
     assert diag["data"]["customer_id"] == "**REDACTED**"
     assert diag["data"]["wallet"]["balance"] == 12.5
     assert diag["data"]["wallet"]["account_number"] == "**REDACTED**"
+    assert diag["data"]["wallet"]["id"] == "**REDACTED**"
     assert sorted(diag["data"]["stations"]) == ["6041", "6042"]
+    # Station/socket ids key a resource many people share, not a per-account handle, and are
+    # exactly what a support request needs -- pin that the scoped id-redaction passes above
+    # never widen to blank these out too.
+    assert diag["data"]["stations"]["6041"]["id"] == 6041
+    assert diag["data"]["stations"]["6042"]["sockets"][0]["id"] == 11243
     assert diag["data"]["stations"]["6042"]["sockets"][0]["status"] == "AVAILABLE"
     assert diag["data"]["active"] is None
     assert diag["data"]["last_transaction"]["id"] == "**REDACTED**"
