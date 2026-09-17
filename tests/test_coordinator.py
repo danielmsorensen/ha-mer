@@ -111,8 +111,11 @@ async def test_rate_limit_error_marks_failed_then_skips(
     coordinator = mock_config_entry.runtime_data
     assert coordinator.last_update_success is False
     mock_client.find_stations_by_ids.side_effect = None
-    await _tick(hass, freezer, 61)  # skipped cycle, still failed
+    await _tick(hass, freezer, 61)  # skipped cycle: republishes cached data, no client call
     assert mock_client.find_stations_by_ids.await_count == 2
+    # A skipped cycle republishes the last known good data without contacting the portal,
+    # which the coordinator framework treats as a successful update.
+    assert coordinator.last_update_success is True
     await _tick(hass, freezer, 61)
     assert coordinator.last_update_success is True
 

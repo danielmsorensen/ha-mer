@@ -101,6 +101,14 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         if self._skip_next:
             self._skip_next = False
             if self.data is not None:
+                # A skipped cycle deliberately republishes the last known good data instead
+                # of contacting the portal. Returning without raising marks the coordinator
+                # successful again (last_update_success -> True) even though nothing was
+                # re-fetched this cycle; that is intentional -- one cycle of stale data is
+                # preferable to blanking every entity to unavailable just because we chose
+                # to be polite to a nearly-exhausted rate limit. Because we hand back the
+                # very same MerData object, nothing downstream may mutate coordinator.data
+                # in place; treat it as immutable.
                 _LOGGER.debug("Skipping one poll to respect the portal rate limit")
                 return self.data
         now = dt_util.utcnow()
@@ -149,18 +157,35 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         )
 
     async def _refresh_account(self, now: datetime) -> None:
-        self._wallet = await self.client.find_wallet()
-        self._customer_id = self._wallet.customer_id
-        if self._customer_id is not None:
+        """Fetch wallet and history, then commit both atomically.
+
+        Every call below must succeed before any `self.*` attribute is written, so a
+        client error partway through never leaves the cached wallet/customer id/last
+        transaction ahead of the last successfully published cycle.
+        """
+        wallet = await self.client.find_wallet()
+        customer_id = wallet.customer_id
+        last_transaction = self._last_transaction
+        if customer_id is not None:
             transactions = await self.client.find_transactions(
-                self._customer_id, now - HISTORY_LOOKBACK, now
+                customer_id, now - HISTORY_LOOKBACK, now
             )
-            self._last_transaction = transactions[0] if transactions else None
+            last_transaction = transactions[0] if transactions else None
+        self._wallet = wallet
+        self._customer_id = customer_id
+        self._last_transaction = last_transaction
         self._wallet_refreshed = now
 
     async def _refresh_details(self, now: datetime) -> None:
+        """Fetch every configured station's details, then commit them atomically.
+
+        Built up in a local dict so a client error partway through the loop leaves
+        `self._details` untouched rather than half-updated.
+        """
+        details = dict(self._details)
         for station_id in self.station_ids:
-            self._details[station_id] = await self.client.find_station_by_id(station_id)
+            details[station_id] = await self.client.find_station_by_id(station_id)
+        self._details = details
         self._details_refreshed = now
 
     def _check_rate_limit(self, now: datetime) -> None:
