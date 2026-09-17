@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 import contextlib
+from datetime import datetime
 import json as jsonlib
 import logging
 import re
@@ -20,10 +21,32 @@ from .const import (
     HEADER_CSRF,
     HEADER_JSON_TYPES,
     HEADER_RATE_LIMIT_REMAINING,
+    OPERATION_PENDING,
+    PATH_FIND_SITES_IN_BOUNDS,
+    PATH_FIND_STATION_BY_ID,
+    PATH_FIND_STATIONS_BY_IDS,
+    PATH_FIND_STATIONS_IN_BOUNDS,
+    PATH_LAST_ACTIVE_SOCKET,
     PATH_LOGIN,
     PATH_MAP,
+    PATH_START_CHARGE,
+    PATH_STOP_CHARGE,
+    PATH_TRANSACTION_ESTIMATE,
+    PATH_TRANSACTION_START_TIME,
+    PATH_TRANSACTIONS,
+    PATH_WALLET,
 )
 from .exceptions import ApiError, AuthError, DriivzConnectionError, RateLimitError
+from .models import (
+    Bounds,
+    SessionEstimate,
+    Site,
+    Socket,
+    Station,
+    Transaction,
+    Wallet,
+    parse_start_time,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,6 +77,10 @@ def _message_key(payload: Mapping[str, Any]) -> str | None:
     if errors and isinstance(errors[0], Mapping) and errors[0].get("messageKey"):
         return str(errors[0]["messageKey"])
     return None
+
+
+def _to_ms(value: datetime) -> int:
+    return int(value.timestamp() * 1000)
 
 
 class DriivzDriverClient:
@@ -216,3 +243,98 @@ class DriivzDriverClient:
                 raise AuthError(_error_type(payload) or "LOGIN_FAILED")
             self._logged_in = True
             await self._fetch_csrf(PATH_MAP)
+
+    # ----- stations and sites -------------------------------------------
+
+    async def find_sites_in_bounds(self, bounds: Bounds) -> list[Site]:
+        data = await self._request(
+            "POST",
+            PATH_FIND_SITES_IN_BOUNDS,
+            json={"filterByBounds": bounds.to_dict(), "filterByIsManaged": True},
+        )
+        return [Site.from_dict(item) for item in data or []]
+
+    async def find_stations_in_bounds(self, bounds: Bounds) -> list[Station]:
+        data = await self._request(
+            "POST",
+            PATH_FIND_STATIONS_IN_BOUNDS,
+            json={"filterByBounds": bounds.to_dict(), "filterByIsManaged": True},
+        )
+        return [Station.from_dict(item) for item in data or []]
+
+    async def find_stations_by_ids(self, ids: Iterable[int]) -> list[Station]:
+        id_list = [int(i) for i in ids]
+        if not id_list:
+            return []
+        data = await self._request("POST", PATH_FIND_STATIONS_BY_IDS, json={"filterByIds": id_list})
+        return [Station.from_dict(item) for item in data or []]
+
+    async def find_station_by_id(
+        self, station_id: int, billing_plan_id: int | None = None
+    ) -> Station:
+        params = {"stationId": str(station_id)}
+        if billing_plan_id is not None:
+            params["billingPlanId"] = str(billing_plan_id)
+        data = await self._request("GET", PATH_FIND_STATION_BY_ID, params=params)
+        if not isinstance(data, Mapping):
+            raise ApiError("STATION_NOT_FOUND")
+        return Station.from_dict(data)
+
+    # ----- charging session ---------------------------------------------
+
+    async def find_last_active_charge_socket(self) -> Socket | None:
+        data = await self._request("POST", PATH_LAST_ACTIVE_SOCKET, data={})
+        if isinstance(data, Mapping) and data.get("id") is not None:
+            return Socket.from_dict(data)
+        return None
+
+    async def find_current_transaction_start_time(self, socket_id: int) -> datetime | None:
+        data = await self._request(
+            "POST", PATH_TRANSACTION_START_TIME, data={"stationSocketId": socket_id}
+        )
+        return parse_start_time(data)
+
+    async def find_current_transaction_estimate(self, socket_id: int) -> SessionEstimate | None:
+        data = await self._request("POST", PATH_TRANSACTION_ESTIMATE, data={"socketId": socket_id})
+        if isinstance(data, Mapping):
+            return SessionEstimate.from_dict(data)
+        return None
+
+    async def start_charge(self, socket_id: int) -> None:
+        """Ask the portal to start charging; the charger then waits for the cable."""
+        data = await self._request("POST", PATH_START_CHARGE, data={"stationSocketId": socket_id})
+        status = data.get("operationStatus") if isinstance(data, Mapping) else None
+        if status != OPERATION_PENDING:
+            raise ApiError(str(status) if status else "START_CHARGE_REJECTED")
+
+    async def stop_charge(self, socket_id: int) -> None:
+        data = await self._request("POST", PATH_STOP_CHARGE, data={"stationSocketId": socket_id})
+        status = data.get("operationStatus") if isinstance(data, Mapping) else None
+        if status is not None and status != OPERATION_PENDING:
+            raise ApiError(str(status))
+
+    # ----- account -------------------------------------------------------
+
+    async def find_wallet(self) -> Wallet:
+        data = await self._request("POST", PATH_WALLET, data={})
+        if not isinstance(data, Mapping):
+            raise ApiError("WALLET_NOT_FOUND")
+        return Wallet.from_dict(data)
+
+    async def find_transactions(
+        self, customer_id: int, start: datetime, end: datetime
+    ) -> list[Transaction]:
+        data = await self._request(
+            "POST",
+            PATH_TRANSACTIONS,
+            json={
+                "filterByStartedOnFrom": _to_ms(start),
+                "filterByStartedOnTo": _to_ms(end),
+                "filterByMemberId": customer_id,
+            },
+        )
+        transactions = [Transaction.from_dict(item) for item in data or []]
+        transactions.sort(
+            key=lambda t: t.started_at.timestamp() if t.started_at else 0.0, reverse=True
+        )
+        return transactions
