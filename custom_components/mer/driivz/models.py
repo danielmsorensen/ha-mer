@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import re
 from typing import Any, ClassVar
 
@@ -32,13 +32,28 @@ def ms_to_datetime(value: Any) -> datetime | None:
         return None
 
 
-def parse_start_time(data: Any) -> datetime | None:
-    """Parse the payload of findCurrentTransactionStartTime (int ms or a dict)."""
+def _elapsed(data: Mapping[str, Any]) -> timedelta | None:
+    """Elapsed milliseconds, under either of the two spellings the portal uses."""
+    for key in ("txDuration", "duration"):
+        value = _float(data.get(key))
+        if value is not None:
+            return timedelta(milliseconds=value)
+    return None
+
+
+def parse_start_time(data: Any, now: datetime) -> datetime | None:
+    """When the charge started.
+
+    The Mer portal's findCurrentTransactionStartTime returns no timestamp -- only how many
+    milliseconds the transaction has been running -- so the start is derived from `now`. An
+    absolute epoch is still honoured first, in case another Driivz tenant sends one.
+    """
     if isinstance(data, Mapping):
         for key in ("startOn", "startTime", "startedOn", "transactionStartTime"):
             if data.get(key) is not None:
                 return ms_to_datetime(data[key])
-        return None
+        elapsed = _elapsed(data)
+        return now - elapsed if elapsed is not None else None
     return ms_to_datetime(data)
 
 
@@ -156,6 +171,7 @@ class Socket:
     max_power_kw: float | None = None
     socket_type: str | None = None
     voltage_type: str | None = None
+    station_caption: str | None = None
     prices: tuple[SocketPrice, ...] = ()
 
     @classmethod
@@ -169,6 +185,8 @@ class Socket:
             max_power_kw=_float(data.get("maximumPower")),
             socket_type=_str(data.get("stationModelSocketSocketTypeId")),
             voltage_type=_str(data.get("stationModelSocketVoltageType")),
+            # Only findLastActiveChargeSocket's superset payload carries this.
+            station_caption=_str(data.get("stationCaption")),
             prices=tuple(SocketPrice.from_dict(p) for p in data.get("socketPrices") or []),
         )
 
@@ -267,6 +285,27 @@ class Wallet:
 
 
 @dataclass(frozen=True, slots=True)
+class ActiveTransaction:
+    """The running transaction, as findCurrentTransactionStartTime reports it."""
+
+    transaction_id: int | None
+    elapsed: timedelta | None
+    boost_enabled: bool
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> ActiveTransaction:
+        return cls(
+            transaction_id=_int(data.get("transactionId")),
+            elapsed=_elapsed(data),
+            boost_enabled=bool(data.get("boostEnabled", False)),
+        )
+
+    def started_at(self, now: datetime) -> datetime | None:
+        """The start time, derived from how long the charge has been running."""
+        return now - self.elapsed if self.elapsed is not None else None
+
+
+@dataclass(frozen=True, slots=True)
 class Transaction:
     """A completed charge transaction from the driver's history."""
 
@@ -317,9 +356,15 @@ class SessionEstimate:
     energy_kwh: float | None
     cost: float | None
     currency: str | None
+    duration: timedelta | None = None
+    rate_estimation: float | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
+    # findCurrentTransactionBillingChargingEstimation's `totalKw` is named as though it were
+    # power, but it is kWh delivered: a live session showed 1.606 over 953 s on a 7.4 kW socket,
+    # which is a ~6 kW average draw -- consistent with energy, not an instantaneous reading.
     _ENERGY_KEYS: ClassVar[tuple[tuple[str, float], ...]] = (
+        ("totalKw", 1.0),
         ("energyKwh", 1.0),
         ("totalEnergyKwh", 1.0),
         ("energy", 1.0),
@@ -345,5 +390,7 @@ class SessionEstimate:
             energy_kwh=energy,
             cost=cost,
             currency=_str(data.get("currency")),
+            duration=_elapsed(data),
+            rate_estimation=_float(data.get("rateEstimation")),
             raw=dict(data),
         )

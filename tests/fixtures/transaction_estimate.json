@@ -1,1 +1,1 @@
-{"errors":[],"success":true,"data":{"totalEnergy":12345,"cost":0,"currency":"GBP"}}
+{"errors":[],"success":true,"data":{"billingPlanDisplayCode":"Durham County Council - Netpark IP","cost":0,"currency":"GBP","customerDetailId":123456,"duration":953825,"rateEstimation":1.801,"receiveMemberNotification":false,"serviceProviderId":7,"totalKw":1.606}}

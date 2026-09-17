@@ -40,7 +40,11 @@ class ActiveSession:
 
     socket_id: int
     station_id: int | None
+    socket_name: str | None
+    station_caption: str | None
+    transaction_id: int | None
     started_at: datetime | None
+    duration: timedelta | None
     energy_kwh: float | None
     cost: float | None
     currency: str | None
@@ -144,12 +148,18 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         socket = await self.client.find_last_active_charge_socket()
         if socket is None:
             return None
-        started = await self.client.find_current_transaction_start_time(socket.id)
+        transaction = await self.client.find_current_transaction(socket.id)
         estimate = await self.client.find_current_transaction_estimate(socket.id)
+        now = dt_util.utcnow()
         return ActiveSession(
             socket_id=socket.id,
             station_id=socket.station_id,
-            started_at=started,
+            socket_name=socket.name,
+            station_caption=socket.station_caption,
+            transaction_id=transaction.transaction_id if transaction else None,
+            started_at=transaction.started_at(now) if transaction else None,
+            duration=(estimate.duration if estimate else None)
+            or (transaction.elapsed if transaction else None),
             energy_kwh=estimate.energy_kwh if estimate else None,
             cost=estimate.cost if estimate else None,
             currency=(estimate.currency if estimate else None)

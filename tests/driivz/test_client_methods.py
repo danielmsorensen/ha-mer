@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -170,7 +170,10 @@ async def test_last_active_socket_idle_and_charging(
     active = await client.find_last_active_charge_socket()
     calls = _calls(aioclient_mock, "POST", path)
     assert active is not None
-    assert active.id == 11241
+    # The real findLastActiveChargeSocket payload is for socket 11242, unlike the other
+    # transaction fixtures which were captured against socket 11241 -- the request's own
+    # socket id is irrelevant to those, so they were left alone.
+    assert active.id == 11242
     assert active.station_id == 6041
     assert active.status == "CHARGING"
     # The call sends an empty form dict (`data={}`), not JSON. The mocker records `data or json`
@@ -186,15 +189,18 @@ async def test_transaction_start_time_and_estimate(
     est_path = "stationFacade/findCurrentTransactionBillingChargingEstimation"
     aioclient_mock.post(url(start_path), json=load_json_fixture("transaction_start_time.json"))
     aioclient_mock.post(url(est_path), json=load_json_fixture("transaction_estimate.json"))
-    started = await client.find_current_transaction_start_time(11241)
+    transaction = await client.find_current_transaction(11241)
     estimate = await client.find_current_transaction_estimate(11241)
     start_calls = _calls(aioclient_mock, "POST", start_path)
     est_calls = _calls(aioclient_mock, "POST", est_path)
-    assert started == datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
+    assert transaction is not None
+    assert transaction.transaction_id == 9088676
+    assert transaction.elapsed == timedelta(milliseconds=953622)
+    # The fixture's own socket id is irrelevant to the request; the form body is what matters.
     assert start_calls[0][2] == {"stationSocketId": "11241"}
     assert est_calls[0][2] == {"socketId": "11241"}
     assert estimate is not None
-    assert estimate.energy_kwh == 12.345
+    assert estimate.energy_kwh == 1.606
     assert estimate.cost == 0
 
 

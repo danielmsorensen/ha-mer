@@ -38,6 +38,7 @@ from .const import (
 )
 from .exceptions import ApiError, AuthError, DriivzConnectionError, RateLimitError
 from .models import (
+    ActiveTransaction,
     Bounds,
     SessionEstimate,
     Site,
@@ -45,7 +46,6 @@ from .models import (
     Station,
     Transaction,
     Wallet,
-    parse_start_time,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -288,11 +288,12 @@ class DriivzDriverClient:
             return Socket.from_dict(data)
         return None
 
-    async def find_current_transaction_start_time(self, socket_id: int) -> datetime | None:
+    async def find_current_transaction(self, socket_id: int) -> ActiveTransaction | None:
+        """The running transaction on this socket, or None when the payload is empty."""
         data = await self._request(
             "POST", PATH_TRANSACTION_START_TIME, data={"stationSocketId": socket_id}
         )
-        return parse_start_time(data)
+        return ActiveTransaction.from_dict(data) if isinstance(data, Mapping) else None
 
     async def find_current_transaction_estimate(self, socket_id: int) -> SessionEstimate | None:
         data = await self._request("POST", PATH_TRANSACTION_ESTIMATE, data={"socketId": socket_id})

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
@@ -20,6 +19,7 @@ from custom_components.mer.const import (
     DOMAIN,
 )
 from custom_components.mer.driivz.models import (
+    ActiveTransaction,
     SessionEstimate,
     Site,
     Socket,
@@ -90,11 +90,15 @@ def mock_client() -> Generator[MagicMock]:
             side_effect=lambda station_id, billing_plan_id=None: details[station_id]
         )
         client.find_last_active_charge_socket = AsyncMock(return_value=None)
-        client.find_current_transaction_start_time = AsyncMock(
-            return_value=datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
+        client.find_current_transaction = AsyncMock(
+            return_value=ActiveTransaction.from_dict(
+                load_json_fixture("transaction_start_time.json")["data"]
+            )
         )
         client.find_current_transaction_estimate = AsyncMock(
-            return_value=SessionEstimate(energy_kwh=12.345, cost=0.0, currency="GBP")
+            return_value=SessionEstimate.from_dict(
+                load_json_fixture("transaction_estimate.json")["data"]
+            )
         )
         client.start_charge = AsyncMock()
         client.stop_charge = AsyncMock()

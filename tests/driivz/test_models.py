@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from custom_components.mer.driivz.models import (
+    ActiveTransaction,
     Bounds,
     SessionEstimate,
     Site,
@@ -37,13 +38,34 @@ def test_ms_to_datetime() -> None:
     assert ms_to_datetime("bad") is None
 
 
-def test_parse_start_time_accepts_int_or_dict() -> None:
-    expected = datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
-    assert parse_start_time(1789554866000) == expected
-    assert parse_start_time({"startOn": 1789554866000}) == expected
-    assert parse_start_time({"startTime": 1789554866000}) == expected
-    assert parse_start_time(None) is None
-    assert parse_start_time({}) is None
+def test_active_transaction_from_dict_derives_start_from_elapsed() -> None:
+    now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
+    tx = ActiveTransaction.from_dict(load_json_fixture("transaction_start_time.json")["data"])
+    assert tx.transaction_id == 9088676
+    assert tx.boost_enabled is False
+    assert tx.elapsed == timedelta(milliseconds=953622)
+    assert tx.started_at(now) == now - timedelta(milliseconds=953622)
+
+
+def test_active_transaction_tolerates_missing_duration() -> None:
+    now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
+    tx = ActiveTransaction.from_dict({"transactionId": 1})
+    assert tx.elapsed is None
+    assert tx.started_at(now) is None
+
+
+def test_parse_start_time_prefers_absolute_then_elapsed() -> None:
+    now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
+    # an absolute timestamp still wins, for portals that send one
+    assert parse_start_time({"startOn": 1789554866000}, now) == datetime(
+        2026, 9, 16, 10, 34, 26, tzinfo=UTC
+    )
+    # the real Mer payload carries only elapsed milliseconds
+    assert parse_start_time(
+        load_json_fixture("transaction_start_time.json")["data"], now
+    ) == now - timedelta(milliseconds=953622)
+    assert parse_start_time(None, now) is None
+    assert parse_start_time({}, now) is None
 
 
 def test_bounds() -> None:
@@ -153,19 +175,21 @@ def test_transaction_from_dict() -> None:
     assert tx.billing_plan_name == "Durham County Council - Netpark IP"
 
 
-def test_session_estimate_variants() -> None:
-    est = SessionEstimate.from_dict({"totalEnergy": 12345, "cost": 1.5, "currency": "GBP"})
-    assert est.energy_kwh == 12.345
-    assert est.cost == 1.5
+def test_session_estimate_reads_the_real_payload() -> None:
+    est = SessionEstimate.from_dict(load_json_fixture("transaction_estimate.json")["data"])
+    assert est.energy_kwh == 1.606
+    assert est.cost == 0
     assert est.currency == "GBP"
-    est2 = SessionEstimate.from_dict({"energyKwh": 3.2, "totalCost": "0.80"})
-    assert est2.energy_kwh == 3.2
-    assert est2.cost == 0.8
-    assert est2.currency is None
-    est3 = SessionEstimate.from_dict({})
-    assert est3.energy_kwh is None
-    assert est3.cost is None
-    assert est3.raw == {}
+    assert est.duration == timedelta(milliseconds=953825)
+    assert est.rate_estimation == 1.801
+
+
+def test_session_estimate_still_reads_alternative_spellings() -> None:
+    est = SessionEstimate.from_dict({"energyKwh": 3.2, "totalCost": "0.80"})
+    assert est.energy_kwh == 3.2
+    assert est.cost == 0.8
+    assert est.duration is None
+    assert est.rate_estimation is None
 
 
 def test_socket_from_dict_minimal() -> None:

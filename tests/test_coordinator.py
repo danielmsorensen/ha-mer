@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
@@ -70,13 +71,18 @@ async def test_charging_cycle_fetches_session(
     coordinator = mock_config_entry.runtime_data
     active = coordinator.data.active
     assert active is not None
-    assert active.socket_id == 11241
+    assert active.socket_id == 11242
     assert active.station_id == 6041
-    assert active.energy_kwh == 12.345
+    assert active.socket_name == "Right"
+    assert active.station_caption is not None and "Explorer 2" in active.station_caption
+    assert active.transaction_id == 9088676
+    assert active.energy_kwh == 1.606
     assert active.cost == 0.0
     assert active.started_at is not None
-    mock_client.find_current_transaction_start_time.assert_awaited_once_with(11241)
-    mock_client.find_current_transaction_estimate.assert_awaited_once_with(11241)
+    assert active.started_at < dt_util.utcnow()
+    assert active.duration == timedelta(milliseconds=953825)
+    mock_client.find_current_transaction.assert_awaited_once_with(11242)
+    mock_client.find_current_transaction_estimate.assert_awaited_once_with(11242)
 
 
 async def test_rate_limit_low_skips_next_cycle(
