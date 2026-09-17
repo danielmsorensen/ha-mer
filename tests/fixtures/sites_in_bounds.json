@@ -1,0 +1,5 @@
+{"errors":[],"success":true,"data":[
+{"id":2877,"deleted":false,"dirty":false,"managed":true,"fast":false,"siteId":2877,"dn":"Durham County Council - Business Durham NETPark","latitude":54.67043,"longitude":-1.45045,"ss":"AVAILABLE","im":true,"ns":8,"sal":"PUBLIC","hg":true,"imn":false,"mfr":false,"isn":false,"isf":false,"scs":"SEMI_FAST","cs":false},
+{"id":3796,"deleted":false,"dirty":false,"managed":true,"fast":true,"siteId":3796,"dn":"Business Durham NETPark - Expansion Space Car Park","latitude":54.6724801,"longitude":-1.4539477,"ss":"AVAILABLE","im":true,"ns":14,"sal":"PUBLIC","hg":true,"imn":false,"mfr":false,"isn":false,"isf":true,"scs":"FAST","cs":false},
+{"id":1359,"deleted":false,"dirty":false,"managed":true,"fast":false,"siteId":1359,"dn":"Norton Hall","latitude":54.592408,"longitude":-1.310479,"ss":"AVAILABLE","im":true,"ns":2,"sal":"PUBLIC","hg":true,"imn":false,"mfr":false,"isn":false,"isf":false,"scs":"SEMI_FAST","cs":false}
+]}

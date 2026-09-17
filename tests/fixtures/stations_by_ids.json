@@ -1,0 +1,4 @@
+{"errors":[],"success":true,"data":[
+{"id":6042,"caption":"(MER-FS-AD00137) Business Durham - NETPark 3 - Explorer 1","latitude":54.67043,"longitude":-1.45045,"stationStatusId":"AVAILABLE","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"stationSockets":[{"id":11243,"socketStatusId":"AVAILABLE","maximumPower":7,"blocked":false,"deleted":false,"dirty":false},{"id":11244,"socketStatusId":"AVAILABLE","maximumPower":7,"blocked":false,"deleted":false,"dirty":false}]},
+{"id":6041,"caption":"(MER-FS-AD01372) Business Durham - NETPark 4 - Explorer 2","latitude":54.67043,"longitude":-1.45045,"stationStatusId":"CHARGING","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"stationSockets":[{"id":11241,"socketStatusId":"CHARGING","maximumPower":7,"blocked":false,"deleted":false,"dirty":false},{"id":11242,"socketStatusId":"AVAILABLE","maximumPower":7,"blocked":false,"deleted":false,"dirty":false}]}
+]}
