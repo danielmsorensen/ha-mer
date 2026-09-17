@@ -155,9 +155,20 @@ own JavaScript. They are operator-portal operations — actions available to
 the site operator, surfaced in the driver-facing capability and permission
 data without a driver-facing endpoint to invoke them. This integration does
 not implement them, and that omission is deliberate: it was checked against
-the actual set of endpoints the portal ships, not assumed. Anyone tempted to
-add a "set current" or "boost" service to this integration on the strength
-of the capability list should know up front that doing so means guessing at
+the actual set of endpoints the portal ships, not assumed.
+
+No `getStationCapabilitiesAndValidate` fixture lives in this repository, so
+this claim isn't reproducible from the test suite alone. The check itself —
+that `SET_CHARGE_CURRENT`, `CHARGE_FULL_SPEED`, `UNLOCK_SOCKET`, the charging
+profile operations and boost appear in the capabilities/permissions payload
+but have no matching endpoint in the portal's JavaScript — is recorded in
+this project's own implementation plan, in the task briefs for the
+notify-me-when-available feature
+(`.superpowers/sdd/2026-09-17-mer-ha-integration/task-9-brief.md` and
+`task-9a-brief.md`, both under "This is the only one of the extra portal
+capabilities that is reachable"). Anyone tempted to add a "set current" or
+"boost" service to this integration on the strength of the capability list
+should know up front that doing so means guessing at
 an unpublished operator-portal endpoint, not calling something the driver
 portal already exposes.
 

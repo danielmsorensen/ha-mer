@@ -150,10 +150,20 @@ actions:
 mode: single
 ```
 
-The entity id above follows from the site device's own name (Developer Tools
-→ States is the reliable way to find your actual id); to watch one specific
-charger instead of the whole site, trigger on that charger's own `*_available`
-binary sensor, e.g. `binary_sensor.explorer_1_available`.
+The entity id above follows from the site device's own name, and real site
+names tend to be far more verbose than "NETPark" — this project's actual
+site is "Durham County Council - Business Durham NETPark", which slugifies
+to something much longer than the tidy example above. Don't assume the
+short form is literal; open **Developer Tools → States**, find your site's
+`any_socket_available` entity, and copy its real id.
+
+There is no charger-level availability entity — availability is a property
+of a socket, and a charger with two sockets (e.g. Left and Right) has two
+independent availability states. To watch one specific socket instead of
+the whole site, trigger on that socket's own availability sensor, e.g.
+`binary_sensor.explorer_1_left_available` for the "Left" socket on a charger
+device named "Explorer 1" — again, check Developer Tools for the id your
+own charger and socket names actually produce.
 
 ## Polling and rate limits
 
