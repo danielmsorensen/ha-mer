@@ -5218,6 +5218,17 @@ Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 
 ### Task 11: Diagnostics
 
+> **Amendment (2026-09-17):** later tasks added fields the diagnostics helper cannot serialise as
+> written. `ActiveSession.duration` and `SessionEstimate.duration` are `timedelta`, which is not
+> JSON-serialisable, and `_plain` below handles dataclasses, mappings, sequences and `datetime` but
+> not `timedelta` — so diagnostics downloaded *while a charge is running* would fail, which is
+> exactly when someone would download them. Add a `timedelta` branch to `_plain` returning
+> `value.total_seconds()`, and cover it with a test that builds diagnostics for the captured active
+> session rather than only the idle case. `MerData` also gained `notify_subscriptions`; include it
+> in the payload alongside the other fields. Keep the redaction list as it is, and add
+> `transaction_id` to it — a transaction id identifies a specific charge by a specific person.
+
+
 **Files:**
 - Create: `custom_components/mer/diagnostics.py`
 - Test: `tests/test_diagnostics.py`
