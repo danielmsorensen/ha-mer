@@ -15,7 +15,6 @@ from custom_components.mer.driivz.models import (
     Wallet,
     clean_caption,
     ms_to_datetime,
-    parse_start_time,
 )
 from tests.helpers import load_json_fixture
 
@@ -51,23 +50,33 @@ def test_active_transaction_tolerates_missing_duration() -> None:
     now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
     tx = ActiveTransaction.from_dict({"transactionId": 1})
     assert tx.elapsed is None
+    assert tx.started_on is None
     assert tx.started_at(now) is None
 
 
-def test_parse_start_time_prefers_absolute_then_elapsed() -> None:
+def test_active_transaction_prefers_an_absolute_start_when_one_is_sent() -> None:
+    """The absolute-epoch tolerance lives here now, where it can actually run.
+
+    It used to live in `parse_start_time`, which only tests called: the live path reads
+    `ActiveTransaction.from_dict`, which looked at the elapsed-millisecond keys and nothing
+    else, so the documented tolerance was unreachable in production. These assertions moved
+    across with it. The bare-epoch-not-in-a-dict case that `parse_start_time` also handled
+    is gone: the client only ever passes a mapping.
+    """
     now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
-    # a bare epoch (not wrapped in a dict) is still accepted directly
-    assert parse_start_time(1789554866000, now) == datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
-    # an absolute timestamp still wins, for portals that send one
-    assert parse_start_time({"startOn": 1789554866000}, now) == datetime(
-        2026, 9, 16, 10, 34, 26, tzinfo=UTC
+    absolute = datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
+    tx = ActiveTransaction.from_dict({"transactionId": 1, "startOn": 1789554866000})
+    assert tx.started_on == absolute
+    assert tx.started_at(now) == absolute
+    # an absolute timestamp wins over the elapsed milliseconds when both are present
+    both = ActiveTransaction.from_dict(
+        {"transactionId": 1, "startedOn": 1789554866000, "txDuration": 953622}
     )
-    # the real Mer payload carries only elapsed milliseconds
-    assert parse_start_time(
-        load_json_fixture("transaction_start_time.json")["data"], now
-    ) == now - timedelta(milliseconds=953622)
-    assert parse_start_time(None, now) is None
-    assert parse_start_time({}, now) is None
+    assert both.started_at(now) == absolute
+    assert both.elapsed == timedelta(milliseconds=953622)
+    # every spelling the portal family has been seen to use is accepted
+    for key in ("startOn", "startTime", "startedOn", "transactionStartTime"):
+        assert ActiveTransaction.from_dict({key: 1789554866000}).started_at(now) == absolute
 
 
 def test_bounds() -> None:
@@ -184,6 +193,9 @@ def test_session_estimate_reads_the_real_payload() -> None:
     assert est.currency == "GBP"
     assert est.duration == timedelta(milliseconds=953825)
     assert est.rate_estimation == 1.801
+    # No raw copy of the payload is kept. Nothing ever read it, and it was the one field in
+    # the model layer that would have put unredacted portal JSON into diagnostics.
+    assert not hasattr(est, "raw")
 
 
 def test_session_estimate_still_reads_alternative_spellings() -> None:

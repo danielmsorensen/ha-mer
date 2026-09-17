@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 import re
 from typing import Any, ClassVar
@@ -39,22 +39,6 @@ def _elapsed(data: Mapping[str, Any]) -> timedelta | None:
         if value is not None:
             return timedelta(milliseconds=value)
     return None
-
-
-def parse_start_time(data: Any, now: datetime) -> datetime | None:
-    """When the charge started.
-
-    The Mer portal's findCurrentTransactionStartTime returns no timestamp -- only how many
-    milliseconds the transaction has been running -- so the start is derived from `now`. An
-    absolute epoch is still honoured first, in case another Driivz tenant sends one.
-    """
-    if isinstance(data, Mapping):
-        for key in ("startOn", "startTime", "startedOn", "transactionStartTime"):
-            if data.get(key) is not None:
-                return ms_to_datetime(data[key])
-        elapsed = _elapsed(data)
-        return now - elapsed if elapsed is not None else None
-    return ms_to_datetime(data)
 
 
 def _int(value: Any) -> int | None:
@@ -291,17 +275,41 @@ class ActiveTransaction:
     transaction_id: int | None
     elapsed: timedelta | None
     boost_enabled: bool
+    started_on: datetime | None = None
+
+    # Mer sends none of these -- the payload carries only elapsed milliseconds -- but
+    # another Driivz tenant might, and honouring one costs nothing. Read here rather than
+    # in a standalone parser so the tolerance actually runs on the live path.
+    _START_KEYS: ClassVar[tuple[str, ...]] = (
+        "startOn",
+        "startTime",
+        "startedOn",
+        "transactionStartTime",
+    )
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ActiveTransaction:
+        started_on: datetime | None = None
+        for key in cls._START_KEYS:
+            if data.get(key) is not None:
+                started_on = ms_to_datetime(data[key])
+                break
         return cls(
             transaction_id=_int(data.get("transactionId")),
             elapsed=_elapsed(data),
             boost_enabled=bool(data.get("boostEnabled", False)),
+            started_on=started_on,
         )
 
     def started_at(self, now: datetime) -> datetime | None:
-        """The start time, derived from how long the charge has been running."""
+        """When the charge started.
+
+        `findCurrentTransactionStartTime` returns no timestamp on Mer -- only how many
+        milliseconds the transaction has been running -- so the start is normally derived
+        from `now`. An absolute epoch, if one was present in the payload, wins.
+        """
+        if self.started_on is not None:
+            return self.started_on
         return now - self.elapsed if self.elapsed is not None else None
 
 
@@ -358,7 +366,6 @@ class SessionEstimate:
     currency: str | None
     duration: timedelta | None = None
     rate_estimation: float | None = None
-    raw: dict[str, Any] = field(default_factory=dict)
 
     # findCurrentTransactionBillingChargingEstimation's `totalKw` is named as though it were
     # power, but it is kWh delivered: a live session showed 1.606 over 953 s on a 7.4 kW socket,
@@ -392,5 +399,4 @@ class SessionEstimate:
             currency=_str(data.get("currency")),
             duration=_elapsed(data),
             rate_estimation=_float(data.get("rateEstimation")),
-            raw=dict(data),
         )
