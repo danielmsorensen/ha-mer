@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Idempotently create (or update) the WSL dev venv used by scripts/test, scripts/lint and
+# scripts/format, and install the test dependencies into it.
+#
+# WSL2's Ubuntu image has no pip, no ensurepip and no passwordless sudo, so pip is bootstrapped
+# from a PyPI wheel downloaded with the Windows-side `python`, then run as a zipapp against the
+# venv's interpreter.
+set -euo pipefail
+
+# Prevent Git Bash/MSYS from rewriting POSIX-looking arguments (e.g. anything after a `-r`-style
+# flag, or the /mnt/... repo path) into bogus Windows paths before they reach wsl.exe.
+export MSYS_NO_PATHCONV=1
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+repo_root_wsl="$(printf '%s' "$repo_root" | sed -E 's#^/([a-zA-Z])/#/mnt/\1/#')"
+
+distro="${HA_MER_WSL_DISTRO:-Ubuntu}"
+venv="${HA_MER_VENV:-\$HOME/.venvs/ha-mer}"
+
+# 1. Create the venv. Re-running `venv --without-pip` against an existing venv directory does not
+#    touch anything already installed in it, so this is safe to repeat.
+wsl.exe -d "$distro" -- bash -lc "python3 -m venv --without-pip \"$venv\""
+
+# 2. Bootstrap pip into the venv, unless it's already there.
+if ! wsl.exe -d "$distro" -- bash -lc "test -x \"$venv/bin/pip\""; then
+  tmp_dir="$repo_root/.bootstrap-dev-tmp"
+  trap 'rm -rf "$tmp_dir"' EXIT
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+
+  python -m pip download pip --no-deps -d "$tmp_dir" >/dev/null
+
+  wheel_name="$(basename "$(ls "$tmp_dir"/pip-*.whl | head -n1)")"
+  tmp_dir_wsl="$(printf '%s' "$tmp_dir" | sed -E 's#^/([a-zA-Z])/#/mnt/\1/#')"
+
+  wsl.exe -d "$distro" -- bash -lc \
+    "python3 \"$tmp_dir_wsl/$wheel_name/pip\" --python \"$venv/bin/python\" install pip setuptools wheel"
+
+  rm -rf "$tmp_dir"
+  trap - EXIT
+fi
+
+# 3. Install test dependencies and report the resolved Home Assistant version.
+wsl.exe -d "$distro" -- bash -lc "\"$venv/bin/python\" -m pip install -r \"$repo_root_wsl/requirements_test.txt\""
+wsl.exe -d "$distro" -- bash -lc "\"$venv/bin/python\" -c \"import homeassistant.const as c; print(c.__version__)\""

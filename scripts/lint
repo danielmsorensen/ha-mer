@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Read-only lint check inside the WSL dev venv: ruff check, then ruff format --check.
+set -euo pipefail
+
+# Prevent Git Bash/MSYS from rewriting POSIX-looking arguments into bogus Windows paths.
+export MSYS_NO_PATHCONV=1
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+repo_root_wsl="$(printf '%s' "$repo_root" | sed -E 's#^/([a-zA-Z])/#/mnt/\1/#')"
+
+distro="${HA_MER_WSL_DISTRO:-Ubuntu}"
+venv="${HA_MER_VENV:-\$HOME/.venvs/ha-mer}"
+
+exec wsl.exe -d "$distro" -- bash -lc "cd '$repo_root_wsl' && \"$venv/bin/ruff\" check . && \"$venv/bin/ruff\" format --check ."

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Run pytest inside the WSL dev venv, passing through all arguments.
+set -euo pipefail
+
+# Prevent Git Bash/MSYS from rewriting POSIX-looking arguments (e.g. anything after a `-r`-style
+# flag, or the /mnt/... repo path) into bogus Windows paths before they reach wsl.exe.
+export MSYS_NO_PATHCONV=1
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+repo_root_wsl="$(printf '%s' "$repo_root" | sed -E 's#^/([a-zA-Z])/#/mnt/\1/#')"
+
+distro="${HA_MER_WSL_DISTRO:-Ubuntu}"
+venv="${HA_MER_VENV:-\$HOME/.venvs/ha-mer}"
+
+quoted_args=""
+for arg in "$@"; do
+  quoted_args+=" $(printf '%q' "$arg")"
+done
+
+exec wsl.exe -d "$distro" -- bash -lc "cd '$repo_root_wsl' && \"$venv/bin/python\" -m pytest${quoted_args}"
