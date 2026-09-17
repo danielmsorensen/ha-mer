@@ -147,6 +147,9 @@
       "socket_start_charge": { "name": "{socket} start charge" },
       "account_stop_charge": { "name": "Stop charge" },
       "station_stop_charge": { "name": "Stop charge" }
+    },
+    "switch": {
+      "notify_available": { "name": "Notify me when available" }
     }
   },
   "exceptions": {

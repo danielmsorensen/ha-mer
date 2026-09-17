@@ -102,6 +102,12 @@ def mock_client() -> Generator[MagicMock]:
         )
         client.start_charge = AsyncMock()
         client.stop_charge = AsyncMock()
+        # Mirrors the real account: 6042 is subscribed via the Mer app, 6041 is not.
+        client.is_subscribed_to_availability = AsyncMock(
+            side_effect=lambda station_id: station_id == 6042
+        )
+        client.subscribe_to_availability = AsyncMock()
+        client.unsubscribe_from_availability = AsyncMock()
         client.find_wallet = AsyncMock(
             return_value=Wallet.from_dict(load_json_fixture("wallet.json")["data"])
         )

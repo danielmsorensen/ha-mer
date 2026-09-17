@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import logging
 
@@ -56,6 +56,7 @@ class MerData:
 
     stations: dict[int, Station] = field(default_factory=dict)
     details: dict[int, Station] = field(default_factory=dict)
+    notify_subscriptions: dict[int, bool] = field(default_factory=dict)
     active: ActiveSession | None = None
     wallet: Wallet | None = None
     last_transaction: Transaction | None = None
@@ -83,6 +84,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self.site_id: int | None = entry.options.get(CONF_SITE_ID)
         self.site_name: str = entry.options.get(CONF_SITE_NAME) or "Mer site"
         self._details: dict[int, Station] = {}
+        self._notify: dict[int, bool] = {}
         self._wallet: Wallet | None = None
         self._last_transaction: Transaction | None = None
         self._customer_id: int | None = None
@@ -134,6 +136,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         return MerData(
             stations=stations,
             details=dict(self._details),
+            notify_subscriptions=dict(self._notify),
             active=active,
             wallet=self._wallet,
             last_transaction=self._last_transaction,
@@ -189,13 +192,16 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
     async def _refresh_details(self, now: datetime) -> None:
         """Fetch every configured station's details, then commit them atomically.
 
-        Built up in a local dict so a client error partway through the loop leaves
-        `self._details` untouched rather than half-updated.
+        Built up in local dicts so a client error partway through the loop leaves
+        `self._details`/`self._notify` untouched rather than half-updated.
         """
         details = dict(self._details)
+        notify = dict(self._notify)
         for station_id in self.station_ids:
             details[station_id] = await self.client.find_station_by_id(station_id)
+            notify[station_id] = await self.client.is_subscribed_to_availability(station_id)
         self._details = details
+        self._notify = notify
         self._details_refreshed = now
 
     def _check_rate_limit(self, now: datetime) -> None:
@@ -232,6 +238,26 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         """Configured stations that are present in the latest data."""
         stations = (self.get_station(sid) for sid in self.station_ids)
         return [s for s in stations if s is not None]
+
+    async def async_set_availability_subscription(self, station_id: int, subscribed: bool) -> None:
+        """Subscribe or unsubscribe this charger, then update the cache optimistically.
+
+        The client call happens first, so a `DriivzError` propagates to the caller (the
+        switch entity) before anything is touched. Only once it succeeds do we update the
+        cache and publish a fresh `MerData` via `async_set_updated_data`, so the toggle
+        does not visibly flick back to its old position while the follow-up refresh is
+        still in flight.
+        """
+        if subscribed:
+            await self.client.subscribe_to_availability(station_id)
+        else:
+            await self.client.unsubscribe_from_availability(station_id)
+        self._notify[station_id] = subscribed
+        if self.data is not None:
+            notify = dict(self.data.notify_subscriptions)
+            notify[station_id] = subscribed
+            self.async_set_updated_data(replace(self.data, notify_subscriptions=notify))
+        self.schedule_refresh()
 
     def schedule_refresh(self) -> None:
         """Refresh shortly after a start/stop command."""

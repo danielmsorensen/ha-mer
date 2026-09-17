@@ -20,7 +20,12 @@ DEFAULT_SCAN_INTERVAL = 60
 MIN_SCAN_INTERVAL = 30
 MAX_SCAN_INTERVAL = 600
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
 
 WALLET_REFRESH = timedelta(minutes=15)
 DETAIL_REFRESH = timedelta(hours=1)

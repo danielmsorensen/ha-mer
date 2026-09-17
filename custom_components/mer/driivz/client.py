@@ -26,14 +26,17 @@ from .const import (
     PATH_FIND_STATION_BY_ID,
     PATH_FIND_STATIONS_BY_IDS,
     PATH_FIND_STATIONS_IN_BOUNDS,
+    PATH_IS_SUBSCRIBED_AVAILABLE,
     PATH_LAST_ACTIVE_SOCKET,
     PATH_LOGIN,
     PATH_MAP,
+    PATH_NOTIFY_WHEN_AVAILABLE,
     PATH_START_CHARGE,
     PATH_STOP_CHARGE,
     PATH_TRANSACTION_ESTIMATE,
     PATH_TRANSACTION_START_TIME,
     PATH_TRANSACTIONS,
+    PATH_UNSUBSCRIBE_WHEN_AVAILABLE,
     PATH_WALLET,
 )
 from .exceptions import ApiError, AuthError, DriivzConnectionError, RateLimitError
@@ -339,3 +342,18 @@ class DriivzDriverClient:
             key=lambda t: t.started_at.timestamp() if t.started_at else 0.0, reverse=True
         )
         return transactions
+
+    # ----- notify-me-when-available --------------------------------------
+
+    async def is_subscribed_to_availability(self, station_id: int) -> bool:
+        """Whether the driver is subscribed to be told when this charger frees up."""
+        data = await self._request(
+            "POST", PATH_IS_SUBSCRIBED_AVAILABLE, data={"stationId": station_id}
+        )
+        return bool(data)
+
+    async def subscribe_to_availability(self, station_id: int) -> None:
+        await self._request("POST", PATH_NOTIFY_WHEN_AVAILABLE, data={"stationId": station_id})
+
+    async def unsubscribe_from_availability(self, station_id: int) -> None:
+        await self._request("POST", PATH_UNSUBSCRIBE_WHEN_AVAILABLE, data={"stationId": station_id})

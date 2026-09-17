@@ -266,6 +266,40 @@ async def test_find_wallet(client: DriivzDriverClient, aioclient_mock: AiohttpCl
     assert wallet.balance == 12.5
 
 
+async def test_availability_subscription_roundtrip(
+    client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """is/subscribe/unsubscribe each post the station id as a form body."""
+    is_subscribed_path = "customerFacade/isDriverSubscribedToNotifyMeWhenStationIsAvailable"
+    notify_path = "customerFacade/notifyMeWhenStationIsAvailable"
+    unsubscribe_path = "customerFacade/unSubscribeFromNotifyMeWhenStationIsAvailable"
+    aioclient_mock.post(
+        url(is_subscribed_path),
+        side_effect=_responses_in_order(
+            {"json": {"errors": [], "success": True, "data": True}},
+            {"json": {"errors": [], "success": True, "data": False}},
+            {"json": {"errors": [], "success": True}},
+        ),
+    )
+    aioclient_mock.post(url(notify_path), json={"errors": [], "success": True})
+    aioclient_mock.post(url(unsubscribe_path), json={"errors": [], "success": True})
+
+    assert await client.is_subscribed_to_availability(6042) is True
+    assert await client.is_subscribed_to_availability(6042) is False
+    # a bare success envelope with no `data` field is a legitimate answer, not an error
+    assert await client.is_subscribed_to_availability(6042) is False
+
+    await client.subscribe_to_availability(6042)
+    await client.unsubscribe_from_availability(6042)
+
+    is_subscribed_calls = _calls(aioclient_mock, "POST", is_subscribed_path)
+    notify_calls = _calls(aioclient_mock, "POST", notify_path)
+    unsubscribe_calls = _calls(aioclient_mock, "POST", unsubscribe_path)
+    assert all(call[2] == {"stationId": "6042"} for call in is_subscribed_calls)
+    assert notify_calls[0][2] == {"stationId": "6042"}
+    assert unsubscribe_calls[0][2] == {"stationId": "6042"}
+
+
 async def test_find_transactions_sorted_newest_first(
     client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
 ) -> None:
