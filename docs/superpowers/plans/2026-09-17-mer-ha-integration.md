@@ -1615,6 +1615,23 @@ Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 
 ### Task 4: Client typed methods (queries, session, commands, wallet, history)
 
+> **Amendment (see Global Constraints):** the test code below is written with `aioresponses`, which
+> has been removed from the project. Treat it as the specification of the test *behaviours and
+> assertions*, and translate each one mechanically to `AiohttpClientMocker`, following the pattern
+> already established in `tests/driivz/test_client_core.py`. Translation rules:
+> `with aioresponses() as m:` → build `mocker = AiohttpClientMocker()` and a session from
+> `mocker.create_session(asyncio.get_running_loop())`; `m.post(url, payload=X)` → `mocker.post(url, json=X)`;
+> `m.get(url, body=X, content_type="text/html")` → `mocker.get(url, text=X)`;
+> `m.requests[("POST", URL(u))][0].kwargs["json"]` and `...kwargs["data"]` → the third element of the
+> matching `mocker.mock_calls` entry, since the mocker records `data or json` in one slot;
+> a `re.compile(...)` URL matcher for a query string → register the plain URL and assert on the
+> recorded URL's `.query`, because params fold into the recorded URL;
+> `assert not m.requests` (no request made) → `assert mocker.mock_calls == []`.
+> Keep every assertion's strength: where the original asserted both a JSON body and the absence of a
+> form body, assert the recorded body equals the expected payload and say in a comment why the
+> second half cannot be expressed.
+
+
 **Files:**
 - Modify: `custom_components/mer/driivz/client.py` (append methods and imports)
 - Test: `tests/driivz/test_client_methods.py`
