@@ -1,0 +1,109 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sign in to Mer",
+        "description": "Use the e-mail and password of your Mer Connect / Driver Portal account.",
+        "data": {
+          "username": "E-mail",
+          "password": "Password"
+        }
+      },
+      "site": {
+        "title": "Find your charging site",
+        "description": "Type part of the site name as shown in the Mer app, e.g. NETPark.",
+        "data": {
+          "search": "Site name"
+        }
+      },
+      "site_select": {
+        "title": "Choose the site",
+        "data": {
+          "site_id": "Site"
+        }
+      },
+      "stations": {
+        "title": "Choose the chargers to monitor",
+        "description": "Chargers at {site}. Each selected charger becomes a device.",
+        "data": {
+          "station_ids": "Chargers"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Mer",
+        "description": "The password for {username} no longer works. Enter the new password.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid e-mail or password",
+      "cannot_connect": "Could not reach the Mer driver portal",
+      "no_sites": "No site matched that name",
+      "no_stations_selected": "Select at least one charger",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This Mer account is already configured",
+      "reauth_successful": "Re-authentication was successful",
+      "cannot_connect": "Could not reach the Mer driver portal",
+      "no_stations": "No chargers were found at that site"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Mer options",
+        "menu_options": {
+          "interval": "Change the poll interval",
+          "site": "Change site or chargers"
+        }
+      },
+      "interval": {
+        "title": "Poll interval",
+        "data": {
+          "scan_interval": "Seconds between updates"
+        }
+      },
+      "site": {
+        "title": "Find your charging site",
+        "data": {
+          "search": "Site name"
+        }
+      },
+      "site_select": {
+        "title": "Choose the site",
+        "data": {
+          "site_id": "Site"
+        }
+      },
+      "stations": {
+        "title": "Choose the chargers to monitor",
+        "description": "Chargers at {site}.",
+        "data": {
+          "station_ids": "Chargers"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the Mer driver portal",
+      "no_sites": "No site matched that name",
+      "no_stations_selected": "Select at least one charger"
+    },
+    "abort": {
+      "invalid_auth": "Stored password no longer works; re-authenticate the integration first",
+      "cannot_connect": "Could not reach the Mer driver portal",
+      "no_stations": "No chargers were found at that site"
+    }
+  },
+  "entity": {},
+  "exceptions": {
+    "command_failed": {
+      "message": "Mer rejected the command: {error}"
+    },
+    "no_active_session": {
+      "message": "There is no active charging session to stop"
+    }
+  }
+}
