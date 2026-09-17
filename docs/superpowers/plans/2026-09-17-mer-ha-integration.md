@@ -25,7 +25,9 @@
   `D:\GitHub\Personal\ha-mer` in Git Bash. The WSL virtualenv lives at `~/.venvs/ha-mer`
   (outside the NTFS mount); `scripts/bootstrap-dev` documents how it is created without sudo.
   Never add a Windows `fcntl` shim, and never run `pytest` directly on Windows Python.
-- Commit after every task with a conventional-commit message ending in `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+- Commit after every task with a conventional-commit message ending in the `Co-Authored-By:`
+  trailer that the running session's harness specifies (it names the authoring model, so it
+  changes if the session model changes). The dispatch for each task states the exact line to use.
 - Test data in `tests/fixtures/` is sanitised: customer id `123456`, member id `123123`, account number `1123456`, wallet id `228000`, no emails/addresses.
 
 ---
@@ -329,7 +331,7 @@ jobs:
 git add -A
 git commit -m "chore: scaffold integration, test tooling and CI
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -1148,7 +1150,7 @@ scripts/format && scripts/lint
 git add -A
 git commit -m "feat(driivz): add constants, exceptions, models and sanitised fixtures
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -1595,7 +1597,7 @@ scripts/format && scripts/lint
 git add -A
 git commit -m "feat(driivz): client login, CSRF handling and request envelope with re-login
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -1998,7 +2000,7 @@ scripts/format && scripts/lint
 git add -A
 git commit -m "feat(driivz): typed station, session, command, wallet and history methods
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -2750,7 +2752,7 @@ scripts/format && scripts/lint
 git add -A
 git commit -m "feat: coordinator, client factory and config entry setup
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -3439,7 +3441,7 @@ scripts/format && scripts/lint
 git add -A
 git commit -m "feat: config flow with site search, charger selection, reauth and options
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -3912,7 +3914,7 @@ scripts/format && scripts/lint
 git add -A
 git commit -m "feat: station and socket sensors with device hierarchy
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -4209,7 +4211,7 @@ scripts/format && scripts/lint
 git add -A
 git commit -m "feat: socket availability, site aggregates and charging binary sensors
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -4429,7 +4431,7 @@ scripts/format && scripts/lint
 git add -A
 git commit -m "feat: start and stop charge buttons
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -4664,7 +4666,7 @@ scripts/format && scripts/lint
 git add -A
 git commit -m "feat: active session, last session and wallet sensors
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -4801,7 +4803,7 @@ scripts/format && scripts/lint
 git add -A
 git commit -m "feat: redacted config entry diagnostics
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
@@ -4873,7 +4875,7 @@ Replace `danielmsorensen` placeholders in `manifest.json` and `README.md` with t
 git add -A
 git commit -m "docs: README, API reference and licence
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: <model named in your dispatch> <noreply@anthropic.com>"
 ```
 
 ---
