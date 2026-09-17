@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
-import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mer import async_remove_config_entry_device
@@ -51,17 +50,15 @@ async def test_setup_connection_error_retries(
     assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
 
 
-@pytest.mark.xfail(reason="entities added in Task 7", strict=True)
 async def test_devices_created_and_stale_station_removable(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     registry = dr.async_get(hass)
-    site = registry.async_get_device(identifiers={(DOMAIN, "site_2877")})
-    station = registry.async_get_device(identifiers={(DOMAIN, "station_6042")})
-    account = registry.async_get_device(
-        identifiers={(DOMAIN, f"account_{mock_config_entry.entry_id}")}
-    )
+    entry_id = mock_config_entry.entry_id
+    site = registry.async_get_device_by_identifier((DOMAIN, "site_2877"), entry_id)
+    station = registry.async_get_device_by_identifier((DOMAIN, "station_6042"), entry_id)
+    account = registry.async_get_device_by_identifier((DOMAIN, f"account_{entry_id}"), entry_id)
     assert site is not None and site.name == "Durham County Council - Business Durham NETPark"
     assert station is not None
     assert station.name == "Business Durham - NETPark 3 - Explorer 1"

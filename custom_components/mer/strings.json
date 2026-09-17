@@ -97,7 +97,45 @@
       "no_stations": "No chargers were found at that site"
     }
   },
-  "entity": {},
+  "entity": {
+    "sensor": {
+      "station_status": {
+        "name": "Status",
+        "state": {
+          "available": "Available",
+          "occupied": "Occupied",
+          "charging": "Charging",
+          "discharging": "Discharging",
+          "paused": "Paused",
+          "preparing": "Preparing",
+          "finishing": "Finishing",
+          "reserved": "Reserved",
+          "unavailable": "Unavailable",
+          "faulted": "Faulted",
+          "unknown": "Unknown"
+        }
+      },
+      "identity_key": { "name": "Identity key" },
+      "socket_status": {
+        "name": "{socket} status",
+        "state": {
+          "available": "Available",
+          "occupied": "Occupied",
+          "charging": "Charging",
+          "discharging": "Discharging",
+          "paused": "Paused",
+          "preparing": "Preparing",
+          "finishing": "Finishing",
+          "reserved": "Reserved",
+          "unavailable": "Unavailable",
+          "faulted": "Faulted",
+          "unknown": "Unknown"
+        }
+      },
+      "socket_price": { "name": "{socket} price" },
+      "socket_max_power": { "name": "{socket} max power" }
+    }
+  },
   "exceptions": {
     "command_failed": {
       "message": "Mer rejected the command: {error}"
