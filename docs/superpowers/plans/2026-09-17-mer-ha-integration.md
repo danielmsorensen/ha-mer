@@ -28,6 +28,17 @@
 - Commit after every task with a conventional-commit message ending in the `Co-Authored-By:`
   trailer that the running session's harness specifies (it names the authoring model, so it
   changes if the session model changes). The dispatch for each task states the exact line to use.
+- HTTP in tests is mocked with `AiohttpClientMocker` from
+  `pytest_homeassistant_custom_component.test_util.aiohttp`, never with `aioresponses`
+  (its latest release, 0.7.9, is broken against the aiohttp 3.14 that Home Assistant pins, and the
+  only fix is an unmerged third-party commit). For the HA-free client tests, build the session
+  directly: `mocker = AiohttpClientMocker()`, `session = mocker.create_session(asyncio.get_running_loop())`,
+  then pass that session to `DriivzDriverClient`. For integration-level tests use the `aioclient_mock`
+  fixture, which intercepts the session that `api.create_client` builds. Register responses with
+  `mocker.get(url, ...)` / `mocker.post(url, status=, text=, json=, headers=, exc=, side_effect=)`;
+  matchers are NOT consumed, so when one URL must answer differently on successive calls, use
+  `side_effect`. Requests are recorded in `mocker.mock_calls` as `(method, url, body, headers)`,
+  where `body` is the form dict or the JSON payload and query params are folded into `url`.
 - Test data in `tests/fixtures/` is sanitised: customer id `123456`, member id `123123`, account number `1123456`, wallet id `228000`, no emails/addresses.
 
 ---
