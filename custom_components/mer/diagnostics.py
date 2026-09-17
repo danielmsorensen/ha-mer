@@ -44,6 +44,11 @@ async def async_get_config_entry_diagnostics(
     """Return redacted diagnostics for a config entry."""
     coordinator = entry.runtime_data
     data = coordinator.data
+    # `Transaction.id` identifies one person's specific past charge, same as
+    # `ActiveSession.transaction_id` -- but the field is spelled `id`, a name shared with
+    # Station/Socket/Wallet where it is just a non-identifying record pointer. Redact it only
+    # within this one sub-object, so every other `id` in the payload stays visible.
+    last_transaction = async_redact_data(_plain(data.last_transaction), TO_REDACT | {"id"})
     return {
         "entry": async_redact_data(
             {
@@ -64,7 +69,7 @@ async def async_get_config_entry_diagnostics(
                 "notify_subscriptions": _plain(data.notify_subscriptions),
                 "active": _plain(data.active),
                 "wallet": _plain(data.wallet),
-                "last_transaction": _plain(data.last_transaction),
+                "last_transaction": last_transaction,
             },
             TO_REDACT,
         ),

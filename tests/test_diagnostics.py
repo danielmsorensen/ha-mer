@@ -29,7 +29,9 @@ async def test_diagnostics_redacts_secrets(
     assert sorted(diag["data"]["stations"]) == ["6041", "6042"]
     assert diag["data"]["stations"]["6042"]["sockets"][0]["status"] == "AVAILABLE"
     assert diag["data"]["active"] is None
+    assert diag["data"]["last_transaction"]["id"] == "**REDACTED**"
     assert diag["data"]["last_transaction"]["energy_kwh"] == 32.408
+    assert diag["data"]["last_transaction"]["station_id"] == 6041
     assert diag["data"]["notify_subscriptions"] == {"6042": True, "6041": False}
 
     # The whole point of redaction is that the result survives JSON serialisation for
