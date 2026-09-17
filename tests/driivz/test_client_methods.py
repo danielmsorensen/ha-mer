@@ -120,14 +120,14 @@ async def test_find_stations_by_ids(
 
 
 async def test_find_stations_by_ids_empty_makes_no_request(
-    client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
+    session: aiohttp.ClientSession, aioclient_mock: AiohttpClientMocker
 ) -> None:
-    # The `client` fixture's login already left calls in `mock_calls` (unlike the original
-    # per-test `with aioresponses() as m:` block, this mocker is shared with login), so "no
-    # request made" is checked as "no *new* call appears" rather than an empty list.
-    before = list(aioclient_mock.mock_calls)
-    assert await client.find_stations_by_ids([]) == []
-    assert aioclient_mock.mock_calls == before
+    # `find_stations_by_ids([])` short-circuits before any call to `_request`, so it needs no
+    # prior login. Building the client fresh (unauthenticated) here, instead of using the shared
+    # already-logged-in `client` fixture, lets this assert a truly empty call list.
+    fresh_client = DriivzDriverClient(session, "user@example.com", "secret")
+    assert await fresh_client.find_stations_by_ids([]) == []
+    assert aioclient_mock.mock_calls == []
 
 
 async def test_find_station_by_id(
