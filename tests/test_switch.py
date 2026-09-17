@@ -102,10 +102,13 @@ async def test_subscribe_error_raises_command_failed(
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
+    entity_id = entity_id_for(hass, f"{eid}_station_6041_notify_available")
     mock_client.subscribe_to_availability.side_effect = ApiError("STATION_NOT_FOUND")
     with pytest.raises(HomeAssistantError) as excinfo:
-        await turn_on(hass, entity_id_for(hass, f"{eid}_station_6041_notify_available"))
+        await turn_on(hass, entity_id)
     assert "STATION_NOT_FOUND" in str(excinfo.value)
+    # the failed call must not have left the switch showing a change that never happened
+    assert hass.states.get(entity_id).state == STATE_OFF
 
 
 async def test_unsubscribe_error_raises_command_failed(
@@ -113,7 +116,10 @@ async def test_unsubscribe_error_raises_command_failed(
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
+    entity_id = entity_id_for(hass, f"{eid}_station_6042_notify_available")
     mock_client.unsubscribe_from_availability.side_effect = ApiError("STATION_NOT_FOUND")
     with pytest.raises(HomeAssistantError) as excinfo:
-        await turn_off(hass, entity_id_for(hass, f"{eid}_station_6042_notify_available"))
+        await turn_off(hass, entity_id)
     assert "STATION_NOT_FOUND" in str(excinfo.value)
+    # the failed call must not have left the switch showing a change that never happened
+    assert hass.states.get(entity_id).state == STATE_ON

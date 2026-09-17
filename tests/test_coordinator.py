@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from unittest.mock import MagicMock
 
@@ -152,6 +153,68 @@ async def test_auth_error_during_poll_starts_reauth(
     assert mock_config_entry.state is ConfigEntryState.LOADED
     flows = hass.config_entries.flow.async_progress()
     assert any(f["context"].get("source") == "reauth" for f in flows)
+
+
+async def test_toggle_during_refresh_is_not_clobbered(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A toggle that lands mid-refresh must win, not be overwritten by the refresh's commit.
+
+    `_refresh_details` snapshots `self._notify` into a local dict, fetches every station's
+    subscription state one await at a time, then assigns the whole dict back. If a toggle
+    for the same station lands after the refresh has already fetched its (now-stale) answer
+    but before that trailing assignment, an unguarded refresh would silently overwrite the
+    user's confirmed change. Station 6042 is first in `station_ids`, so its fetch is the one
+    parked here while the toggle runs.
+
+    The toggle is started as its own task, not awaited inline: with the fix in place, it
+    blocks on `_notify_lock` (held by the parked refresh) until the refresh's fetch-and-commit
+    loop finishes, so awaiting it directly here would deadlock against the still-parked
+    refresh. That ordering -- toggle forced to wait its turn rather than interleaving -- is
+    exactly the property under test.
+    """
+    await setup_integration(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data
+    assert coordinator.data.notify_subscriptions[6042] is True  # the now-stale answer
+
+    parked = asyncio.Event()
+    release = asyncio.Event()
+    blocked_once = False
+
+    async def blocking_is_subscribed(station_id: int) -> bool:
+        nonlocal blocked_once
+        if not blocked_once and station_id == 6042:
+            blocked_once = True
+            parked.set()
+            await release.wait()
+        return station_id == 6042
+
+    mock_client.is_subscribed_to_availability.side_effect = blocking_is_subscribed
+
+    refresh_task = asyncio.create_task(coordinator._refresh_details(dt_util.utcnow()))
+    await parked.wait()  # the refresh is now parked inside the fetch for 6042
+
+    toggle_task = asyncio.create_task(coordinator.async_set_availability_subscription(6042, False))
+    await asyncio.sleep(0)  # let the toggle task run up to its lock-acquire attempt
+
+    release.set()
+    await refresh_task
+    await toggle_task
+
+    mock_client.unsubscribe_from_availability.assert_awaited_once_with(6042)
+    assert coordinator._notify[6042] is False
+    assert coordinator.data.notify_subscriptions[6042] is False
+
+    # flush the scheduled refresh so no timer is left pending at teardown
+    freezer.tick(timedelta(seconds=6))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=11))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
 
 
 async def test_get_station_merges_detail_and_live(

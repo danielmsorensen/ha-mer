@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import logging
@@ -85,6 +86,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self.site_name: str = entry.options.get(CONF_SITE_NAME) or "Mer site"
         self._details: dict[int, Station] = {}
         self._notify: dict[int, bool] = {}
+        self._notify_lock = asyncio.Lock()
         self._wallet: Wallet | None = None
         self._last_transaction: Transaction | None = None
         self._customer_id: int | None = None
@@ -192,16 +194,28 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
     async def _refresh_details(self, now: datetime) -> None:
         """Fetch every configured station's details, then commit them atomically.
 
-        Built up in local dicts so a client error partway through the loop leaves
-        `self._details`/`self._notify` untouched rather than half-updated.
+        Built up in a local dict so a client error partway through the loop leaves
+        `self._details` untouched rather than half-updated.
+
+        The subscription fetch is a separate loop, guarded by `_notify_lock` end to end
+        (every awaited fetch plus the trailing commit), so it can never interleave with
+        `async_set_availability_subscription`. Locking only the final assignment would
+        not be enough: the staleness this guards against is introduced while *fetching*
+        each station's answer, not while writing the dict back, so a toggle that lands
+        after this loop has already fetched (now-stale) data for its station but before
+        the loop commits must be blocked out entirely, not just raced at the assignment.
         """
         details = dict(self._details)
-        notify = dict(self._notify)
         for station_id in self.station_ids:
             details[station_id] = await self.client.find_station_by_id(station_id)
-            notify[station_id] = await self.client.is_subscribed_to_availability(station_id)
         self._details = details
-        self._notify = notify
+
+        async with self._notify_lock:
+            notify = dict(self._notify)
+            for station_id in self.station_ids:
+                notify[station_id] = await self.client.is_subscribed_to_availability(station_id)
+            self._notify = notify
+
         self._details_refreshed = now
 
     def _check_rate_limit(self, now: datetime) -> None:
@@ -240,19 +254,28 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         return [s for s in stations if s is not None]
 
     async def async_set_availability_subscription(self, station_id: int, subscribed: bool) -> None:
-        """Subscribe or unsubscribe this charger, then update the cache optimistically.
+        """Subscribe or unsubscribe this charger, then publish the confirmed result.
 
-        The client call happens first, so a `DriivzError` propagates to the caller (the
-        switch entity) before anything is touched. Only once it succeeds do we update the
-        cache and publish a fresh `MerData` via `async_set_updated_data`, so the toggle
-        does not visibly flick back to its old position while the follow-up refresh is
-        still in flight.
+        The client call happens first and is not retried or reverted here: if it raises
+        `DriivzError`, it propagates to the caller (the switch entity) before anything is
+        touched, so the cache and published data are left exactly as they were. Only once
+        the portal has confirmed the change do we update `self._notify` and publish a
+        fresh `MerData` via `async_set_updated_data`, so the switch reflects the confirmed
+        value immediately rather than waiting up to an hour for the next detail refresh.
+
+        Both the client call and the cache write happen under `_notify_lock`, the same
+        lock `_refresh_details` holds for its whole subscription fetch-and-commit loop.
+        That serializes the two writers completely: a toggle either finishes entirely
+        before a refresh's subscription loop starts, or waits for it to finish first, so
+        the refresh's trailing whole-dict assignment can never overwrite a toggle that
+        landed while the refresh was still fetching.
         """
-        if subscribed:
-            await self.client.subscribe_to_availability(station_id)
-        else:
-            await self.client.unsubscribe_from_availability(station_id)
-        self._notify[station_id] = subscribed
+        async with self._notify_lock:
+            if subscribed:
+                await self.client.subscribe_to_availability(station_id)
+            else:
+                await self.client.unsubscribe_from_availability(station_id)
+            self._notify[station_id] = subscribed
         if self.data is not None:
             notify = dict(self.data.notify_subscriptions)
             notify[station_id] = subscribed
