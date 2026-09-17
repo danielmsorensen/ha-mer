@@ -114,8 +114,21 @@ things:
   from setup, seeded with your current choices.
 
 Changing either setting reloads the integration so the new value takes
-effect immediately. If you remove a charger from the selection, its device
-and all of its entities are removed too.
+effect immediately.
+
+Deselecting a charger does **not** delete anything by itself. The
+integration stops polling it, but its device and all of its entities stay in
+Home Assistant's registries with their entities unavailable. To get rid of
+them, open the charger's own device page and use **Delete**; that is enabled
+only for chargers you have already deselected.
+
+Changing the **site** is messier, and worth knowing before you try it. A new
+site device is created for the new site, and the old site device is left
+behind orphaned — and unlike a charger, it cannot be deleted from its device
+page, because the integration only permits deleting charger devices. The
+config entry's title also keeps naming the old site. If you need to move to a
+different site, the clean way is to remove the integration entirely and add
+it again.
 
 If your Mer password changes and the integration can no longer log in, Home
 Assistant raises a repair/reauthentication prompt on the integration; follow
@@ -172,8 +185,10 @@ this integration tracks it. At the default 60-second interval it makes
 roughly two portal calls a minute while idle, and about four a minute while a
 session is active (the extra calls fetch the live session's duration and
 energy estimate). Every 15 minutes it also refreshes your wallet balance and
-last session, and once an hour it refreshes each charger's socket names and
-prices.
+last session, and once an hour it refreshes each charger's socket names,
+prices and notify-me subscription — one charger per poll cycle rather than
+all of them in the same one, so that the size of a cycle's burst doesn't grow
+with the number of chargers you selected.
 
 If the portal reports that its rate-limit budget is nearly exhausted, the
 integration deliberately skips the next poll cycle rather than pushing the
@@ -212,3 +227,7 @@ From then on:
 
 All three scripts shell out to `wsl.exe` under the hood, so they work from a
 normal Windows shell without you needing to open a WSL terminal yourself.
+That WSL hop is the only reason the wrappers exist, so they are a Windows
+convenience rather than a requirement: on Linux or macOS, create a virtualenv
+and `pip install -r requirements_test.txt` into it. Then run `pytest` and
+`ruff check .` / `ruff format .` directly — the wrappers do nothing else.

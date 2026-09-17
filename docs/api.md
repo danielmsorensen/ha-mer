@@ -56,9 +56,14 @@ which one each endpoint expects:
 - **Form** (`application/x-www-form-urlencoded`): most other facade calls.
 
 Every response carries `X-Rate-Limit-Remaining` (observed at 9 at rest,
-decrementing per burst of calls). Anonymous access works for public station
-data; a logged-in session is required for restricted chargers' tariffs,
-sessions, history, wallet, and starting or stopping a charge.
+decrementing per burst of calls). **The refill window was never measured.**
+Nothing in this repository establishes how long the budget takes to return to
+9, or whether it refills steadily or resets on a fixed boundary — only that it
+was seen at 9 while idle. Treat any sizing of the poll interval or of a
+per-cycle call budget against that number as an unverified assumption, not as
+a checked constraint. Anonymous access works for public station data; a
+logged-in session is required for restricted chargers' tariffs, sessions,
+history, wallet, and starting or stopping a charge.
 
 ## Endpoints used in v1
 
@@ -158,19 +163,17 @@ not implement them, and that omission is deliberate: it was checked against
 the actual set of endpoints the portal ships, not assumed.
 
 No `getStationCapabilitiesAndValidate` fixture lives in this repository, so
-this claim isn't reproducible from the test suite alone. The check itself —
-that `SET_CHARGE_CURRENT`, `CHARGE_FULL_SPEED`, `UNLOCK_SOCKET`, the charging
-profile operations and boost appear in the capabilities/permissions payload
-but have no matching endpoint in the portal's JavaScript — is recorded in
-this project's own implementation plan, in the task briefs for the
-notify-me-when-available feature
-(`.superpowers/sdd/2026-09-17-mer-ha-integration/task-9-brief.md` and
-`task-9a-brief.md`, both under "This is the only one of the extra portal
-capabilities that is reachable"). Anyone tempted to add a "set current" or
-"boost" service to this integration on the strength of the capability list
-should know up front that doing so means guessing at
-an unpublished operator-portal endpoint, not calling something the driver
-portal already exposes.
+this claim isn't reproducible from the test suite alone. The check behind it
+was this: the driver portal's own JavaScript bundles were searched for
+endpoints matching those operation names — `SET_CHARGE_CURRENT`,
+`CHARGE_FULL_SPEED`, `UNLOCK_SOCKET`, the charging-profile operations and
+boost — and none exists. The names appear only in the shared capabilities and
+permissions payload, which is the same payload the operator portal consumes,
+and there is no code in the driver portal that would call them. Anyone tempted
+to add a "set current" or "boost" service to this integration on the strength
+of the capability list should know up front that doing so means guessing at an
+unpublished operator-portal endpoint, not calling something the driver portal
+already exposes.
 
 ## Enumerations
 
