@@ -123,6 +123,21 @@ async def test_login_without_csrf_meta_is_connection_error(
         await client.login()
 
 
+async def test_login_rate_limited_is_rate_limit_error(
+    client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """A 429 on the login page's CSRF fetch is a rate limit, not a connection error.
+
+    `_send` already maps 429 to `RateLimitError`, which is what makes the coordinator skip
+    a cycle instead of retrying straight away. `_fetch_csrf` mapped every status >= 400 to
+    `DriivzConnectionError`, so the same 429 during a login lost that signal entirely.
+    """
+    aioclient_mock.get(LOGIN_URL, status=429)
+    with pytest.raises(RateLimitError):
+        await client.login()
+    assert client.logged_in is False
+
+
 async def test_request_returns_data_and_tracks_rate_limit(
     client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
 ) -> None:
@@ -177,12 +192,79 @@ async def test_request_gives_up_after_second_auth_failure(
         await client._request("POST", WALLET_PATH, data={})
 
 
-async def test_request_html_page_is_auth_error_when_not_logged_in(
+async def test_request_html_page_logs_in_then_gives_up(
     client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
 ) -> None:
+    """A login page is answered by logging in, whatever `_logged_in` currently says.
+
+    This used to assert the opposite -- that a client whose `_logged_in` was false raised
+    `AuthError` without even trying to log in. That is what made a transient re-login
+    failure latch: `login()` clears `_logged_in` on entry and only restores it on success,
+    so one failed re-login left every later request convinced the credentials were bad.
+    The login attempt is now unconditional, bounded by the `(0, 1)` retry loop instead, so
+    the page is retried once and only then gives up.
+    """
+    mock_login(aioclient_mock)
     aioclient_mock.post(WALLET_URL, text="<html>login</html>")
     with pytest.raises(AuthError):
         await client._request("POST", WALLET_PATH, data={})
+    assert len(_login_posts(aioclient_mock)) == 1
+
+
+async def test_request_html_page_propagates_bad_credentials(
+    client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """A genuinely wrong password still reaches the caller, via `login()`'s own AuthError."""
+    mock_login(aioclient_mock, success=False)
+    aioclient_mock.post(WALLET_URL, text="<html>login</html>")
+    with pytest.raises(AuthError) as excinfo:
+        await client._request("POST", WALLET_PATH, data={})
+    assert excinfo.value.error_type == "BAD_CREDENTIALS"
+
+
+async def test_transient_login_failure_does_not_latch(
+    client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """One failed re-login must not turn every later request into a false reauth demand.
+
+    The sequence that used to break: the session expires mid-poll, the facade answers with
+    the login page, the re-login's CSRF fetch hits a 500, and the cycle ends as a
+    connection error with `_logged_in` stuck at false. On the next cycle the stale cookie
+    produced another login page, `not self._logged_in` short-circuited the retry, and the
+    resulting `AuthError` became `ConfigEntryAuthFailed` -- Home Assistant told the user
+    their password no longer worked and stopped polling, with nothing wrong at all.
+    """
+    aioclient_mock.get(
+        LOGIN_URL,
+        side_effect=_responses_in_order(
+            {"status": 500},
+            {"text": load_fixture("login.html")},
+        ),
+    )
+    aioclient_mock.post(LOGIN_URL, json=load_json_fixture("login_success.json"))
+    aioclient_mock.get(MAP_URL, text=load_fixture("map.html"))
+    aioclient_mock.post(
+        WALLET_URL,
+        side_effect=_responses_in_order(
+            {"text": "<html>login</html>"},
+            {"text": "<html>login</html>"},
+            {"json": load_json_fixture("wallet.json")},
+        ),
+    )
+
+    # First cycle: login page -> re-login attempted -> CSRF fetch 500. That has to surface
+    # as the connection error it actually is, not as an auth failure.
+    with pytest.raises(DriivzConnectionError):
+        await client._request("POST", WALLET_PATH, data={})
+    assert client.logged_in is False
+    assert _login_posts(aioclient_mock) == []  # never got past the CSRF fetch
+
+    # Second cycle: the stale cookie still yields the login page, and the client must try
+    # to log in again rather than declaring the credentials bad.
+    data = await client._request("POST", WALLET_PATH, data={})
+    assert data["id"] == 228000
+    assert client.logged_in is True
+    assert len(_login_posts(aioclient_mock)) == 1
 
 
 async def test_request_429_is_rate_limit_error(

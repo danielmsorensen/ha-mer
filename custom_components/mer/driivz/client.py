@@ -145,6 +145,11 @@ class DriivzDriverClient:
         try:
             async with self._session.get(self._url(path), headers=self._headers()) as response:
                 self._track_rate_limit(response)
+                # Mirrors `_send`: a 429 here has to surface as RateLimitError too, or a
+                # rate-limited login would be reported as a connection error and the
+                # coordinator would keep hammering instead of skipping a cycle.
+                if response.status == 429:
+                    raise RateLimitError("Rate limited by portal")
                 if response.status >= 400:
                     raise DriivzConnectionError(f"HTTP {response.status} fetching {path}")
                 html = await response.text()
@@ -204,12 +209,22 @@ class DriivzDriverClient:
         data: Mapping[str, Any] | None = None,
         params: Mapping[str, str] | None = None,
     ) -> Any:
-        """Call a facade, unwrap the envelope, re-login once if the session expired."""
+        """Call a facade, unwrap the envelope, re-login once if the session expired.
+
+        The retry is deliberately not conditioned on `self._logged_in`. `login()` clears
+        that flag on entry and only restores it on success, so a transient failure during
+        a re-login (a 5xx or a network blip on the CSRF fetch) would otherwise latch it
+        off: the next request would see `not self._logged_in`, skip the login attempt, and
+        raise `AuthError` -- which Home Assistant turns into a reauth flow that tells the
+        user their password is wrong and stops polling. The `for attempt in (0, 1)` loop
+        already bounds this to one login attempt per request, and a genuinely wrong
+        password still propagates because `login()` itself raises `AuthError`.
+        """
         for attempt in (0, 1):
             try:
                 payload = await self._send(method, path, json=json, data=data, params=params)
             except AuthError:
-                if attempt == 1 or not self._logged_in:
+                if attempt == 1:
                     raise
                 _LOGGER.debug("Session rejected for %s, logging in again", path)
                 await self.login()
@@ -218,7 +233,7 @@ class DriivzDriverClient:
                 return payload.get("data")
             error_type = _error_type(payload) or "UNKNOWN_ERROR"
             if error_type in AUTH_ERROR_TYPES:
-                if attempt == 1 or not self._logged_in:
+                if attempt == 1:
                     raise AuthError(error_type)
                 await self.login()
                 continue
