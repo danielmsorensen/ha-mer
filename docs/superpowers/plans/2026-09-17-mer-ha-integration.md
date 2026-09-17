@@ -19,7 +19,12 @@
 - Nothing under `custom_components/mer/driivz/` may import `homeassistant`.
 - Polling default 60 s, options range 30–600. Wallet + history every 15 min. Station details every 60 min. Skip one cycle when `X-Rate-Limit-Remaining` ≤ 1.
 - Never run a real `start_charge`/`stop_charge` against the live portal during development without explicit user confirmation.
-- Home Assistant 2026.9.2 requires Python ≥ 3.14.2. All commands below run from the repo root `D:\GitHub\Personal\ha-mer` inside `.venv`.
+- Home Assistant core requires POSIX and cannot be imported on native Windows Python (`fcntl`).
+  All local tests and linting therefore run inside WSL2 Ubuntu 26.04 (Python 3.14.4) through the
+  repo wrappers `scripts/test`, `scripts/lint` and `scripts/format`, invoked from the repo root
+  `D:\GitHub\Personal\ha-mer` in Git Bash. The WSL virtualenv lives at `~/.venvs/ha-mer`
+  (outside the NTFS mount); `scripts/bootstrap-dev` documents how it is created without sudo.
+  Never add a Windows `fcntl` shim, and never run `pytest` directly on Windows Python.
 - Commit after every task with a conventional-commit message ending in `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - Test data in `tests/fixtures/` is sanitised: customer id `123456`, member id `123123`, account number `1123456`, wallet id `228000`, no emails/addresses.
 
@@ -57,11 +62,13 @@
 **Interfaces:**
 - Produces: `custom_components.mer.const.DOMAIN == "mer"`; `tests.helpers.load_fixture(name) -> str`, `tests.helpers.load_json_fixture(name) -> dict`.
 
-- [ ] **Step 1: Create the virtualenv and install test dependencies**
+- [ ] **Step 1: Create the WSL dev environment and the wrapper scripts**
 
-```bash
-python -m venv .venv && .venv/Scripts/python -m pip install -U pip
-```
+Home Assistant cannot be imported on native Windows Python (`homeassistant.runner` imports the
+POSIX-only `fcntl`), so the local test environment lives in WSL2 Ubuntu 26.04 (Python 3.14.4).
+That distro has no `pip`, no `ensurepip` and no passwordless `sudo`, so pip is bootstrapped from a
+PyPI wheel fetched with Windows pip. This has already been done and verified once on this machine;
+`scripts/bootstrap-dev` records the procedure so it is reproducible.
 
 Create `requirements_test.txt`:
 
@@ -71,12 +78,30 @@ aioresponses==0.7.9
 ruff==0.14.0
 ```
 
+Create four executable scripts in `scripts/`. Each of `test`, `lint` and `format` derives the repo
+root from its own location, converts the Git Bash path (`/d/...`) to a WSL path (`/mnt/d/...`) with
+`sed -E 's#^/([a-zA-Z])/#/mnt//#'`, and execs the WSL venv's tool via
+`wsl.exe -d "$DISTRO" -- bash -lc "cd '<repo_wsl>' && \"\$HOME/.venvs/ha-mer/bin/<tool>\" ..."`:
+
+- `scripts/test` — passes its arguments through to `pytest`.
+- `scripts/lint` — read-only: `ruff check .` then `ruff format --check .`.
+- `scripts/format` — `ruff format .`.
+- `scripts/bootstrap-dev` — creates `~/.venvs/ha-mer` with `python3 -m venv --without-pip`, fetches
+  a pip wheel with Windows `python -m pip download pip --no-deps -d <tmp>`, bootstraps it with
+  `python3 <wheel>/pip --python ~/.venvs/ha-mer/bin/python install pip setuptools wheel` (the
+  `--python` flag must precede the `install` subcommand), then installs `requirements_test.txt` and
+  prints the Home Assistant version.
+
+Honour `HA_MER_VENV` (default `$HOME/.venvs/ha-mer`) and `HA_MER_WSL_DISTRO` (default `Ubuntu`).
+
+Verify:
+
 ```bash
-.venv/Scripts/python -m pip install -r requirements_test.txt
-.venv/Scripts/python -c "import homeassistant.const as c; print(c.__version__)"
+scripts/bootstrap-dev
 ```
 
-Expected: prints `2026.9.2` (or the version pinned by pytest-homeassistant-custom-component 0.13.365; if it differs, keep that version and update `hacs.json` below to match).
+Expected: ends by printing Home Assistant `2026.9.2`. If the pin resolves to a different version,
+keep it and set `hacs.json`'s `homeassistant` key to that minor line.
 
 - [ ] **Step 2: Write `pyproject.toml`**
 
@@ -256,8 +281,8 @@ def test_manifest_matches_domain() -> None:
 
 - [ ] **Step 6: Run tests and ruff**
 
-Run: `.venv/Scripts/python -m pytest -q` → Expected: `1 passed`.
-Run: `.venv/Scripts/ruff check . && .venv/Scripts/ruff format --check .` → Expected: no errors (run `ruff format .` first if needed).
+Run: `scripts/test -q` → Expected: `1 passed`.
+Run: `scripts/lint` → Expected: no errors (run `scripts/format` first if needed).
 
 - [ ] **Step 7: Add CI workflow**
 
@@ -754,7 +779,7 @@ def test_socket_from_dict_minimal() -> None:
 
 - [ ] **Step 5: Run tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/driivz/test_models.py -q`
+Run: `scripts/test tests/driivz/test_models.py -q`
 Expected: FAIL with `ModuleNotFoundError: No module named 'custom_components.mer.driivz.models'`.
 
 - [ ] **Step 6: Write `driivz/models.py`**
@@ -1113,13 +1138,13 @@ class SessionEstimate:
 
 - [ ] **Step 7: Run tests to verify they pass**
 
-Run: `.venv/Scripts/python -m pytest tests/driivz/test_models.py -q`
+Run: `scripts/test tests/driivz/test_models.py -q`
 Expected: all PASS. If `ms_to_datetime(1789554866000)` differs by the local timezone, the implementation is wrong: it must pass `tz=UTC`.
 
 - [ ] **Step 8: Lint and commit**
 
 ```bash
-.venv/Scripts/ruff format . && .venv/Scripts/ruff check .
+scripts/format && scripts/lint
 git add -A
 git commit -m "feat(driivz): add constants, exceptions, models and sanitised fixtures
 
@@ -1329,7 +1354,7 @@ def test_form_stringifies_values() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/driivz/test_client_core.py -q`
+Run: `scripts/test tests/driivz/test_client_core.py -q`
 Expected: FAIL with `ModuleNotFoundError: No module named 'custom_components.mer.driivz.client'`.
 
 - [ ] **Step 3: Write `driivz/client.py` (core part)**
@@ -1558,7 +1583,7 @@ class DriivzDriverClient:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `.venv/Scripts/python -m pytest tests/driivz/test_client_core.py -q`
+Run: `scripts/test tests/driivz/test_client_core.py -q`
 Expected: 13 passed.
 
 Pitfall: aioresponses matches the exact URL; `params` must be `None` (not `{}`) when unused, otherwise aiohttp appends `?` and the mock misses.
@@ -1566,7 +1591,7 @@ Pitfall: aioresponses matches the exact URL; `params` must be `None` (not `{}`) 
 - [ ] **Step 5: Lint and commit**
 
 ```bash
-.venv/Scripts/ruff format . && .venv/Scripts/ruff check .
+scripts/format && scripts/lint
 git add -A
 git commit -m "feat(driivz): client login, CSRF handling and request envelope with re-login
 
@@ -1805,7 +1830,7 @@ async def test_find_transactions_sorted_newest_first(client: DriivzDriverClient)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/driivz/test_client_methods.py -q`
+Run: `scripts/test tests/driivz/test_client_methods.py -q`
 Expected: FAIL with `AttributeError: 'DriivzDriverClient' object has no attribute 'find_sites_in_bounds'` (and similar).
 
 - [ ] **Step 3: Add imports and methods to `driivz/client.py`**
@@ -1963,13 +1988,13 @@ Append these methods to the class (after `login`):
 
 - [ ] **Step 4: Run all client tests**
 
-Run: `.venv/Scripts/python -m pytest tests/driivz -q`
+Run: `scripts/test tests/driivz -q`
 Expected: all pass (models 13, core 13, methods 15).
 
 - [ ] **Step 5: Lint and commit**
 
 ```bash
-.venv/Scripts/ruff format . && .venv/Scripts/ruff check .
+scripts/format && scripts/lint
 git add -A
 git commit -m "feat(driivz): typed station, session, command, wallet and history methods
 
@@ -2388,7 +2413,7 @@ async def test_get_station_merges_detail_and_live(
 
 - [ ] **Step 3: Run tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_init.py tests/test_coordinator.py -q`
+Run: `scripts/test tests/test_init.py tests/test_coordinator.py -q`
 Expected: FAIL with `ImportError` (no `api`/`coordinator` module, no `async_remove_config_entry_device`).
 
 - [ ] **Step 4: Write `api.py`**
@@ -2711,7 +2736,7 @@ The device-registry test (`test_devices_created_and_stale_station_removable`) ne
 
 - [ ] **Step 8: Run tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_init.py tests/test_coordinator.py -q`
+Run: `scripts/test tests/test_init.py tests/test_coordinator.py -q`
 Expected: all pass except the xfail. If `freezer` is missing, install `pytest-freezer` (it ships with pytest-homeassistant-custom-component; check `pip show pytest-freezer`).
 
 Pitfalls:
@@ -2721,7 +2746,7 @@ Pitfalls:
 - [ ] **Step 9: Lint and commit**
 
 ```bash
-.venv/Scripts/ruff format . && .venv/Scripts/ruff check .
+scripts/format && scripts/lint
 git add -A
 git commit -m "feat: coordinator, client factory and config entry setup
 
@@ -2932,7 +2957,7 @@ async def test_options_change_stations(
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_config_flow.py -q`
+Run: `scripts/test tests/test_config_flow.py -q`
 Expected: FAIL (`UnknownHandler` / no config flow registered).
 
 - [ ] **Step 3: Write `config_flow.py`**
@@ -3398,7 +3423,7 @@ Create `custom_components/mer/translations/en.json` as an exact copy (`cp custom
 
 - [ ] **Step 5: Run tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_config_flow.py -q`
+Run: `scripts/test tests/test_config_flow.py -q`
 Expected: 7 passed.
 
 Pitfalls:
@@ -3410,7 +3435,7 @@ Pitfalls:
 - [ ] **Step 6: Lint and commit**
 
 ```bash
-.venv/Scripts/ruff format . && .venv/Scripts/ruff check .
+scripts/format && scripts/lint
 git add -A
 git commit -m "feat: config flow with site search, charger selection, reauth and options
 
@@ -3547,7 +3572,7 @@ def test_socket_label_fallbacks() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_sensor.py -q`
+Run: `scripts/test tests/test_sensor.py -q`
 Expected: FAIL (`no sensor entity with unique_id ...`, `ImportError` for `entity`).
 
 - [ ] **Step 3: Write `entity.py`**
@@ -3875,7 +3900,7 @@ Remove the `xfail` marker from `test_devices_created_and_stale_station_removable
 
 - [ ] **Step 6: Run tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_sensor.py tests/test_init.py -q`
+Run: `scripts/test tests/test_sensor.py tests/test_init.py -q`
 Expected: all pass.
 
 Pitfall: entity names in state objects are `"<device name> <translated name>"`. If `state.name` lacks the translated part, the `translations/en.json` copy is missing or out of sync with `strings.json`.
@@ -3883,7 +3908,7 @@ Pitfall: entity names in state objects are `"<device name> <translated name>"`. 
 - [ ] **Step 7: Lint and commit**
 
 ```bash
-.venv/Scripts/ruff format . && .venv/Scripts/ruff check .
+scripts/format && scripts/lint
 git add -A
 git commit -m "feat: station and socket sensors with device hierarchy
 
@@ -3979,7 +4004,7 @@ async def test_site_count_sensors(
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_binary_sensor.py tests/test_sensor.py -q`
+Run: `scripts/test tests/test_binary_sensor.py tests/test_sensor.py -q`
 Expected: FAIL (`no binary_sensor entity with unique_id ...`, `no sensor entity ... _site_available_sockets`).
 
 - [ ] **Step 3: Write `binary_sensor.py`**
@@ -4174,13 +4199,13 @@ and a new `entity.binary_sensor` block:
 
 - [ ] **Step 6: Run tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_binary_sensor.py tests/test_sensor.py -q`
+Run: `scripts/test tests/test_binary_sensor.py tests/test_sensor.py -q`
 Expected: all pass.
 
 - [ ] **Step 7: Lint and commit**
 
 ```bash
-.venv/Scripts/ruff format . && .venv/Scripts/ruff check .
+scripts/format && scripts/lint
 git add -A
 git commit -m "feat: socket availability, site aggregates and charging binary sensors
 
@@ -4299,7 +4324,7 @@ async def test_stop_charge_without_session_raises(
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_button.py -q`
+Run: `scripts/test tests/test_button.py -q`
 Expected: FAIL (`assert entity_id is not None`).
 
 - [ ] **Step 3: Write `button.py`**
@@ -4394,13 +4419,13 @@ Add to `entity` in `strings.json` / `translations/en.json`:
 
 - [ ] **Step 5: Run tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_button.py -q`
+Run: `scripts/test tests/test_button.py -q`
 Expected: 4 passed.
 
 - [ ] **Step 6: Lint and commit**
 
 ```bash
-.venv/Scripts/ruff format . && .venv/Scripts/ruff check .
+scripts/format && scripts/lint
 git add -A
 git commit -m "feat: start and stop charge buttons
 
@@ -4467,7 +4492,7 @@ async def test_account_sensors_charging(
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_sensor.py -q -k account`
+Run: `scripts/test tests/test_sensor.py -q -k account`
 Expected: FAIL (`no sensor entity with unique_id ..._account_active_station`).
 
 - [ ] **Step 3: Add account sensors to `sensor.py`**
@@ -4627,7 +4652,7 @@ Add to `entity.sensor` in both JSON files:
 
 - [ ] **Step 5: Run the whole suite**
 
-Run: `.venv/Scripts/python -m pytest -q`
+Run: `scripts/test -q`
 Expected: all pass.
 
 Pitfall: HA rejects a `MONETARY` sensor whose unit is `None`; `_currency` always returns a code, so a wallet-less first cycle still works.
@@ -4635,7 +4660,7 @@ Pitfall: HA rejects a `MONETARY` sensor whose unit is `None`; `_currency` always
 - [ ] **Step 6: Lint and commit**
 
 ```bash
-.venv/Scripts/ruff format . && .venv/Scripts/ruff check .
+scripts/format && scripts/lint
 git add -A
 git commit -m "feat: active session, last session and wallet sensors
 
@@ -4692,7 +4717,7 @@ async def test_diagnostics_redacts_secrets(
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_diagnostics.py -q`
+Run: `scripts/test tests/test_diagnostics.py -q`
 Expected: FAIL with `ModuleNotFoundError`.
 
 - [ ] **Step 3: Write `diagnostics.py`**
@@ -4769,10 +4794,10 @@ async def async_get_config_entry_diagnostics(
 
 - [ ] **Step 4: Run test, lint, commit**
 
-Run: `.venv/Scripts/python -m pytest tests/test_diagnostics.py -q` → 1 passed.
+Run: `scripts/test tests/test_diagnostics.py -q` → 1 passed.
 
 ```bash
-.venv/Scripts/ruff format . && .venv/Scripts/ruff check .
+scripts/format && scripts/lint
 git add -A
 git commit -m "feat: redacted config entry diagnostics
 
