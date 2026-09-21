@@ -1,0 +1,23 @@
+# Minimal Home Assistant configuration for scripts/dev-hass.
+#
+# Deliberately not `default_config:`, which would pip-install dozens of
+# unrelated integrations into the test virtualenv. `frontend:` and `config:`
+# are what you need to reach Settings -> Devices & services and add the
+# integration; `history:` and `logbook:` let you watch entity state over time.
+homeassistant:
+  name: Mer dev
+  unit_system: metric
+  time_zone: Europe/London
+  currency: GBP
+  country: GB
+
+frontend:
+config:
+http:
+history:
+logbook:
+
+logger:
+  default: warning
+  logs:
+    custom_components.mer: debug
