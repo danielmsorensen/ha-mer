@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
-# Run a throwaway Home Assistant instance in WSL that loads this repo's
-# integration directly, for manual testing at http://localhost:8123.
+# Run, or stop, a throwaway Home Assistant instance in WSL that loads this
+# repo's integration directly, for manual testing at http://localhost:8123.
 #
 # Home Assistant core cannot run on native Windows Python, so like the
 # other wrappers this executes inside WSL using the venv that
-# scripts/bootstrap-dev created. The config directory lives in the WSL
-# home (default ~/ha-mer-dev) and is safe to delete at any time; it holds
-# only the test instance's own state, never anything from your live HA.
-# Its configuration.yaml is copied from scripts/dev-configuration.yaml on
-# first run.
+# scripts/bootstrap-dev created. All the real work happens in
+# scripts/dev-hass.wsl, which runs inside the distro; this file only
+# translates the repo path and forwards arguments, so nothing here has to
+# survive wsl.exe's argument quoting.
 #
-# First run installs the frontend and a few integration requirements via
-# pip, which takes a minute or two. Onboarding then asks you to create a
-# local user. After that: Settings -> Devices & services -> Add
-# integration -> "Mer EV Charging".
+# The config directory lives in the WSL home (default ~/ha-mer-dev) and is
+# safe to delete at any time; it holds only the test instance's own state,
+# never anything from your live HA. Its configuration.yaml is copied from
+# scripts/dev-configuration.yaml on first run.
 #
-# Only one instance can run per config directory: Home Assistant holds a
-# file lock on .ha_run.lock while it runs and refuses to start while another
-# process holds it. A leftover lock file from an interrupted run is harmless,
-# because the lock itself dies with the process.
+#   scripts/dev-hass                 start (Ctrl+C to stop)
+#   scripts/dev-hass --open          start and open the UI in your browser once it answers
+#   scripts/dev-hass --reset         wipe the config dir first, then start
+#   scripts/dev-hass --stop          stop the running instance, if any
 #
-#   scripts/dev-hass            start (Ctrl+C to stop)
-#   scripts/dev-hass --reset    wipe the config dir first, then start
+# Starting while an instance is already running is not an error: the launcher
+# reports the running instance and exits, so the VS Code "start + debug"
+# configuration simply attaches to it.
 #
 # Environment overrides, matching the other scripts:
 #   HA_MER_WSL_DISTRO  WSL distro name        (default: Ubuntu)
-#   HA_MER_VENV        venv path inside WSL   (default: $HOME/.venvs/ha-mer)
-#   HA_MER_DEV_CONFIG  config dir inside WSL  (default: $HOME/ha-mer-dev)
+#   HA_MER_VENV        venv path inside WSL   (default: ~/.venvs/ha-mer)
+#   HA_MER_DEV_CONFIG  config dir inside WSL  (default: ~/ha-mer-dev)
 set -euo pipefail
 
 # Prevent Git Bash/MSYS from rewriting POSIX-looking arguments into Windows paths.
@@ -35,27 +35,19 @@ export MSYS_NO_PATHCONV=1
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 repo_root_wsl="$(printf '%s' "$repo_root" | sed -E 's#^/([a-zA-Z])/#/mnt/\1/#')"
-
 distro="${HA_MER_WSL_DISTRO:-Ubuntu}"
-venv="${HA_MER_VENV:-\$HOME/.venvs/ha-mer}"
-cfg="${HA_MER_DEV_CONFIG:-\$HOME/ha-mer-dev}"
 
-reset_cmd="true"
+mode="start"
+flags=()
 for arg in "$@"; do
   case "$arg" in
-    --reset) reset_cmd="rm -rf \"$cfg\"" ;;
+    --stop)  mode="stop" ;;
+    --reset|--open) flags+=("$arg") ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
 
-component="$repo_root_wsl/custom_components/mer"
-template="$repo_root_wsl/scripts/dev-configuration.yaml"
-
-# The notices go to stderr, like Home Assistant's own log lines. When both
-# streams are captured together, stdout written just before exec can be lost
-# on the way out of WSL; stderr is not.
-notice="echo \"Home Assistant dev instance -> http://localhost:8123  (config: $cfg)\" >&2; echo \"Two lines saying Setup failed for assist_pipeline / assist_satellite are expected here; see README (Development).\" >&2"
-
-# PYDEVD_DISABLE_FILE_VALIDATION silences debugpy's four-line warning about
-# frozen modules, which does not apply to breakpoints in an integration.
-exec wsl.exe -d "$distro" -- bash -lc "$reset_cmd && mkdir -p \"$cfg/custom_components\" && ln -sfn '$component' \"$cfg/custom_components/mer\" && { [ -f \"$cfg/configuration.yaml\" ] || cp '$template' \"$cfg/configuration.yaml\"; } && $notice && PYDEVD_DISABLE_FILE_VALIDATION=1 exec \"$venv/bin/hass\" -c \"$cfg\""
+# Empty strings tell the WSL side to use its own defaults under $HOME there;
+# Windows-side environment variables are not visible inside the distro.
+exec wsl.exe -d "$distro" -- bash -l "$repo_root_wsl/scripts/dev-hass.wsl" "$mode" "${flags[@]}" \
+  "$repo_root_wsl" "${HA_MER_DEV_CONFIG:-}" "${HA_MER_VENV:-}"

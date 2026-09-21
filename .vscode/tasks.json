@@ -19,22 +19,23 @@
   "tasks": [
     {
       "label": "HA: start dev instance",
-      "detail": "Throwaway Home Assistant at http://localhost:8123 loading this checkout. Ctrl+C in the terminal stops it.",
+      "detail": "Throwaway Home Assistant at http://localhost:8123 loading this checkout; opens the UI when ready. Also the preLaunchTask of the F5 configuration.",
       "type": "shell",
-      "command": "scripts/dev-hass",
+      "command": "scripts/dev-hass --open",
       "isBackground": true,
       // A background task needs a matcher that tells VS Code when the
-      // instance is up, otherwise it spins forever and warns. Nothing here
-      // is reported as a problem; the pattern never matches. The instance
-      // counts as ready when Home Assistant reports its debugger listening,
-      // which happens once the core has started.
+      // instance is up, otherwise it spins forever and warns, and the F5
+      // configuration would attach too early. Nothing here is reported as a
+      // problem; the pattern never matches. The instance counts as ready
+      // when Home Assistant reports its debugger listening, or when the
+      // launcher reports that an instance is already running.
       "problemMatcher": {
         "owner": "ha-mer-dev",
         "pattern": { "regexp": "__never_matches__", "file": 1, "location": 2, "message": 3 },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": "Home Assistant dev instance ->",
-          "endsPattern": "Listening for remote debug connection"
+          "beginsPattern": "Home Assistant dev instance",
+          "endsPattern": "Listening for remote debug connection|dev instance already running"
         }
       },
       "group": { "kind": "build", "isDefault": true },
@@ -44,18 +45,26 @@
       "label": "HA: reset and start dev instance",
       "detail": "Wipe the dev instance's config (users, entries, history) and start fresh.",
       "type": "shell",
-      "command": "scripts/dev-hass --reset",
+      "command": "scripts/dev-hass --reset --open",
       "isBackground": true,
       "problemMatcher": {
         "owner": "ha-mer-dev",
         "pattern": { "regexp": "__never_matches__", "file": 1, "location": 2, "message": 3 },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": "Home Assistant dev instance ->",
-          "endsPattern": "Listening for remote debug connection"
+          "beginsPattern": "Home Assistant dev instance",
+          "endsPattern": "Listening for remote debug connection|dev instance already running"
         }
       },
       "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "HA: stop dev instance",
+      "detail": "Stop the running dev instance. Also the postDebugTask of the F5 configuration, so the Stop button shuts Home Assistant down.",
+      "type": "shell",
+      "command": "scripts/dev-hass --stop",
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared", "clear": false }
     },
     {
       "label": "Test",

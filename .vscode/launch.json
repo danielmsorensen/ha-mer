@@ -1,10 +1,16 @@
 {
-  // Attach the Python debugger to the running dev instance.
+  // Two ways to debug the integration in the throwaway dev instance.
   //
-  // 1. Start it with the "HA: start dev instance" task (Ctrl+Shift+B).
-  // 2. Wait for the log line saying debugpy is listening on port 5678
-  //    (the dev configuration enables Home Assistant's debugpy integration).
-  // 3. Press F5. Breakpoints in custom_components/mer/ then bind.
+  // "Dev Home Assistant (start, open, debug)" is the one-button flow: F5
+  // starts the instance (the preLaunchTask), waits until Home Assistant
+  // reports its debugger listening, attaches, and opens the UI in your
+  // browser. The Stop button ends the session and the postDebugTask shuts
+  // the instance down. Home Assistant's own file lock and the task's
+  // instance limit mean only one copy can run; if one is already running,
+  // the launcher reports it and F5 simply attaches to it.
+  //
+  // "Attach to dev Home Assistant" attaches to an instance you started some
+  // other way, and leaves it running when you disconnect.
   //
   // Home Assistant runs inside WSL and reaches this checkout through a
   // symlink in its config directory, so the debugger needs to know how the
@@ -13,6 +19,25 @@
   // or HA_MER_DEV_CONFIG differ, adjust the first remoteRoot to match.
   "version": "0.2.0",
   "configurations": [
+    {
+      "name": "Dev Home Assistant (start, open, debug)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": { "host": "localhost", "port": 5678 },
+      "justMyCode": false,
+      "preLaunchTask": "HA: start dev instance",
+      "postDebugTask": "HA: stop dev instance",
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}/custom_components",
+          "remoteRoot": "/home/danielsorensen/ha-mer-dev/custom_components"
+        },
+        {
+          "localRoot": "${workspaceFolder}",
+          "remoteRoot": "/mnt/d/GitHub/Personal/ha-mer"
+        }
+      ]
+    },
     {
       "name": "Attach to dev Home Assistant",
       "type": "debugpy",

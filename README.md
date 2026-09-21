@@ -253,15 +253,23 @@ From then on:
 **From VS Code**, the repository ships tasks and a debug configuration in
 `.vscode/`, so none of this needs a terminal:
 
-- **Ctrl+Shift+B** runs the default build task, "HA: start dev instance". The
-  other tasks (reset, test, test current file, lint, format) are under
-  *Terminal → Run Task*.
-- **F5** attaches the Python debugger to the running dev instance. The dev
-  configuration enables Home Assistant's built-in `debugpy` integration on
-  port 5678, and `launch.json` maps this checkout's files to the paths the
-  WSL process sees, so breakpoints in `custom_components/mer/` bind. Start the
-  instance first, then attach; if your WSL username or config directory
-  differ from the defaults, adjust the first `remoteRoot` in `launch.json`.
+- **F5** on "Dev Home Assistant (start, open, debug)" is the one-button flow,
+  like an IDE run configuration: it starts the dev instance, waits until Home
+  Assistant reports its debugger listening, attaches the Python debugger,
+  and opens the UI in your browser. The **Stop** button ends the session and
+  shuts the instance down. Only one instance can run at a time; if one is
+  already up, F5 attaches to it instead of starting another.
+- **Ctrl+Shift+B** runs the default build task, "HA: start dev instance",
+  without the debugger, and opens the UI when it is ready. "HA: stop dev
+  instance" and the other tasks (reset, test, test current file, lint,
+  format) are under *Terminal → Run Task*.
+- "Attach to dev Home Assistant" attaches to an instance started any other
+  way and leaves it running when you disconnect.
+- The dev configuration enables Home Assistant's built-in `debugpy`
+  integration on port 5678, and `launch.json` maps this checkout's files to
+  the paths the WSL process sees, so breakpoints in `custom_components/mer/`
+  bind. If your WSL username or config directory differ from the defaults,
+  adjust the first `remoteRoot` in `launch.json`.
 - The recommended extensions (Python, Python Debugger, Ruff, YAML) are listed
   in `.vscode/extensions.json`; VS Code offers to install them when you open
   the folder.

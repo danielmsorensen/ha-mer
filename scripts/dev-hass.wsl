@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# WSL-side half of scripts/dev-hass. Runs inside the Ubuntu distro; the Windows
+# launcher only forwards arguments here so no command has to survive wsl.exe's
+# quoting. Not meant to be run from Windows directly.
+#
+#   dev-hass.wsl start [--reset] [--open]  REPO_WSL_PATH [CFG_DIR] [VENV_DIR]
+#   dev-hass.wsl stop                      REPO_WSL_PATH [CFG_DIR] [VENV_DIR]
+#
+# CFG_DIR defaults to ~/ha-mer-dev and VENV_DIR to ~/.venvs/ha-mer.
+set -euo pipefail
+
+mode="${1:-}"; shift || true
+reset=0; open=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --reset) reset=1 ;;
+    --open)  open=1 ;;
+    --*)     echo "dev-hass.wsl: unknown flag $1" >&2; exit 2 ;;
+    *)       break ;;
+  esac
+  shift
+done
+repo="${1:?repo path required}"
+cfg="${2:-$HOME/ha-mer-dev}"
+venv="${3:-$HOME/.venvs/ha-mer}"
+lock="$cfg/.ha_run.lock"
+url="http://localhost:8123"
+
+# Home Assistant holds an fcntl lock on .ha_run.lock while it runs and writes
+# its pid into the file. The file outliving the process is harmless; what
+# matters is whether that pid is a live hass. This reads it defensively.
+running_pid() {
+  [ -f "$lock" ] || return 1
+  local pid cmd
+  pid="$("$venv/bin/python" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$lock" 2>/dev/null || true)"
+  [ -n "$pid" ] && [ -d "/proc/$pid" ] || return 1
+  cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+  case "$cmd" in *"/bin/hass -c"*) echo "$pid"; return 0 ;; esac
+  return 1
+}
+
+open_when_ready() {
+  # Runs in the background and survives the exec below. Polls the UI port,
+  # then asks Windows to open the default browser through WSL interop.
+  (
+    for _ in $(seq 1 90); do
+      if curl -s -o /dev/null "$url/" 2>/dev/null; then
+        echo "dev-hass: opening $url in your browser" >&2
+        (cd /mnt/c && /mnt/c/Windows/System32/cmd.exe /c start "" "$url" >/dev/null 2>&1) || true
+        exit 0
+      fi
+      sleep 2
+    done
+  ) &
+}
+
+case "$mode" in
+  start)
+    if pid="$(running_pid)"; then
+      # Phrase chosen so the VS Code task's readiness matcher also accepts it.
+      echo "Home Assistant dev instance already running (pid $pid) -> $url" >&2
+      [ $open -eq 1 ] && (cd /mnt/c && /mnt/c/Windows/System32/cmd.exe /c start "" "$url" >/dev/null 2>&1) || true
+      exit 0
+    fi
+    [ $reset -eq 1 ] && rm -rf "$cfg"
+    mkdir -p "$cfg/custom_components"
+    ln -sfn "$repo/custom_components/mer" "$cfg/custom_components/mer"
+    [ -f "$cfg/configuration.yaml" ] || cp "$repo/scripts/dev-configuration.yaml" "$cfg/configuration.yaml"
+    # Notices go to stderr like Home Assistant's own log lines; stdout written
+    # just before exec can be lost when both streams are captured together.
+    echo "Home Assistant dev instance -> $url  (config: $cfg)" >&2
+    echo "Two lines saying Setup failed for assist_pipeline / assist_satellite are expected here; see README (Development)." >&2
+    [ $open -eq 1 ] && open_when_ready
+    # PYDEVD_DISABLE_FILE_VALIDATION silences debugpy's frozen-modules warning,
+    # which does not apply to breakpoints in an integration.
+    PYDEVD_DISABLE_FILE_VALIDATION=1 exec "$venv/bin/hass" -c "$cfg"
+    ;;
+  stop)
+    if pid="$(running_pid)"; then
+      kill "$pid"
+      for i in $(seq 1 20); do [ -d "/proc/$pid" ] || break; sleep 1; done
+      if [ -d "/proc/$pid" ]; then kill -9 "$pid"; echo "dev-hass: forced stop of pid $pid" >&2
+      else echo "dev-hass: stopped Home Assistant (pid $pid)" >&2; fi
+    else
+      echo "dev-hass: no dev instance is running" >&2
+    fi
+    ;;
+  *)
+    echo "dev-hass.wsl: mode must be start or stop" >&2; exit 2 ;;
+esac
