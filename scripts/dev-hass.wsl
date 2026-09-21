@@ -92,9 +92,9 @@ case "$mode" in
     # Notices go to stderr like Home Assistant's own log lines; stdout written
     # just before exec can be lost when both streams are captured together.
     echo "Home Assistant dev instance -> $url  (config: $cfg)" >&2
-    if ! command -v cc >/dev/null 2>&1; then
-      echo "dev-hass: WARNING: no C compiler in WSL. Two of Home Assistant's default requirements cannot be built," >&2
-      echo "dev-hass:          so the UI's action list fails to load. Fix once:  wsl -d Ubuntu -- sudo apt install -y build-essential" >&2
+    if ! command -v cc >/dev/null 2>&1 || ! "$venv/bin/python" -c 'import sysconfig,os,sys; sys.exit(0 if os.path.exists(os.path.join(sysconfig.get_path("include"), "Python.h")) else 1)'; then
+      echo "dev-hass: WARNING: no C compiler or Python headers in WSL. Two of Home Assistant's default requirements cannot be built," >&2
+      echo "dev-hass:          so the UI's action list fails to load. Fix once:  wsl -d Ubuntu -- sudo apt install -y build-essential python3-dev" >&2
     fi
     [ $open -eq 1 ] && open_when_ready
     # PYDEVD_DISABLE_FILE_VALIDATION silences debugpy's frozen-modules warning,

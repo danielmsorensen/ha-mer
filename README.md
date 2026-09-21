@@ -231,23 +231,25 @@ From then on:
   `scripts/dev-hass --reset` wipes it and starts fresh. The first launch
   installs the frontend, which takes a minute or two.
 
-  **A C compiler is required in WSL.** Home Assistant always loads a handful
-  of default integrations, and two of those pull in voice-assistant packages
-  (`pymicro-vad`, `pyspeex-noise`) that have no prebuilt wheel for this
-  Python and must be compiled. Without a compiler every boot logs `Setup
-  failed for 'assist_pipeline'` and `Setup failed for 'assist_satellite'`,
+  **A C compiler and the Python headers are required in WSL.** Home
+  Assistant always loads a handful of default integrations, and two of those
+  pull in voice-assistant packages (`pymicro-vad`, `pyspeex-noise`) that have
+  no prebuilt wheel for this Python and must be compiled. Without them every
+  boot logs `Setup failed for 'assist_pipeline'` and `Setup failed for
+  'assist_satellite'`,
   and, worse, the frontend's request for the list of actions fails with
   `ModuleNotFoundError: No module named 'pymicro_vad'`, so parts of the UI
-  never finish loading. `scripts/bootstrap-dev` warns when the compiler is
-  missing. Install it once (it needs your WSL password, so run it yourself):
+  never finish loading. `scripts/bootstrap-dev` warns when they are missing.
+  Install them once (it needs your WSL password, so run it yourself):
 
   ```bash
-  wsl -d Ubuntu -- sudo apt install -y build-essential
+  wsl -d Ubuntu -- sudo apt update
+  wsl -d Ubuntu -- sudo apt install -y build-essential python3-dev
   ```
 
   Then restart the dev instance; Home Assistant builds the two packages on
   that boot, which takes a minute or two. Re-running `scripts/bootstrap-dev`
-  after installing the compiler builds them ahead of time instead.
+  after installing them builds the packages ahead of time instead.
 
   **One instance at a time.** Home Assistant holds a file lock on
   `.ha_run.lock` while it runs. Starting a second copy against the same

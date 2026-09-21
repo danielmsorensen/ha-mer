@@ -29,7 +29,7 @@ logger:
     # homeassistant.setup is deliberately left alone: it is what reports a
     # failure in *our* setup. Note that the compiler is not optional: without
     # it the frontend's request for the action list fails (see README,
-    # "A C compiler is required in WSL").
+    # "A C compiler and the Python headers are required in WSL").
     homeassistant.util.package: critical
     haffmpeg: critical
     homeassistant.components.camera.img_util: critical

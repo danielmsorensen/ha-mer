@@ -6,12 +6,16 @@
 set -euo pipefail
 venv="${1:?venv path required}"
 
-if ! command -v cc >/dev/null 2>&1; then
+have_headers() {
+  "$venv/bin/python" -c 'import sysconfig,os,sys; sys.exit(0 if os.path.exists(os.path.join(sysconfig.get_path("include"), "Python.h")) else 1)'
+}
+if ! command -v cc >/dev/null 2>&1 || ! have_headers; then
   echo >&2
-  echo "bootstrap-dev: WARNING: no C compiler in WSL. The tests work without one, but the dev" >&2
-  echo "bootstrap-dev: instance's UI cannot load its action list until Home Assistant can build" >&2
-  echo "bootstrap-dev: pymicro-vad and pyspeex-noise. Install a compiler once (needs your password):" >&2
-  echo "bootstrap-dev:     wsl -d Ubuntu -- sudo apt install -y build-essential" >&2
+  echo "bootstrap-dev: WARNING: no C compiler or Python headers in WSL. The tests work without them, but the" >&2
+  echo "bootstrap-dev: dev instance's UI cannot load its action list until Home Assistant can build" >&2
+  echo "bootstrap-dev: pymicro-vad and pyspeex-noise. Install them once (needs your password):" >&2
+  echo "bootstrap-dev:     wsl -d Ubuntu -- sudo apt update" >&2
+  echo "bootstrap-dev:     wsl -d Ubuntu -- sudo apt install -y build-essential python3-dev" >&2
   echo "bootstrap-dev: then re-run scripts/bootstrap-dev, or just start the dev instance." >&2
   exit 0
 fi
