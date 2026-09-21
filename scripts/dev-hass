@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Run a throwaway Home Assistant instance in WSL that loads this repo's
+# integration directly, for manual testing at http://localhost:8123.
+#
+# Home Assistant core cannot run on native Windows Python, so like the
+# other wrappers this executes inside WSL using the venv that
+# scripts/bootstrap-dev created. The config directory lives in the WSL
+# home (default ~/ha-mer-dev) and is safe to delete at any time; it holds
+# only the test instance's own state, never anything from your live HA.
+#
+# First run installs the frontend and a few integration requirements via
+# pip, which takes a minute or two. Onboarding then asks you to create a
+# local user. After that: Settings -> Devices & services -> Add
+# integration -> "Mer EV Charging".
+#
+#   scripts/dev-hass            start (Ctrl+C to stop)
+#   scripts/dev-hass --reset    wipe the config dir first, then start
+#
+# Environment overrides, matching the other scripts:
+#   HA_MER_WSL_DISTRO  WSL distro name        (default: Ubuntu)
+#   HA_MER_VENV        venv path inside WSL   (default: $HOME/.venvs/ha-mer)
+#   HA_MER_DEV_CONFIG  config dir inside WSL  (default: $HOME/ha-mer-dev)
+set -euo pipefail
+export MSYS_NO_PATHCONV=1
+
+repo_win="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_wsl="$(printf '%s' "$repo_win" | sed -E 's#^/([a-zA-Z])/#/mnt/\1/#')"
+distro="${HA_MER_WSL_DISTRO:-Ubuntu}"
+venv="${HA_MER_VENV:-\$HOME/.venvs/ha-mer}"
+cfg="${HA_MER_DEV_CONFIG:-\$HOME/ha-mer-dev}"
+
+reset=0
+for arg in "$@"; do
+  case "$arg" in
+    --reset) reset=1 ;;
+    *) echo "unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
+
+exec wsl.exe -d "$distro" -- bash -lc "
+set -euo pipefail
+cfg=\"$cfg\"
+if [ $reset -eq 1 ]; then rm -rf \"\$cfg\"; fi
+mkdir -p \"\$cfg/custom_components\"
+ln -sfn '$repo_wsl/custom_components/mer' \"\$cfg/custom_components/mer\"
+if [ ! -f \"\$cfg/configuration.yaml\" ]; then
+  cat > \"\$cfg/configuration.yaml\" <<'YAML'
+homeassistant:
+  name: Mer dev
+  unit_system: metric
+  time_zone: Europe/London
+  currency: GBP
+  country: GB
+
+frontend:
+config:
+http:
+history:
+logbook:
+
+logger:
+  default: warning
+  logs:
+    custom_components.mer: debug
+YAML
+fi
+echo \"Home Assistant dev instance -> http://localhost:8123  (config: \$cfg)\"
+exec \"$venv/bin/hass\" -c \"\$cfg\"
+"

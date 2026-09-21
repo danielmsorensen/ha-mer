@@ -224,8 +224,17 @@ From then on:
 - `scripts/lint` runs `ruff check` and `ruff format --check` — read-only, for
   CI parity.
 - `scripts/format` runs `ruff format` to fix formatting in place.
+- `scripts/dev-hass` starts a throwaway Home Assistant instance at
+  http://localhost:8123 that loads this checkout's integration directly, for
+  manual testing without touching a real installation. Its config lives in the
+  WSL home directory (`~/ha-mer-dev`) and can be deleted at any time;
+  `scripts/dev-hass --reset` wipes it and starts fresh. The first launch
+  installs the frontend, which takes a minute or two, and logs some errors
+  about `assist_pipeline` and `ffmpeg`: those are voice and camera components
+  the frontend pulls in that need a C compiler your WSL may not have, and
+  they do not affect this integration.
 
-All three scripts shell out to `wsl.exe` under the hood, so they work from a
+All four scripts shell out to `wsl.exe` under the hood, so they work from a
 normal Windows shell without you needing to open a WSL terminal yourself.
 That WSL hop is the only reason the wrappers exist, so they are a Windows
 convenience rather than a requirement: on Linux or macOS, create a virtualenv
