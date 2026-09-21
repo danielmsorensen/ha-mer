@@ -255,8 +255,9 @@ From then on:
 
 - **F5** on "Dev Home Assistant (start, open, debug)" is the one-button flow,
   like an IDE run configuration: it starts the dev instance, waits until Home
-  Assistant reports its debugger listening, attaches the Python debugger,
-  and opens the UI in your browser. The **Stop** button ends the session and
+  Assistant's debugger port is listening (a second task prints dots while it
+  waits, usually for a few seconds), attaches the Python debugger, and opens
+  the UI in your browser. The **Stop** button ends the session and
   shuts the instance down. Only one instance can run at a time; if one is
   already up, F5 attaches to it instead of starting another.
 - **Ctrl+Shift+B** runs the default build task, "HA: start dev instance",

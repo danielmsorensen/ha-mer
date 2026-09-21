@@ -23,23 +23,39 @@
       "type": "shell",
       "command": "scripts/dev-hass --open",
       "isBackground": true,
-      // A background task needs a matcher that tells VS Code when the
-      // instance is up, otherwise it spins forever and warns, and the F5
-      // configuration would attach too early. Nothing here is reported as a
-      // problem; the pattern never matches. The instance counts as ready
-      // when Home Assistant reports its debugger listening, or when the
-      // launcher reports that an instance is already running.
+      // A background task needs a matcher that tells VS Code when it has
+      // "started", otherwise it spins forever and warns. Nothing here is
+      // reported as a problem; the pattern never matches. The task counts
+      // as started as soon as the launcher prints its first notice. Real
+      // readiness for debugging is NOT decided here: the F5 configuration
+      // runs "HA: wait for debugger port" afterwards, a foreground task that
+      // exits only once Home Assistant is actually listening.
       "problemMatcher": {
         "owner": "ha-mer-dev",
         "pattern": { "regexp": "__never_matches__", "file": 1, "location": 2, "message": 3 },
         "background": {
           "activeOnStart": true,
           "beginsPattern": "Home Assistant dev instance",
-          "endsPattern": "Listening for remote debug connection|dev instance already running"
+          "endsPattern": "Home Assistant dev instance"
         }
       },
       "group": { "kind": "build", "isDefault": true },
       "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "HA: wait for debugger port",
+      "detail": "Blocks until Home Assistant's debugger port is listening. Gates the F5 attach.",
+      "type": "shell",
+      "command": "scripts/dev-hass --wait-debugger",
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared", "clear": false }
+    },
+    {
+      "label": "HA: start dev instance (for debugging)",
+      "detail": "Start the dev instance, then wait until its debugger port is listening. The F5 configuration's preLaunchTask.",
+      "dependsOn": ["HA: start dev instance", "HA: wait for debugger port"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
     },
     {
       "label": "HA: reset and start dev instance",
@@ -53,7 +69,7 @@
         "background": {
           "activeOnStart": true,
           "beginsPattern": "Home Assistant dev instance",
-          "endsPattern": "Listening for remote debug connection|dev instance already running"
+          "endsPattern": "Home Assistant dev instance"
         }
       },
       "runOptions": { "instanceLimit": 1 }

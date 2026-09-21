@@ -2,12 +2,13 @@
   // Two ways to debug the integration in the throwaway dev instance.
   //
   // "Dev Home Assistant (start, open, debug)" is the one-button flow: F5
-  // starts the instance (the preLaunchTask), waits until Home Assistant
-  // reports its debugger listening, attaches, and opens the UI in your
-  // browser. The Stop button ends the session and the postDebugTask shuts
-  // the instance down. Home Assistant's own file lock and the task's
-  // instance limit mean only one copy can run; if one is already running,
-  // the launcher reports it and F5 simply attaches to it.
+  // runs the preLaunchTask, which starts the instance and then blocks in a
+  // second, foreground task until the debugger port is actually listening;
+  // only then does the attach happen, and the UI opens in your browser. The
+  // Stop button ends the session and the postDebugTask shuts the instance
+  // down. Home Assistant's own file lock and the task's instance limit mean
+  // only one copy can run; if one is already running, the launcher reports
+  // it and F5 simply attaches to it.
   //
   // "Attach to dev Home Assistant" attaches to an instance you started some
   // other way, and leaves it running when you disconnect.
@@ -25,7 +26,7 @@
       "request": "attach",
       "connect": { "host": "localhost", "port": 5678 },
       "justMyCode": false,
-      "preLaunchTask": "HA: start dev instance",
+      "preLaunchTask": "HA: start dev instance (for debugging)",
       "postDebugTask": "HA: stop dev instance",
       "pathMappings": [
         {

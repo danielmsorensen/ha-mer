@@ -5,6 +5,7 @@
 #
 #   dev-hass.wsl start [--reset] [--open]  REPO_WSL_PATH [CFG_DIR] [VENV_DIR]
 #   dev-hass.wsl stop                      REPO_WSL_PATH [CFG_DIR] [VENV_DIR]
+#   dev-hass.wsl wait-debugger             REPO_WSL_PATH [CFG_DIR] [VENV_DIR]
 #
 # CFG_DIR defaults to ~/ha-mer-dev and VENV_DIR to ~/.venvs/ha-mer.
 set -euo pipefail
@@ -39,6 +40,27 @@ running_pid() {
   return 1
 }
 
+# debugpy runs its adapter as a separate process. It is a child of hass while
+# hass lives, but it survives hass's exit and keeps listening on 5678, which
+# would make the next start unable to bind its debugger and would let an
+# attach connect to a dead adapter. These find and remove such processes,
+# identified by cmdline (our venv's python running debugpy), never by a loose
+# pattern.
+stale_adapter_pids() {
+  local pid cmd
+  for pid in $(ss -ltnp 2>/dev/null | grep ':5678 ' | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u); do
+    cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+    case "$cmd" in *"$venv/bin/python"*debugpy*) echo "$pid" ;; esac
+  done
+}
+
+kill_stale_adapters() {
+  local pid
+  for pid in $(stale_adapter_pids); do
+    kill "$pid" 2>/dev/null && echo "dev-hass: removed leftover debugpy adapter (pid $pid)" >&2
+  done
+}
+
 open_when_ready() {
   # Runs in the background and survives the exec below. Polls the UI port,
   # then asks Windows to open the default browser through WSL interop.
@@ -62,6 +84,7 @@ case "$mode" in
       [ $open -eq 1 ] && (cd /mnt/c && /mnt/c/Windows/System32/cmd.exe /c start "" "$url" >/dev/null 2>&1) || true
       exit 0
     fi
+    kill_stale_adapters
     [ $reset -eq 1 ] && rm -rf "$cfg"
     mkdir -p "$cfg/custom_components"
     ln -sfn "$repo/custom_components/mer" "$cfg/custom_components/mer"
@@ -75,16 +98,44 @@ case "$mode" in
     # which does not apply to breakpoints in an integration.
     PYDEVD_DISABLE_FILE_VALIDATION=1 exec "$venv/bin/hass" -c "$cfg"
     ;;
+  wait-debugger)
+    # Block until Home Assistant's debugpy integration is listening, then give
+    # WSL's localhost relay a moment to catch up (measured at ~0.25 s). Used as
+    # a foreground task so a debugger attach cannot start before the port is
+    # really there; a background matcher alone proved unreliable for that.
+    # The heartbeat dots are not only progress: if the Windows side is killed
+    # (F5 aborted), the next write to the closed pipe fails and, with set -e,
+    # ends this loop instead of leaving it polling in WSL for two minutes.
+    echo -n "dev-hass: waiting for Home Assistant's debugger port 5678 " >&2
+    for i in $(seq 1 120); do
+      if ss -ltn 2>/dev/null | grep -q ':5678 '; then
+        sleep 1.5
+        echo " listening (after ${i}s); attaching" >&2
+        exit 0
+      fi
+      echo -n "." >&2
+      sleep 1
+    done
+    echo >&2
+    echo "dev-hass: the debugger port never came up within 120s. Check the 'HA: start dev instance' terminal for the reason." >&2
+    exit 1
+    ;;
   stop)
     if pid="$(running_pid)"; then
+      # Note the children first: the debugpy adapter is one, and it would
+      # otherwise outlive hass and keep the debugger port.
+      children="$(pgrep -P "$pid" || true)"
       kill "$pid"
       for i in $(seq 1 20); do [ -d "/proc/$pid" ] || break; sleep 1; done
       if [ -d "/proc/$pid" ]; then kill -9 "$pid"; echo "dev-hass: forced stop of pid $pid" >&2
       else echo "dev-hass: stopped Home Assistant (pid $pid)" >&2; fi
+      for c in $children; do [ -d "/proc/$c" ] && kill "$c" 2>/dev/null; done
     else
       echo "dev-hass: no dev instance is running" >&2
     fi
+    sleep 1
+    kill_stale_adapters
     ;;
   *)
-    echo "dev-hass.wsl: mode must be start or stop" >&2; exit 2 ;;
+    echo "dev-hass.wsl: mode must be start, stop or wait-debugger" >&2; exit 2 ;;
 esac

@@ -18,6 +18,7 @@
 #   scripts/dev-hass --open          start and open the UI in your browser once it answers
 #   scripts/dev-hass --reset         wipe the config dir first, then start
 #   scripts/dev-hass --stop          stop the running instance, if any
+#   scripts/dev-hass --wait-debugger block until the debugger port is listening (exit 1 after 120s)
 #
 # Starting while an instance is already running is not an error: the launcher
 # reports the running instance and exits, so the VS Code "start + debug"
@@ -42,6 +43,7 @@ flags=()
 for arg in "$@"; do
   case "$arg" in
     --stop)  mode="stop" ;;
+    --wait-debugger) mode="wait-debugger" ;;
     --reset|--open) flags+=("$arg") ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
@@ -49,5 +51,12 @@ done
 
 # Empty strings tell the WSL side to use its own defaults under $HOME there;
 # Windows-side environment variables are not visible inside the distro.
-exec wsl.exe -d "$distro" -- bash -l "$repo_root_wsl/scripts/dev-hass.wsl" "$mode" "${flags[@]}" \
+#
+# Deliberately NOT `bash -l`. A login shell runs ~/.bash_logout on exit, and
+# Ubuntu's clears the console, which fails when there is no real terminal
+# behind wsl.exe. The WSL script uses `set -e`, so that failure turned every
+# successful run into exit code 1 as seen from Windows, and VS Code then
+# reported the preLaunchTask as failed. The script needs nothing from the
+# login profile: HOME is always set, and it uses absolute paths otherwise.
+exec wsl.exe -d "$distro" -- bash "$repo_root_wsl/scripts/dev-hass.wsl" "$mode" "${flags[@]}" \
   "$repo_root_wsl" "${HA_MER_DEV_CONFIG:-}" "${HA_MER_VENV:-}"
