@@ -10,8 +10,11 @@
   // only one copy can run; if one is already running, the launcher reports
   // it and F5 simply attaches to it.
   //
-  // "Attach to dev Home Assistant" attaches to an instance you started some
-  // other way, and leaves it running when you disconnect.
+  // "Attach only (dev instance must already be running)" attaches to an
+  // instance you started some other way and leaves it running when you
+  // disconnect. It has no start task on purpose, so with nothing running it
+  // fails at once with "connect ECONNREFUSED 127.0.0.1:5678". If you see
+  // that, the Run and Debug dropdown is on this entry; pick the first one.
   //
   // Home Assistant runs inside WSL and reaches this checkout through a
   // symlink in its config directory, so the debugger needs to know how the
@@ -40,7 +43,7 @@
       ]
     },
     {
-      "name": "Attach to dev Home Assistant",
+      "name": "Attach only (dev instance must already be running)",
       "type": "debugpy",
       "request": "attach",
       "connect": { "host": "localhost", "port": 5678 },

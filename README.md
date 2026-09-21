@@ -264,8 +264,11 @@ From then on:
   without the debugger, and opens the UI when it is ready. "HA: stop dev
   instance" and the other tasks (reset, test, test current file, lint,
   format) are under *Terminal → Run Task*.
-- "Attach to dev Home Assistant" attaches to an instance started any other
-  way and leaves it running when you disconnect.
+- "Attach only (dev instance must already be running)" attaches to an
+  instance started any other way and leaves it running when you disconnect.
+  With nothing running it fails at once with "connect ECONNREFUSED
+  127.0.0.1:5678"; that message means the Run and Debug dropdown is on this
+  entry rather than the one-button flow above.
 - The dev configuration enables Home Assistant's built-in `debugpy`
   integration on port 5678, and `launch.json` maps this checkout's files to
   the paths the WSL process sees, so breakpoints in `custom_components/mer/`
