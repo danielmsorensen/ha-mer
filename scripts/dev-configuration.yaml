@@ -24,12 +24,12 @@ logger:
     # Home Assistant always loads a few default integrations that pull in voice
     # and camera helpers (assist_pipeline, camera). Two of their Python
     # requirements have no prebuilt wheel for this Python and need a C compiler
-    # to build, and ffmpeg/turbojpeg are not installed in WSL. None of that
-    # touches this integration, so the pip build spew and the ffmpeg/turbojpeg
-    # tracebacks are silenced here. homeassistant.setup is deliberately left
-    # alone: it is what reports a failure in *our* setup, so you will still see
-    # two short "Setup failed for 'assist_pipeline' / 'assist_satellite'" lines.
-    # Installing build-essential in WSL makes them go away for good.
+    # to build, and ffmpeg/turbojpeg are not installed in WSL. The pip build
+    # spew and the ffmpeg/turbojpeg tracebacks are silenced here.
+    # homeassistant.setup is deliberately left alone: it is what reports a
+    # failure in *our* setup. Note that the compiler is not optional: without
+    # it the frontend's request for the action list fails (see README,
+    # "A C compiler is required in WSL").
     homeassistant.util.package: critical
     haffmpeg: critical
     homeassistant.components.camera.img_util: critical

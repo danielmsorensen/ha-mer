@@ -92,7 +92,10 @@ case "$mode" in
     # Notices go to stderr like Home Assistant's own log lines; stdout written
     # just before exec can be lost when both streams are captured together.
     echo "Home Assistant dev instance -> $url  (config: $cfg)" >&2
-    echo "Two lines saying Setup failed for assist_pipeline / assist_satellite are expected here; see README (Development)." >&2
+    if ! command -v cc >/dev/null 2>&1; then
+      echo "dev-hass: WARNING: no C compiler in WSL. Two of Home Assistant's default requirements cannot be built," >&2
+      echo "dev-hass:          so the UI's action list fails to load. Fix once:  wsl -d Ubuntu -- sudo apt install -y build-essential" >&2
+    fi
     [ $open -eq 1 ] && open_when_ready
     # PYDEVD_DISABLE_FILE_VALIDATION silences debugpy's frozen-modules warning,
     # which does not apply to breakpoints in an integration.

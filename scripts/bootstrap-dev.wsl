@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# WSL-side helper for scripts/bootstrap-dev, step 4. Builds the assist_pipeline
+# requirements that scripts/dev-hass needs, if a C compiler is available.
+#
+#   bootstrap-dev.wsl VENV_DIR
+set -euo pipefail
+venv="${1:?venv path required}"
+
+if ! command -v cc >/dev/null 2>&1; then
+  echo >&2
+  echo "bootstrap-dev: WARNING: no C compiler in WSL. The tests work without one, but the dev" >&2
+  echo "bootstrap-dev: instance's UI cannot load its action list until Home Assistant can build" >&2
+  echo "bootstrap-dev: pymicro-vad and pyspeex-noise. Install a compiler once (needs your password):" >&2
+  echo "bootstrap-dev:     wsl -d Ubuntu -- sudo apt install -y build-essential" >&2
+  echo "bootstrap-dev: then re-run scripts/bootstrap-dev, or just start the dev instance." >&2
+  exit 0
+fi
+
+# Take the exact pins from the installed Home Assistant so they track its version.
+reqs="$("$venv/bin/python" - <<'PY'
+import json, pathlib, homeassistant.components.assist_pipeline as ap
+print(*json.load(open(pathlib.Path(ap.__file__).parent / "manifest.json"))["requirements"])
+PY
+)"
+echo "bootstrap-dev: building assist_pipeline requirements: $reqs" >&2
+# shellcheck disable=SC2086
+"$venv/bin/python" -m pip install --quiet $reqs

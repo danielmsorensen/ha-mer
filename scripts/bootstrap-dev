@@ -44,3 +44,9 @@ fi
 # 3. Install test dependencies and report the resolved Home Assistant version.
 wsl.exe -d "$distro" -- bash -lc "\"$venv/bin/python\" -m pip install -r \"$repo_root_wsl/requirements_test.txt\""
 wsl.exe -d "$distro" -- bash -lc "\"$venv/bin/python\" -c \"import homeassistant.const as c; print(c.__version__)\""
+
+# 4. The dev instance (scripts/dev-hass) needs two of Home Assistant's default
+#    requirements that have no prebuilt wheel for this Python. With a compiler
+#    present, build them now rather than on the instance's first boot; without
+#    one, say so, since only the user can install it (sudo needs a password).
+wsl.exe -d "$distro" -- bash "$repo_root_wsl/scripts/bootstrap-dev.wsl" "$venv"
