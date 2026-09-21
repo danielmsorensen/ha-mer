@@ -15,6 +15,11 @@
 # local user. After that: Settings -> Devices & services -> Add
 # integration -> "Mer EV Charging".
 #
+# Only one instance can run per config directory: Home Assistant holds a
+# file lock on .ha_run.lock while it runs and refuses to start while another
+# process holds it. A leftover lock file from an interrupted run is harmless,
+# because the lock itself dies with the process.
+#
 #   scripts/dev-hass            start (Ctrl+C to stop)
 #   scripts/dev-hass --reset    wipe the config dir first, then start
 #
@@ -46,4 +51,11 @@ done
 component="$repo_root_wsl/custom_components/mer"
 template="$repo_root_wsl/scripts/dev-configuration.yaml"
 
-exec wsl.exe -d "$distro" -- bash -lc "$reset_cmd && mkdir -p \"$cfg/custom_components\" && ln -sfn '$component' \"$cfg/custom_components/mer\" && { [ -f \"$cfg/configuration.yaml\" ] || cp '$template' \"$cfg/configuration.yaml\"; } && echo \"Home Assistant dev instance -> http://localhost:8123  (config: $cfg)\" && exec \"$venv/bin/hass\" -c \"$cfg\""
+# The notices go to stderr, like Home Assistant's own log lines. When both
+# streams are captured together, stdout written just before exec can be lost
+# on the way out of WSL; stderr is not.
+notice="echo \"Home Assistant dev instance -> http://localhost:8123  (config: $cfg)\" >&2; echo \"Two lines saying Setup failed for assist_pipeline / assist_satellite are expected here; see README (Development).\" >&2"
+
+# PYDEVD_DISABLE_FILE_VALIDATION silences debugpy's four-line warning about
+# frozen modules, which does not apply to breakpoints in an integration.
+exec wsl.exe -d "$distro" -- bash -lc "$reset_cmd && mkdir -p \"$cfg/custom_components\" && ln -sfn '$component' \"$cfg/custom_components/mer\" && { [ -f \"$cfg/configuration.yaml\" ] || cp '$template' \"$cfg/configuration.yaml\"; } && $notice && PYDEVD_DISABLE_FILE_VALIDATION=1 exec \"$venv/bin/hass\" -c \"$cfg\""

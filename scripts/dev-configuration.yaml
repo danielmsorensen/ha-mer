@@ -21,6 +21,18 @@ logger:
   default: warning
   logs:
     custom_components.mer: debug
+    # Home Assistant always loads a few default integrations that pull in voice
+    # and camera helpers (assist_pipeline, camera). Two of their Python
+    # requirements have no prebuilt wheel for this Python and need a C compiler
+    # to build, and ffmpeg/turbojpeg are not installed in WSL. None of that
+    # touches this integration, so the pip build spew and the ffmpeg/turbojpeg
+    # tracebacks are silenced here. homeassistant.setup is deliberately left
+    # alone: it is what reports a failure in *our* setup, so you will still see
+    # two short "Setup failed for 'assist_pipeline' / 'assist_satellite'" lines.
+    # Installing build-essential in WSL makes them go away for good.
+    homeassistant.util.package: critical
+    haffmpeg: critical
+    homeassistant.components.camera.img_util: critical
 
 # Home Assistant's built-in remote-debugging integration. It installs debugpy
 # on first start and listens on port 5678, which WSL forwards to Windows, so

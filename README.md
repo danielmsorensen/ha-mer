@@ -229,10 +229,26 @@ From then on:
   manual testing without touching a real installation. Its config lives in the
   WSL home directory (`~/ha-mer-dev`) and can be deleted at any time;
   `scripts/dev-hass --reset` wipes it and starts fresh. The first launch
-  installs the frontend, which takes a minute or two, and logs some errors
-  about `assist_pipeline` and `ffmpeg`: those are voice and camera components
-  the frontend pulls in that need a C compiler your WSL may not have, and
-  they do not affect this integration.
+  installs the frontend, which takes a minute or two.
+
+  **Expected noise.** Every boot logs two lines: `Setup failed for
+  'assist_pipeline'` and `Setup failed for 'assist_satellite'`. Home Assistant
+  always loads a handful of default integrations, and two of those pull in
+  voice-assistant packages that have no prebuilt wheel for this Python and
+  need a C compiler to build. They have nothing to do with this integration,
+  and the instance is fully working when you see them. To make them go away
+  for good, install a compiler in WSL once:
+
+  ```bash
+  wsl -d Ubuntu -- sudo apt install -y build-essential
+  ```
+
+  **One instance at a time.** Home Assistant holds a file lock on
+  `.ha_run.lock` while it runs. Starting a second copy against the same
+  config directory fails with "Another Home Assistant instance is already
+  running": stop the first one (Ctrl+C in its terminal) and try again. A
+  leftover lock file from an interrupted run is harmless, since the lock
+  itself is released when the process dies.
 
 **From VS Code**, the repository ships tasks and a debug configuration in
 `.vscode/`, so none of this needs a terminal:

@@ -23,7 +23,20 @@
       "type": "shell",
       "command": "scripts/dev-hass",
       "isBackground": true,
-      "problemMatcher": [],
+      // A background task needs a matcher that tells VS Code when the
+      // instance is up, otherwise it spins forever and warns. Nothing here
+      // is reported as a problem; the pattern never matches. The instance
+      // counts as ready when Home Assistant reports its debugger listening,
+      // which happens once the core has started.
+      "problemMatcher": {
+        "owner": "ha-mer-dev",
+        "pattern": { "regexp": "__never_matches__", "file": 1, "location": 2, "message": 3 },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Home Assistant dev instance ->",
+          "endsPattern": "Listening for remote debug connection"
+        }
+      },
       "group": { "kind": "build", "isDefault": true },
       "runOptions": { "instanceLimit": 1 }
     },
@@ -33,7 +46,15 @@
       "type": "shell",
       "command": "scripts/dev-hass --reset",
       "isBackground": true,
-      "problemMatcher": [],
+      "problemMatcher": {
+        "owner": "ha-mer-dev",
+        "pattern": { "regexp": "__never_matches__", "file": 1, "location": 2, "message": 3 },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Home Assistant dev instance ->",
+          "endsPattern": "Listening for remote debug connection"
+        }
+      },
       "runOptions": { "instanceLimit": 1 }
     },
     {
