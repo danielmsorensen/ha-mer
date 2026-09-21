@@ -234,6 +234,22 @@ From then on:
   the frontend pulls in that need a C compiler your WSL may not have, and
   they do not affect this integration.
 
+**From VS Code**, the repository ships tasks and a debug configuration in
+`.vscode/`, so none of this needs a terminal:
+
+- **Ctrl+Shift+B** runs the default build task, "HA: start dev instance". The
+  other tasks (reset, test, test current file, lint, format) are under
+  *Terminal → Run Task*.
+- **F5** attaches the Python debugger to the running dev instance. The dev
+  configuration enables Home Assistant's built-in `debugpy` integration on
+  port 5678, and `launch.json` maps this checkout's files to the paths the
+  WSL process sees, so breakpoints in `custom_components/mer/` bind. Start the
+  instance first, then attach; if your WSL username or config directory
+  differ from the defaults, adjust the first `remoteRoot` in `launch.json`.
+- The recommended extensions (Python, Python Debugger, Ruff, YAML) are listed
+  in `.vscode/extensions.json`; VS Code offers to install them when you open
+  the folder.
+
 All four scripts shell out to `wsl.exe` under the hood, so they work from a
 normal Windows shell without you needing to open a WSL terminal yourself.
 That WSL hop is the only reason the wrappers exist, so they are a Windows

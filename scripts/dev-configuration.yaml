@@ -21,3 +21,13 @@ logger:
   default: warning
   logs:
     custom_components.mer: debug
+
+# Home Assistant's built-in remote-debugging integration. It installs debugpy
+# on first start and listens on port 5678, which WSL forwards to Windows, so
+# the "Attach to dev Home Assistant" configuration in .vscode/launch.json
+# connects with F5. `wait: false` means startup does not block on the IDE.
+debugpy:
+  start: true
+  wait: false
+  host: 0.0.0.0
+  port: 5678

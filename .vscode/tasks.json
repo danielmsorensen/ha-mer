@@ -1,0 +1,70 @@
+{
+  // Run these with Terminal -> Run Task..., or Ctrl+Shift+B for the default.
+  // Every task goes through the repo's scripts/ wrappers, which execute in
+  // WSL because Home Assistant core cannot be imported on native Windows
+  // Python. The wrappers are bash scripts, so each task runs them with Git
+  // Bash explicitly rather than trusting whichever `bash` is on PATH.
+  "version": "2.0.0",
+  "options": {
+    "shell": {
+      "executable": "${env:ProgramFiles}\\Git\\bin\\bash.exe",
+      "args": ["-c"]
+    }
+  },
+  "presentation": {
+    "reveal": "always",
+    "panel": "dedicated",
+    "clear": true
+  },
+  "tasks": [
+    {
+      "label": "HA: start dev instance",
+      "detail": "Throwaway Home Assistant at http://localhost:8123 loading this checkout. Ctrl+C in the terminal stops it.",
+      "type": "shell",
+      "command": "scripts/dev-hass",
+      "isBackground": true,
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "HA: reset and start dev instance",
+      "detail": "Wipe the dev instance's config (users, entries, history) and start fresh.",
+      "type": "shell",
+      "command": "scripts/dev-hass --reset",
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "Test",
+      "detail": "scripts/test — the whole suite.",
+      "type": "shell",
+      "command": "scripts/test -q",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: current file",
+      "detail": "scripts/test on the test file open in the editor.",
+      "type": "shell",
+      "command": "scripts/test -q '${relativeFile}'",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Lint",
+      "detail": "scripts/lint — ruff check and format --check, read-only.",
+      "type": "shell",
+      "command": "scripts/lint",
+      "problemMatcher": []
+    },
+    {
+      "label": "Format",
+      "detail": "scripts/format — ruff format, fixes files in place.",
+      "type": "shell",
+      "command": "scripts/format",
+      "problemMatcher": []
+    }
+  ]
+}
