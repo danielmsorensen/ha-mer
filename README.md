@@ -265,9 +265,13 @@ From then on:
   like an IDE run configuration: it starts the dev instance, waits until Home
   Assistant's debugger port is listening (a second task prints dots while it
   waits, usually for a few seconds), attaches the Python debugger, and opens
-  the UI in your browser. The **Stop** button ends the session and
-  shuts the instance down. Only one instance can run at a time; if one is
-  already up, F5 attaches to it instead of starting another.
+  the UI in your browser. Because this is an attach session the toolbar
+  shows **Disconnect** (Shift+F5) instead of Stop; use it as the stop
+  button, since the post-debug task shuts the instance down whenever the
+  session ends. Holding **Alt** turns it into Stop (Alt+Shift+F5), which
+  also terminates Home Assistant through the debugger. Only one instance
+  can run at a time; if one is already up, F5 attaches to it instead of
+  starting another.
 - **Ctrl+Shift+B** runs the default build task, "HA: start dev instance",
   without the debugger, and opens the UI when it is ready. "HA: stop dev
   instance" and the other tasks (reset, test, test current file, lint,

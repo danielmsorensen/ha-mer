@@ -4,9 +4,15 @@
   // "Dev Home Assistant (start, open, debug)" is the one-button flow: F5
   // runs the preLaunchTask, which starts the instance and then blocks in a
   // second, foreground task until the debugger port is actually listening;
-  // only then does the attach happen, and the UI opens in your browser. The
-  // Stop button ends the session and the postDebugTask shuts the instance
-  // down. Home Assistant's own file lock and the task's instance limit mean
+  // only then does the attach happen, and the UI opens in your browser.
+  //
+  // Ending it: this is an attach session, so the toolbar shows Disconnect
+  // (Shift+F5) rather than Stop. That is fine: the postDebugTask runs on any
+  // session end and shuts the instance down. Holding Alt turns Disconnect
+  // into Stop (Alt+Shift+F5), which additionally terminates Home Assistant
+  // through the debugger before the postDebugTask cleans up.
+  //
+  // Home Assistant's own file lock and the task's instance limit mean
   // only one copy can run; if one is already running, the launcher reports
   // it and F5 simply attaches to it.
   //
@@ -29,6 +35,10 @@
       "request": "attach",
       "connect": { "host": "localhost", "port": 5678 },
       "justMyCode": false,
+      // Home Assistant spawns pip/uv to install requirements; without this,
+      // debugpy attaches to each one as an extra "Subprocess NNNN" session
+      // that clutters the debug toolbar and the call stack view.
+      "subProcess": false,
       "preLaunchTask": "HA: start dev instance (for debugging)",
       "postDebugTask": "HA: stop dev instance",
       "pathMappings": [
@@ -48,6 +58,7 @@
       "request": "attach",
       "connect": { "host": "localhost", "port": 5678 },
       "justMyCode": false,
+      "subProcess": false,
       "pathMappings": [
         {
           "localRoot": "${workspaceFolder}/custom_components",
