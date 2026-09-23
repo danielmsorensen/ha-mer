@@ -10,6 +10,7 @@ from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mer.const import DOMAIN
@@ -210,7 +211,10 @@ async def test_account_sensors_charging(
         state_by_unique_id(hass, "sensor", f"{eid}_account_active_started").state
         == expected_started
     )
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration").state == "953.825"
+    active_duration = state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration")
+    # 953.825 s, displayed in minutes by default.
+    assert float(active_duration.state) == pytest.approx(953.825 / 60)
+    assert active_duration.attributes["unit_of_measurement"] == "min"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_socket").state == "Right"
 
     # The charger it is actually running on (6041) mirrors the same session...
@@ -223,7 +227,8 @@ async def test_account_sensors_charging(
     started = state_by_unique_id(hass, "sensor", f"{eid}_station_6041_session_started")
     assert started.state == expected_started
     duration = state_by_unique_id(hass, "sensor", f"{eid}_station_6041_session_duration")
-    assert duration.state == "953.825"
+    assert float(duration.state) == pytest.approx(953.825 / 60)
+    assert duration.attributes["unit_of_measurement"] == "min"
 
     # ...while the charger the user did not select (6042) stays unknown.
     for key in ("session_energy", "session_cost", "session_started", "session_duration"):
