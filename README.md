@@ -298,6 +298,12 @@ From then on:
   the paths the WSL process sees, so breakpoints in `custom_components/mer/`
   bind. If your WSL username or config directory differ from the defaults,
   adjust the first `remoteRoot` in `launch.json`.
+- **Brand icon.** Home Assistant serves a custom integration's icon from
+  `custom_components/mer/brand/` (`icon.png` at 256 px, `icon@2x.png` at
+  512 px, transparent PNGs), so no upload to the brands repository is needed.
+  The current files are a placeholder EV-station glyph rendered by
+  `scripts/generate_brand_icon.py`; to use Mer's own mark, overwrite those two
+  PNGs. Reload the browser page after changing them, as it caches icons.
 - The recommended extensions (Python, Python Debugger, Ruff, YAML) are listed
   in `.vscode/extensions.json`; VS Code offers to install them when you open
   the folder.
