@@ -13,7 +13,7 @@ from tests.helpers import setup_integration
 from tests.test_sensor import state_by_unique_id
 
 
-async def test_socket_available_and_site_any_available(
+async def test_socket_available_and_account_any_available(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
     await setup_integration(hass, mock_config_entry)
@@ -25,10 +25,12 @@ async def test_socket_available_and_site_any_available(
         state_by_unique_id(hass, "binary_sensor", f"{eid}_socket_11241_available").state
         == STATE_OFF
     )
-    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_site_any_available").state == STATE_ON
+    assert (
+        state_by_unique_id(hass, "binary_sensor", f"{eid}_account_any_available").state == STATE_ON
+    )
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == STATE_OFF
 
-    # everything occupied -> site not available
+    # everything occupied -> nothing available
     stations = mock_client.find_stations_by_ids.return_value
     busy = []
     for station in stations:
@@ -42,7 +44,9 @@ async def test_socket_available_and_site_any_available(
     mock_client.find_stations_by_ids.return_value = busy
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
-    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_site_any_available").state == STATE_OFF
+    assert (
+        state_by_unique_id(hass, "binary_sensor", f"{eid}_account_any_available").state == STATE_OFF
+    )
     assert (
         state_by_unique_id(hass, "binary_sensor", f"{eid}_socket_11243_available").state
         == STATE_OFF

@@ -143,16 +143,16 @@ def test_socket_price_unit_follows_tariff_currency() -> None:
     assert price_description.unit_fn(no_tariff_socket) == "GBP/kWh"
 
 
-async def test_site_count_sensors(
+async def test_aggregate_count_sensors(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     # Explorer 1: 2 available; Explorer 2: 1 charging + 1 available
-    assert state_by_unique_id(hass, "sensor", f"{eid}_site_available_sockets").state == "3"
-    assert state_by_unique_id(hass, "sensor", f"{eid}_site_sockets_in_use").state == "1"
-    site_state = state_by_unique_id(hass, "sensor", f"{eid}_site_available_sockets")
-    assert site_state.name == "Durham County Council - Business Durham NETPark Available sockets"
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_available_sockets").state == "3"
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_sockets_in_use").state == "1"
+    aggregate = state_by_unique_id(hass, "sensor", f"{eid}_account_available_sockets")
+    assert aggregate.name == "Mer account Available sockets"
 
 
 async def test_account_sensors_idle(

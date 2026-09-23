@@ -27,14 +27,13 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: MerConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     coordinator = entry.runtime_data
-    entities: list[ButtonEntity] = []
-    for station in coordinator.configured_stations():
-        entities.extend(
+    for subentry, station in coordinator.charger_stations():
+        entities: list[ButtonEntity] = [
             MerStartChargeButton(coordinator, station.id, socket.id) for socket in station.sockets
-        )
+        ]
         entities.append(MerStationStopChargeButton(coordinator, station.id))
-    entities.append(MerAccountStopChargeButton(coordinator))
-    async_add_entities(entities)
+        async_add_entities(entities, config_subentry_id=subentry.subentry_id)
+    async_add_entities([MerAccountStopChargeButton(coordinator)])
 
 
 def _raise_command_failed(err: DriivzError) -> None:

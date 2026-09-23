@@ -5,10 +5,9 @@ from __future__ import annotations
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.device_registry import DeviceEntry
 
 from .api import create_client
-from .const import CONF_BASE_URL, CONF_STATION_IDS, DEFAULT_BASE_URL, DOMAIN, PLATFORMS
+from .const import CONF_BASE_URL, DEFAULT_BASE_URL, DOMAIN, PLATFORMS
 from .coordinator import MerConfigEntry, MerCoordinator
 
 
@@ -23,31 +22,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: MerConfigEntry) -> bool:
     coordinator = MerCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
-    _async_register_parent_devices(hass, entry, coordinator)
+    _async_register_account_device(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+    # Fires on options changes and on every subentry added or removed: chargers are
+    # subentries, so this is what brings a newly added charger's entities up.
+    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     return True
 
 
-def _async_register_parent_devices(
-    hass: HomeAssistant, entry: MerConfigEntry, coordinator: MerCoordinator
-) -> None:
-    """Create the site and account devices ahead of the entities that attach to them.
+def _async_register_account_device(hass: HomeAssistant, entry: MerConfigEntry) -> None:
+    """Create the account device ahead of the entities that attach to it.
 
-    Station/socket entities link to the site device via `via_device_id`, which must
-    already exist in the registry to resolve; the account device has no entities at
-    all yet (added in a later task), so nothing else would ever create it.
+    Charger devices link to it via `via_device_id`, which must already resolve in
+    the registry when the platforms compose their device info.
     """
-    device_registry = dr.async_get(hass)
-    if coordinator.site_id is not None:
-        device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, f"site_{coordinator.site_id}")},
-            name=coordinator.site_name,
-            manufacturer="Mer",
-            model="Charging site",
-        )
-    device_registry.async_get_or_create(
+    dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, f"account_{entry.entry_id}")},
         name="Mer account",
@@ -56,24 +45,11 @@ def _async_register_parent_devices(
     )
 
 
-async def _async_options_updated(hass: HomeAssistant, entry: MerConfigEntry) -> None:
-    """Reload when options (interval, chargers) change."""
+async def _async_entry_updated(hass: HomeAssistant, entry: MerConfigEntry) -> None:
+    """Reload when options or the set of charger subentries change."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: MerConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-
-async def async_remove_config_entry_device(
-    hass: HomeAssistant, entry: MerConfigEntry, device_entry: DeviceEntry
-) -> bool:
-    """Allow removing station devices that are no longer configured."""
-    configured = {f"station_{sid}" for sid in entry.options.get(CONF_STATION_IDS, [])}
-    for domain, identifier in device_entry.identifiers:
-        if domain != DOMAIN:
-            continue
-        if identifier.startswith("station_") and identifier not in configured:
-            return True
-    return False

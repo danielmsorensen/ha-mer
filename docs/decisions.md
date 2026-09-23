@@ -239,3 +239,27 @@ If a maintainer wants the exact list rather than the theme summary, it no
 longer exists anywhere durable — it lived only in the now-deleted scratch
 planning ledger. Treat the absence of detail here as a signal that the
 review judged each item genuinely minor, not as a gap to go looking for.
+
+## 2026-09-23: chargers are config subentries; setup asks only for credentials
+
+**Decision.** Initial setup takes the e-mail and password and nothing else. Each
+monitored charger is a Home Assistant config *subentry* of type `charger` on the
+account entry, added from the integration page's "Add charger" button (site search →
+site → tick chargers, already-added ones hidden) and removed from its own card. The
+site device and its three aggregate entities are gone; the aggregates now live on the
+account device and cover every added charger, since one entry can hold chargers from
+several sites. Configure keeps only the poll interval.
+
+**Why.** Daniel asked for setup to stop requiring a charger up front and for chargers
+to be searchable and addable afterwards. Subentries are HA's native shape for exactly
+that: per-charger cards, an Add button, per-charger delete, and automatic removal of
+the devices and entities registered under a deleted subentry. An options-flow
+"manage chargers" menu would have reimplemented all of that by hand and left the
+orphaned-device problem the README used to warn about.
+
+**Consequences.** Entry `VERSION` is 2 with no migration; no version-1 entry existed
+outside the dev instance. A flow can return only one subentry, so when several
+chargers are ticked the extras are added through `async_add_subentry` before the
+flow finishes; each addition triggers a reload, which is fine for the handful of
+chargers anyone monitors. Aggregate unique ids moved from `<entry>_site_<key>` to
+`<entry>_account_<key>`.

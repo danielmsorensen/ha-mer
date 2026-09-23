@@ -43,23 +43,8 @@ class MerEntity(CoordinatorEntity[MerCoordinator]):
     def entry_id(self) -> str:
         return self.coordinator.config_entry.entry_id
 
-    def site_device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, f"site_{self.coordinator.site_id}")},
-            name=self.coordinator.site_name,
-            manufacturer="Mer",
-            model="Charging site",
-            entry_type=None,
-        )
-
-
-class MerSiteEntity(MerEntity):
-    """Entity attached to the site device."""
-
-    def __init__(self, coordinator: MerCoordinator, description: EntityDescription) -> None:
-        super().__init__(coordinator, description)
-        self._attr_unique_id = f"{self.entry_id}_site_{description.key}"
-        self._attr_device_info = self.site_device_info()
+    def account_identifier(self) -> tuple[str, str]:
+        return (DOMAIN, f"account_{self.entry_id}")
 
 
 class MerAccountEntity(MerEntity):
@@ -69,7 +54,7 @@ class MerAccountEntity(MerEntity):
         super().__init__(coordinator, description)
         self._attr_unique_id = f"{self.entry_id}_account_{description.key}"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"account_{self.entry_id}")},
+            identifiers={self.account_identifier()},
             name="Mer account",
             manufacturer="Mer",
             model="Driver account",
@@ -77,7 +62,7 @@ class MerAccountEntity(MerEntity):
 
 
 class MerStationEntity(MerEntity):
-    """Entity attached to a charger device."""
+    """Entity attached to a charger device, which hangs off the account device."""
 
     def __init__(
         self, coordinator: MerCoordinator, station_id: int, description: EntityDescription
@@ -86,21 +71,18 @@ class MerStationEntity(MerEntity):
         self.station_id = station_id
         self._attr_unique_id = f"{self.entry_id}_station_{station_id}_{description.key}"
         station = coordinator.get_station(station_id)
-        site_device = dr.async_get(coordinator.hass).async_get_device_by_identifier(
-            (DOMAIN, f"site_{coordinator.site_id}"), self.entry_id
+        account_device = dr.async_get(coordinator.hass).async_get_device_by_identifier(
+            self.account_identifier(), self.entry_id
         )
+        base_url = coordinator.config_entry.data.get("base_url", "")
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"station_{station_id}")},
             name=station.display_name if station else f"Charger {station_id}",
             manufacturer="Mer",
             model=station.model_name if station else None,
             serial_number=station.identity_key if station else None,
-            via_device_id=site_device.id if site_device else None,
-            configuration_url=(
-                f"{coordinator.config_entry.data.get('base_url', '')}/findCharger"
-                if coordinator.config_entry.data.get("base_url")
-                else None
-            ),
+            via_device_id=account_device.id if account_device else None,
+            configuration_url=f"{base_url}/findCharger" if base_url else None,
         )
 
     @property

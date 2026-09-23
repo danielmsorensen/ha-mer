@@ -27,17 +27,26 @@ your own account, for your own personal use.
 ## Setup
 
 Go to **Settings → Devices & services → Add integration**, and search for
-**Mer EV Charging**. Setup is three steps:
+**Mer EV Charging**. Setup asks only for the e-mail and password you use for
+the Mer Connect / driver portal app. That creates the account, with its own
+device and entities, but no chargers yet.
 
-1. **Sign in** with the e-mail and password you use for the Mer Connect /
-   driver portal app.
-2. **Search for your site** by typing part of its name — the search matches
+Chargers are added afterwards, from the integration's page (**Settings →
+Devices & services → Mer EV Charging**), where each charger you add gets its
+own card and there is an **Add charger** button:
+
+1. **Search for the site** by typing part of its name — the search matches
    anywhere in the name, so "NETPark" is enough to find "Durham County
-   Council - Business Durham NETPark" without typing it in full. Pick your
+   Council - Business Durham NETPark" without typing it in full. Pick the
    site from the matches.
-3. **Tick the chargers** you want Home Assistant to monitor. Every charger
-   you select becomes its own device, with a device per socket entity
+2. **Tick the chargers** you want to monitor at that site. Chargers you have
+   already added are not offered again. Every ticked charger becomes its own
+   card on the integration page and its own device, with its socket entities
    attached to it.
+
+You can repeat Add charger for chargers at other sites. To stop monitoring a
+charger, open the menu on its card and choose **Delete**; Home Assistant
+removes its device and entities and the integration reloads.
 
 ## Entities
 
@@ -45,19 +54,9 @@ Names below are the entity's own name; the full entity name Home Assistant
 shows is "*device name* *entity name*", e.g. "Explorer 1 status" or "Mer
 account wallet balance".
 
-### Site device
-
-One device per configured site, aggregating all the chargers you selected.
-
-| Entity | Platform | Meaning |
-|---|---|---|
-| Available sockets | sensor | Count of configured sockets currently `AVAILABLE` |
-| Sockets in use | sensor | Count of configured sockets in any "in use" state |
-| Any socket available | binary sensor | On if any configured socket is `AVAILABLE` |
-
 ### Charger (station) device
 
-One device per charger you selected during setup.
+One device per charger you added, linked to the account device.
 
 | Entity | Platform | Meaning |
 |---|---|---|
@@ -85,11 +84,14 @@ have a "Left" and a "Right" socket):
 
 ### Account device
 
-One device per Mer account, covering your active session (wherever it is
-running) and your charging history.
+One device per Mer account. It aggregates the chargers you added, and covers
+your active session (wherever it is running) and your charging history.
 
 | Entity | Platform | Meaning |
 |---|---|---|
+| Any socket available | binary sensor | On if any socket on any charger you added is `AVAILABLE` |
+| Available sockets | sensor | Count of sockets on your added chargers currently `AVAILABLE` |
+| Sockets in use | sensor | Count of sockets on your added chargers in any "in use" state |
 | Charging | binary sensor | On while you have an active session, on any charger |
 | Active session charger | sensor | Name of the charger your active session is running on |
 | Active session socket | sensor | Name of the socket your active session is running on |
@@ -105,30 +107,15 @@ running) and your charging history.
 
 ## Options
 
-**Settings → Devices & services → Mer EV Charging → Configure** gives you two
-things:
+**Settings → Devices & services → Mer EV Charging → Configure** has one
+setting, the **poll interval**: how often, in seconds, Home Assistant polls
+the portal. Configurable between 30 and 600 seconds; the default is 60.
+Changing it reloads the integration so the new value takes effect
+immediately.
 
-- **Poll interval** — how often, in seconds, Home Assistant polls the portal.
-  Configurable between 30 and 600 seconds; the default is 60.
-- **Change site or chargers** — re-run the site search and charger selection
-  from setup, seeded with your current choices.
-
-Changing either setting reloads the integration so the new value takes
-effect immediately.
-
-Deselecting a charger does **not** delete anything by itself. The
-integration stops polling it, but its device and all of its entities stay in
-Home Assistant's registries with their entities unavailable. To get rid of
-them, open the charger's own device page and use **Delete**; that is enabled
-only for chargers you have already deselected.
-
-Changing the **site** is messier, and worth knowing before you try it. A new
-site device is created for the new site, and the old site device is left
-behind orphaned — and unlike a charger, it cannot be deleted from its device
-page, because the integration only permits deleting charger devices. The
-config entry's title also keeps naming the old site. If you need to move to a
-different site, the clean way is to remove the integration entirely and add
-it again.
+Chargers are not managed here but on the integration's page, with **Add
+charger** and each charger card's **Delete**, as described under
+[Setup](#setup). Adding or deleting a charger also reloads the integration.
 
 If your Mer password changes and the integration can no longer log in, Home
 Assistant raises a repair/reauthentication prompt on the integration; follow
@@ -143,7 +130,7 @@ work site, so you know before you set off whether you'll get a spot:
 alias: Notify when a NETPark socket frees up
 triggers:
   - trigger: state
-    entity_id: binary_sensor.netpark_any_socket_available
+    entity_id: binary_sensor.mer_account_any_socket_available
     to: "on"
 conditions:
   - condition: time
@@ -163,17 +150,15 @@ actions:
 mode: single
 ```
 
-The entity id above follows from the site device's own name, and real site
-names tend to be far more verbose than "NETPark" — this project's actual
-site is "Durham County Council - Business Durham NETPark", which slugifies
-to something much longer than the tidy example above. Don't assume the
-short form is literal; open **Developer Tools → States**, find your site's
-`any_socket_available` entity, and copy its real id.
+The entity above is the account device's **Any socket available**, which
+covers every charger you have added. Its id follows from the device name
+"Mer account", so it is the same for everyone unless you rename the device;
+if in doubt, open **Developer Tools → States** and copy the real id.
 
 There is no charger-level availability entity — availability is a property
 of a socket, and a charger with two sockets (e.g. Left and Right) has two
 independent availability states. To watch one specific socket instead of
-the whole site, trigger on that socket's own availability sensor, e.g.
+all your chargers, trigger on that socket's own availability sensor, e.g.
 `binary_sensor.explorer_1_left_available` for the "Left" socket on a charger
 device named "Explorer 1" — again, check Developer Tools for the id your
 own charger and socket names actually produce.

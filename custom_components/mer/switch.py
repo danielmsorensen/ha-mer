@@ -25,10 +25,11 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: MerConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     coordinator = entry.runtime_data
-    async_add_entities(
-        MerNotifyAvailableSwitch(coordinator, station.id)
-        for station in coordinator.configured_stations()
-    )
+    for subentry, station in coordinator.charger_stations():
+        async_add_entities(
+            [MerNotifyAvailableSwitch(coordinator, station.id)],
+            config_subentry_id=subentry.subentry_id,
+        )
 
 
 class MerNotifyAvailableSwitch(MerStationEntity, SwitchEntity):

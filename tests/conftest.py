@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -14,9 +15,11 @@ from custom_components.mer.const import (
     CONF_SCAN_INTERVAL,
     CONF_SITE_ID,
     CONF_SITE_NAME,
-    CONF_STATION_IDS,
+    CONF_STATION_ID,
+    CONF_STATION_NAME,
     DEFAULT_BASE_URL,
     DOMAIN,
+    SUBENTRY_TYPE_CHARGER,
 )
 from custom_components.mer.driivz.models import (
     ActiveTransaction,
@@ -29,6 +32,11 @@ from custom_components.mer.driivz.models import (
 from tests.helpers import load_json_fixture, station_from_fixture, stations_from_fixture
 
 SITE_NAME = "Durham County Council - Business Durham NETPark"
+SITE_ID = 2877
+STATION_NAMES = {
+    6042: "Business Durham - NETPark 3 - Explorer 1",
+    6041: "Business Durham - NETPark 4 - Explorer 2",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -37,25 +45,42 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     return
 
 
-@pytest.fixture
-def mock_config_entry() -> MockConfigEntry:
-    """A configured entry monitoring Explorer 1 and 2."""
+def charger_subentry(station_id: int) -> ConfigSubentryData:
+    """Subentry data for one of the NETPark chargers, as the add-charger flow stores it."""
+    return ConfigSubentryData(
+        data={
+            CONF_STATION_ID: station_id,
+            CONF_STATION_NAME: STATION_NAMES[station_id],
+            CONF_SITE_ID: SITE_ID,
+            CONF_SITE_NAME: SITE_NAME,
+        },
+        subentry_type=SUBENTRY_TYPE_CHARGER,
+        title=f"{STATION_NAMES[station_id]} ({SITE_NAME})",
+        unique_id=f"station_{station_id}",
+    )
+
+
+def make_config_entry(station_ids: list[int]) -> MockConfigEntry:
+    """An account entry with a charger subentry per station id."""
     return MockConfigEntry(
         domain=DOMAIN,
-        title=f"Mer - {SITE_NAME}",
+        version=2,
+        title="user@example.com",
         unique_id="user@example.com",
         data={
             CONF_USERNAME: "user@example.com",
             CONF_PASSWORD: "secret",
             CONF_BASE_URL: DEFAULT_BASE_URL,
         },
-        options={
-            CONF_SITE_ID: 2877,
-            CONF_SITE_NAME: SITE_NAME,
-            CONF_STATION_IDS: [6042, 6041],
-            CONF_SCAN_INTERVAL: 60,
-        },
+        options={CONF_SCAN_INTERVAL: 60},
+        subentries_data=[charger_subentry(sid) for sid in station_ids],
     )
+
+
+@pytest.fixture
+def mock_config_entry() -> MockConfigEntry:
+    """A configured account monitoring Explorer 1 and 2."""
+    return make_config_entry([6042, 6041])
 
 
 def _details() -> dict[int, object]:

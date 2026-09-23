@@ -199,35 +199,49 @@ Any `AuthError` after the client's own retry → `ConfigEntryAuthFailed` (reauth
 Button presses call the client directly, then `coordinator.async_request_refresh()` after
 a 5 s delay so the new socket status shows promptly.
 
-### 3.3 Config flow
+### 3.3 Config flow (revised 2026-09-23)
 
-Config entry **data**: `username`, `password`, `base_url`. **Options**: `site_id`,
-`site_name`, `station_ids: list[int]`, `scan_interval`.
+The config entry is the **account**. **Data**: `username`, `password`, `base_url`.
+**Options**: `scan_interval` only. Title: the username. Entry `VERSION = 2`; version 1
+entries (site + station list in options) are not migrated, since none existed outside
+the dev instance when the shape changed.
 
-Steps:
+`user` step: email, password. Validate with `login()`. Errors: `invalid_auth`,
+`cannot_connect`, `unknown`. `unique_id = username.lower()`; abort if configured. Creates
+the entry immediately; with no chargers the coordinator polls the account only.
 
-1. `user`: email, password. Validate with `login()`. Errors: `invalid_auth`,
-   `cannot_connect`, `unknown`. `unique_id = username.lower()`; abort if configured.
-2. `site`: text field `search`. Fetch all sites with a whole-UK bounds call, filter
-   case-insensitively on `dn`, present a `SelectSelector` of up to 25 matches labelled
-   `"<name> (<n> sockets, <status>)"`. No match → error `no_sites`.
+**Chargers are config subentries** of type `charger`, one per station, added from the
+integration page's "Add charger" button (`MerChargerSubentryFlow`):
+
+1. `user`: text field `search`. Log in with the entry's credentials first (abort
+   `invalid_auth` / `cannot_connect`). Fetch all sites with a whole-UK bounds call,
+   filter case-insensitively on `dn`, present a `SelectSelector` of up to 25 matches
+   labelled `"<name> (<n> sockets, <status>)"`. No match → error `no_sites`.
+2. `site_select`: pick one site.
 3. `stations`: `find_stations_in_bounds` around the chosen site's coordinates (±0.003°)
-   then keep those whose `find_station_by_id` says `siteId == site_id` (one call per
-   candidate; sites have ≤ ~20 stations). Multi-select, all pre-selected, labels are the
-   cleaned caption. Must select ≥ 1.
-4. Create entry titled `"Mer – <site name>"`.
+   then keep those whose `find_station_by_id` says `siteId == site_id`. Stations that
+   already have a subentry are hidden (all hidden → abort `all_stations_configured`).
+   Multi-select, nothing pre-selected, must select ≥ 1.
+4. One subentry per ticked station: `data = {station_id, station_name, site_id,
+   site_name}`, `title = "<station> (<site>)"`, `unique_id = "station_<id>"`. A flow
+   returns one subentry, so the others are added via
+   `hass.config_entries.async_add_subentry` first.
 
-Options flow: `init` menu with `interval` (number 30–600) and `stations` (re-run steps
-2–3 seeded with current values). Changing stations reloads the entry; removed stations'
-devices are deleted via `async_remove_config_entry_device` support.
+Adding or removing a subentry notifies the entry's update listener, which reloads the
+entry. Removing one also has HA delete the devices and entities registered under that
+subentry, so no `async_remove_config_entry_device` hook is needed.
+
+Options flow: a single `init` form with the interval (number 30–600).
 
 Reauth flow: `reauth_confirm` asks for the password only, validates, updates data,
 reloads.
 
 ### 3.4 Devices and entities
 
-Device identifiers: `(mer, "site_<id>")`, `(mer, "station_<id>")` with `via_device` site,
-`(mer, "account_<customer_id>")`. Station device: name = caption with
+Device identifiers: `(mer, "account_<entry_id>")` and `(mer, "station_<id>")` with
+`via_device` the account device; there is no site device (revised 2026-09-23, since one
+entry can hold chargers from several sites). Each charger's entities are added under
+its subentry id. Station device: name = caption with
 `[RESTRICTED ACCESS]` and `(MER-FS-…)` removed and trimmed, manufacturer `Mer`,
 model `stationModelName`, serial `identityKey`, `configuration_url` = portal map link.
 
@@ -242,9 +256,9 @@ Unique ids: `<entry_id>_<device>_<key>`; socket entities use the socket id.
 | Socket | `<socket name> price` | sensor | `kwhPrice` for the user's plan (first `socketPrices` entry), unit `GBP/kWh` |
 | Socket | `<socket name> max power` | sensor (diagnostic) | `maximumPower` kW |
 | Socket | `<socket name> start charge` | button | `start_charge(socket_id)` |
-| Site | `any socket available` | binary_sensor | any configured socket AVAILABLE |
-| Site | `available sockets` | sensor | count |
-| Site | `sockets in use` | sensor | count with in-use statuses |
+| Account | `any socket available` | binary_sensor | any socket on any added charger AVAILABLE |
+| Account | `available sockets` | sensor | count over added chargers |
+| Account | `sockets in use` | sensor | count with in-use statuses |
 | Account | `charging` | binary_sensor | `active is not None` |
 | Account | `active session station` | sensor | cleaned caption or `none` |
 | Account | `active session started` | sensor (timestamp) | |

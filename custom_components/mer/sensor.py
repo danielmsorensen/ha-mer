@@ -22,7 +22,6 @@ from .driivz.models import Socket, Station, Transaction, clean_caption
 from .entity import (
     STATUS_OPTIONS,
     MerAccountEntity,
-    MerSiteEntity,
     MerSocketEntity,
     MerStationEntity,
     socket_label,
@@ -94,41 +93,42 @@ SOCKET_SENSORS: tuple[MerSocketSensorDescription, ...] = (
 
 
 @dataclass(frozen=True, kw_only=True)
-class MerSiteSensorDescription(SensorEntityDescription):
-    """Sensor aggregating the configured stations."""
-
-    value_fn: Callable[[list[Station]], StateType]
-
-
-SITE_SENSORS: tuple[MerSiteSensorDescription, ...] = (
-    MerSiteSensorDescription(
-        key="available_sockets",
-        translation_key="site_available_sockets",
-        icon="mdi:ev-plug-type2",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda stations: sum(
-            1 for station in stations for socket in station.sockets if socket.is_available
-        ),
-    ),
-    MerSiteSensorDescription(
-        key="sockets_in_use",
-        translation_key="site_sockets_in_use",
-        icon="mdi:ev-plug-type2",
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda stations: sum(
-            1 for station in stations for socket in station.sockets if socket.is_in_use
-        ),
-    ),
-)
-
-
-@dataclass(frozen=True, kw_only=True)
 class MerAccountSensorDescription(SensorEntityDescription):
     """Sensor reading coordinator-wide data."""
 
     value_fn: Callable[[MerCoordinator, MerData], StateType | datetime]
     unit_fn: Callable[[MerData], str | None] | None = None
     attributes_fn: Callable[[MerCoordinator, MerData], dict[str, str]] | None = None
+
+
+def _count_sockets(coordinator: MerCoordinator, predicate: Callable[[Socket], bool]) -> int:
+    """Count sockets across every configured charger that satisfy the predicate."""
+    return sum(
+        1
+        for station in coordinator.configured_stations()
+        for socket in station.sockets
+        if predicate(socket)
+    )
+
+
+# Aggregates over the chargers you added, on the account device: the "is anything free
+# at work" view this integration exists for.
+AGGREGATE_SENSORS: tuple[MerAccountSensorDescription, ...] = (
+    MerAccountSensorDescription(
+        key="available_sockets",
+        translation_key="account_available_sockets",
+        icon="mdi:ev-plug-type2",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda coordinator, _d: _count_sockets(coordinator, lambda s: s.is_available),
+    ),
+    MerAccountSensorDescription(
+        key="sockets_in_use",
+        translation_key="account_sockets_in_use",
+        icon="mdi:ev-plug-type2",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda coordinator, _d: _count_sockets(coordinator, lambda s: s.is_in_use),
+    ),
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -318,10 +318,10 @@ STATION_SESSION_SENSORS: tuple[MerStationSessionSensorDescription, ...] = (
 async def async_setup_entry(
     hass: HomeAssistant, entry: MerConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
-    """Create sensors for every configured station and its sockets."""
+    """Create sensors for every configured charger (under its subentry) and the account."""
     coordinator = entry.runtime_data
-    entities: list[SensorEntity] = []
-    for station in coordinator.configured_stations():
+    for subentry, station in coordinator.charger_stations():
+        entities: list[SensorEntity] = []
         entities.extend(
             MerStationSensor(coordinator, station.id, description)
             for description in STATION_SENSORS
@@ -335,9 +335,11 @@ async def async_setup_entry(
                 MerSocketSensor(coordinator, station.id, socket.id, description)
                 for description in SOCKET_SENSORS
             )
-    entities.extend(MerSiteSensor(coordinator, description) for description in SITE_SENSORS)
-    entities.extend(MerAccountSensor(coordinator, description) for description in ACCOUNT_SENSORS)
-    async_add_entities(entities)
+        async_add_entities(entities, config_subentry_id=subentry.subentry_id)
+    async_add_entities(
+        MerAccountSensor(coordinator, description)
+        for description in (*AGGREGATE_SENSORS, *ACCOUNT_SENSORS)
+    )
 
 
 class MerStationSensor(MerStationEntity, SensorEntity):
@@ -408,16 +410,6 @@ class MerSocketSensor(MerSocketEntity, SensorEntity):
         if self.entity_description.unit_fn is not None and socket is not None:
             return self.entity_description.unit_fn(socket)
         return self.entity_description.native_unit_of_measurement
-
-
-class MerSiteSensor(MerSiteEntity, SensorEntity):
-    """A sensor aggregating all configured chargers at the site."""
-
-    entity_description: MerSiteSensorDescription
-
-    @property
-    def native_value(self) -> StateType:
-        return self.entity_description.value_fn(self.coordinator.configured_stations())
 
 
 class MerAccountSensor(MerAccountEntity, SensorEntity):

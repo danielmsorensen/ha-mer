@@ -14,8 +14,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import MerConfigEntry, MerCoordinator, MerData
-from .driivz.models import Socket, Station
-from .entity import MerAccountEntity, MerSiteEntity, MerSocketEntity, MerStationEntity
+from .driivz.models import Socket
+from .entity import MerAccountEntity, MerSocketEntity, MerStationEntity
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -24,13 +24,8 @@ class MerSocketBinaryDescription(BinarySensorEntityDescription):
 
 
 @dataclass(frozen=True, kw_only=True)
-class MerSiteBinaryDescription(BinarySensorEntityDescription):
-    is_on_fn: Callable[[list[Station]], bool]
-
-
-@dataclass(frozen=True, kw_only=True)
 class MerAccountBinaryDescription(BinarySensorEntityDescription):
-    is_on_fn: Callable[[MerData], bool]
+    is_on_fn: Callable[[MerCoordinator, MerData], bool]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -47,23 +42,23 @@ SOCKET_BINARY_SENSORS: tuple[MerSocketBinaryDescription, ...] = (
     ),
 )
 
-SITE_BINARY_SENSORS: tuple[MerSiteBinaryDescription, ...] = (
-    MerSiteBinaryDescription(
+ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
+    # Aggregate over every charger you added: the single "is anything free" signal.
+    MerAccountBinaryDescription(
         key="any_available",
-        translation_key="site_any_available",
+        translation_key="account_any_available",
         icon="mdi:ev-station",
-        is_on_fn=lambda stations: any(
-            socket.is_available for station in stations for socket in station.sockets
+        is_on_fn=lambda coordinator, _d: any(
+            socket.is_available
+            for station in coordinator.configured_stations()
+            for socket in station.sockets
         ),
     ),
-)
-
-ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
     MerAccountBinaryDescription(
         key="charging",
         translation_key="account_charging",
         device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
-        is_on_fn=lambda data: data.active is not None,
+        is_on_fn=lambda _c, data: data.active is not None,
     ),
 )
 
@@ -82,8 +77,8 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: MerConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     coordinator = entry.runtime_data
-    entities: list[BinarySensorEntity] = []
-    for station in coordinator.configured_stations():
+    for subentry, station in coordinator.charger_stations():
+        entities: list[BinarySensorEntity] = []
         entities.extend(
             MerStationBinarySensor(coordinator, station.id, description)
             for description in STATION_BINARY_SENSORS
@@ -93,9 +88,8 @@ async def async_setup_entry(
                 MerSocketBinarySensor(coordinator, station.id, socket.id, description)
                 for description in SOCKET_BINARY_SENSORS
             )
-    entities.extend(MerSiteBinarySensor(coordinator, d) for d in SITE_BINARY_SENSORS)
-    entities.extend(MerAccountBinarySensor(coordinator, d) for d in ACCOUNT_BINARY_SENSORS)
-    async_add_entities(entities)
+        async_add_entities(entities, config_subentry_id=subentry.subentry_id)
+    async_add_entities(MerAccountBinarySensor(coordinator, d) for d in ACCOUNT_BINARY_SENSORS)
 
 
 class MerSocketBinarySensor(MerSocketEntity, BinarySensorEntity):
@@ -116,20 +110,12 @@ class MerSocketBinarySensor(MerSocketEntity, BinarySensorEntity):
         return self.entity_description.is_on_fn(socket) if socket else None
 
 
-class MerSiteBinarySensor(MerSiteEntity, BinarySensorEntity):
-    entity_description: MerSiteBinaryDescription
-
-    @property
-    def is_on(self) -> bool:
-        return self.entity_description.is_on_fn(self.coordinator.configured_stations())
-
-
 class MerAccountBinarySensor(MerAccountEntity, BinarySensorEntity):
     entity_description: MerAccountBinaryDescription
 
     @property
     def is_on(self) -> bool:
-        return self.entity_description.is_on_fn(self.coordinator.data)
+        return self.entity_description.is_on_fn(self.coordinator, self.coordinator.data)
 
 
 class MerStationBinarySensor(MerStationEntity, BinarySensorEntity):

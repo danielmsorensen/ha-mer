@@ -9,11 +9,18 @@ from homeassistant.const import Platform
 DOMAIN = "mer"
 
 CONF_BASE_URL = "base_url"
-CONF_SITE_ID = "site_id"
-CONF_SITE_NAME = "site_name"
-CONF_STATION_IDS = "station_ids"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_SEARCH = "search"
+
+# Each monitored charger is a config subentry of this type on the account entry.
+# Its data holds the four keys below; the site ones are informational.
+SUBENTRY_TYPE_CHARGER = "charger"
+CONF_STATION_ID = "station_id"
+CONF_STATION_NAME = "station_name"
+CONF_SITE_ID = "site_id"
+CONF_SITE_NAME = "site_name"
+# Transient key of the multi-select in the add-charger flow.
+CONF_STATION_IDS = "station_ids"
 
 DEFAULT_BASE_URL = "https://driver.uk.mer.eco"
 DEFAULT_SCAN_INTERVAL = 60

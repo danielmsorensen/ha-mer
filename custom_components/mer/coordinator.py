@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import logging
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.event import async_call_later
@@ -18,9 +18,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_SCAN_INTERVAL,
-    CONF_SITE_ID,
-    CONF_SITE_NAME,
-    CONF_STATION_IDS,
+    CONF_STATION_ID,
     DEFAULT_SCAN_INTERVAL,
     DETAIL_REFRESH,
     DOMAIN,
@@ -28,6 +26,7 @@ from .const import (
     RATE_LIMIT_SKIP_THRESHOLD,
     RATE_LIMIT_WARN_INTERVAL,
     REFRESH_AFTER_COMMAND_SECONDS,
+    SUBENTRY_TYPE_CHARGER,
     WALLET_REFRESH,
 )
 from .driivz.client import DriivzDriverClient
@@ -83,9 +82,16 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             update_interval=timedelta(seconds=interval),
         )
         self.client = client
-        self.station_ids: list[int] = [int(i) for i in entry.options.get(CONF_STATION_IDS, [])]
-        self.site_id: int | None = entry.options.get(CONF_SITE_ID)
-        self.site_name: str = entry.options.get(CONF_SITE_NAME) or "Mer site"
+        # One charger subentry per monitored station. Adding or removing one reloads
+        # the entry (see __init__), so this list is fixed for the coordinator's life.
+        self.charger_subentries: list[ConfigSubentry] = [
+            subentry
+            for subentry in entry.subentries.values()
+            if subentry.subentry_type == SUBENTRY_TYPE_CHARGER
+        ]
+        self.station_ids: list[int] = [
+            int(subentry.data[CONF_STATION_ID]) for subentry in self.charger_subentries
+        ]
         self._details: dict[int, Station] = {}
         self._notify: dict[int, bool] = {}
         self._notify_lock = asyncio.Lock()
@@ -125,7 +131,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 return self.data
         now = dt_util.utcnow()
         try:
-            stations = {s.id: s for s in await self.client.find_stations_by_ids(self.station_ids)}
+            stations: dict[int, Station] = {}
+            if self.station_ids:
+                found = await self.client.find_stations_by_ids(self.station_ids)
+                stations = {s.id: s for s in found}
             active = await self._fetch_active()
             if self._due(self._wallet_refreshed, WALLET_REFRESH, now):
                 await self._refresh_optional("account", self._refresh_account(now))
@@ -320,6 +329,25 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         """Configured stations that are present in the latest data."""
         stations = (self.get_station(sid) for sid in self.station_ids)
         return [s for s in stations if s is not None]
+
+    def charger_stations(self) -> list[tuple[ConfigSubentry, Station]]:
+        """Each charger subentry with its station, skipping any the portal did not return.
+
+        Platforms add a charger's entities under its subentry id, so that removing the
+        subentry removes exactly that charger's device and entities.
+        """
+        pairs: list[tuple[ConfigSubentry, Station]] = []
+        for subentry in self.charger_subentries:
+            station = self.get_station(int(subentry.data[CONF_STATION_ID]))
+            if station is None:
+                _LOGGER.warning(
+                    "Mer charger %s (%s) was not returned by the portal; skipping its entities",
+                    subentry.data[CONF_STATION_ID],
+                    subentry.title,
+                )
+                continue
+            pairs.append((subentry, station))
+        return pairs
 
     async def async_set_availability_subscription(self, station_id: int, subscribed: bool) -> None:
         """Subscribe or unsubscribe this charger, then publish the confirmed result.
