@@ -201,6 +201,10 @@ a 5 s delay so the new socket status shows promptly.
 
 ### 3.3 Config flow (revised 2026-09-23)
 
+> **Superseded in part (2026-09-23, later):** chargers are grouped into one subentry per
+> *site* (type `site`, `station_ids` list, entry `VERSION` 3) rather than one per charger;
+> see `docs/decisions.md`, "one subentry per site, not per charger".
+
 The config entry is the **account**. **Data**: `username`, `password`, `base_url`.
 **Options**: `scan_interval` only. Title: the username. Entry `VERSION = 2`; version 1
 entries (site + station list in options) are not migrated, since none existed outside

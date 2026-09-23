@@ -39,10 +39,11 @@
     }
   },
   "config_subentries": {
-    "charger": {
-      "entry_type": "Charger",
+    "site": {
+      "entry_type": "Charging site",
       "initiate_flow": {
-        "user": "Add charger"
+        "user": "Add charger",
+        "reconfigure": "Change chargers"
       },
       "step": {
         "user": {
@@ -64,10 +65,17 @@
         },
         "stations": {
           "title": "Choose the chargers to add",
-          "description": "Chargers at {site} that you have not added yet. Each one becomes its own device.",
+          "description": "Chargers at {site} that you have not added yet. Each one becomes its own device, grouped under the site.",
           "data": {
             "station_ids": "Chargers",
             "back": "Not here? Go back and choose a different site"
+          }
+        },
+        "reconfigure": {
+          "title": "Change chargers at {site}",
+          "description": "Tick the chargers to monitor at this site. Unticking one removes its device and entities. To stop monitoring the whole site, delete it from its menu instead.",
+          "data": {
+            "station_ids": "Chargers"
           }
         }
       },
@@ -77,11 +85,13 @@
         "no_stations_selected": "Select at least one charger"
       },
       "abort": {
-        "already_configured": "That charger is already added",
+        "already_configured": "That site is already added; use Add charger again to add more of its chargers.",
         "all_stations_configured": "Every charger at that site is already added",
         "invalid_auth": "Stored password no longer works; re-authenticate the integration first",
         "cannot_connect": "Could not reach the Mer driver portal",
-        "no_stations": "No chargers were found at that site"
+        "no_stations": "No chargers were found at that site",
+        "stations_added": "Added to {site}.",
+        "reconfigure_successful": "Chargers updated."
       }
     }
   },
@@ -103,7 +113,9 @@
           "unknown": "Unknown"
         }
       },
-      "identity_key": { "name": "Identity key" },
+      "identity_key": {
+        "name": "Identity key"
+      },
       "socket_status": {
         "name": "{socket} status",
         "state": {
@@ -120,38 +132,98 @@
           "unknown": "Unknown"
         }
       },
-      "socket_price": { "name": "{socket} price" },
-      "socket_max_power": { "name": "{socket} max power" },
-      "account_available_sockets": { "name": "Available sockets" },
-      "account_sockets_in_use": { "name": "Sockets in use" },
-      "active_station": { "name": "Active session charger" },
-      "active_started": { "name": "Active session started" },
-      "active_energy": { "name": "Active session energy" },
-      "active_cost": { "name": "Active session cost" },
-      "active_duration": { "name": "Active session duration" },
-      "active_socket": { "name": "Active session socket" },
-      "last_energy": { "name": "Last session energy" },
-      "last_cost": { "name": "Last session cost" },
-      "last_started": { "name": "Last session started" },
-      "wallet_balance": { "name": "Wallet balance" },
-      "station_session_energy": { "name": "Session energy" },
-      "station_session_cost": { "name": "Session cost" },
-      "station_session_started": { "name": "Session started" },
-      "station_session_duration": { "name": "Session duration" }
+      "socket_price": {
+        "name": "{socket} price"
+      },
+      "socket_max_power": {
+        "name": "{socket} max power"
+      },
+      "account_available_sockets": {
+        "name": "Available sockets"
+      },
+      "account_sockets_in_use": {
+        "name": "Sockets in use"
+      },
+      "active_station": {
+        "name": "Active session charger"
+      },
+      "active_started": {
+        "name": "Active session started"
+      },
+      "active_energy": {
+        "name": "Active session energy"
+      },
+      "active_cost": {
+        "name": "Active session cost"
+      },
+      "active_duration": {
+        "name": "Active session duration"
+      },
+      "active_socket": {
+        "name": "Active session socket"
+      },
+      "last_energy": {
+        "name": "Last session energy"
+      },
+      "last_cost": {
+        "name": "Last session cost"
+      },
+      "last_started": {
+        "name": "Last session started"
+      },
+      "wallet_balance": {
+        "name": "Wallet balance"
+      },
+      "station_session_energy": {
+        "name": "Session energy"
+      },
+      "station_session_cost": {
+        "name": "Session cost"
+      },
+      "station_session_started": {
+        "name": "Session started"
+      },
+      "station_session_duration": {
+        "name": "Session duration"
+      }
     },
     "binary_sensor": {
-      "socket_available": { "name": "{socket} available" },
-      "account_any_available": { "name": "Any socket available" },
-      "account_charging": { "name": "Charging" },
-      "station_session_here": { "name": "My session here" }
+      "socket_available": {
+        "name": "{socket} available",
+        "state": {
+          "on": "Available",
+          "off": "Not available"
+        }
+      },
+      "account_any_available": {
+        "name": "Any socket available",
+        "state": {
+          "on": "Available",
+          "off": "None available"
+        }
+      },
+      "account_charging": {
+        "name": "Charging"
+      },
+      "station_session_here": {
+        "name": "My session here"
+      }
     },
     "button": {
-      "socket_start_charge": { "name": "{socket} start charge" },
-      "account_stop_charge": { "name": "Stop charge" },
-      "station_stop_charge": { "name": "Stop charge" }
+      "socket_start_charge": {
+        "name": "{socket} start charge"
+      },
+      "account_stop_charge": {
+        "name": "Stop charge"
+      },
+      "station_stop_charge": {
+        "name": "Stop charge"
+      }
     },
     "switch": {
-      "notify_available": { "name": "Notify me when available" }
+      "notify_available": {
+        "name": "Notify me when available"
+      }
     }
   },
   "exceptions": {

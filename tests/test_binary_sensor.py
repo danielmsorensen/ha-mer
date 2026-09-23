@@ -127,3 +127,15 @@ async def test_any_available_lists_free_sockets_with_start_buttons(
         free[0]["start_button"] == "button.business_durham_netpark_3_explorer_1_left_start_charge"
     )
     assert hass.states.get(free[0]["start_button"]) is not None
+
+
+def test_availability_states_have_descriptive_names() -> None:
+    """On/Off would say nothing; the translations name both states."""
+    import json
+    from pathlib import Path
+
+    strings = json.loads(
+        (Path(__file__).parent.parent / "custom_components/mer/strings.json").read_text()
+    )["entity"]["binary_sensor"]
+    for key in ("socket_available", "account_any_available"):
+        assert set(strings[key]["state"]) == {"on", "off"}

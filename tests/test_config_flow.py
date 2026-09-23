@@ -18,12 +18,10 @@ from custom_components.mer.const import (
     CONF_SEARCH,
     CONF_SITE_ID,
     CONF_SITE_NAME,
-    CONF_STATION_ID,
     CONF_STATION_IDS,
-    CONF_STATION_NAME,
     DEFAULT_BASE_URL,
     DOMAIN,
-    SUBENTRY_TYPE_CHARGER,
+    SUBENTRY_TYPE_SITE,
 )
 from custom_components.mer.driivz.exceptions import AuthError, DriivzConnectionError
 from tests.conftest import SITE_NAME, make_config_entry
@@ -40,17 +38,43 @@ async def _start(hass: HomeAssistant):
 
 async def _start_add_charger(hass: HomeAssistant, entry: MockConfigEntry):
     return await hass.config_entries.subentries.async_init(
-        (entry.entry_id, SUBENTRY_TYPE_CHARGER),
+        (entry.entry_id, SUBENTRY_TYPE_SITE),
         context={"source": config_entries.SOURCE_USER},
     )
 
 
 def _charger_station_ids(entry: MockConfigEntry) -> set[int]:
     return {
-        int(s.data[CONF_STATION_ID])
+        int(i)
         for s in entry.subentries.values()
-        if s.subentry_type == SUBENTRY_TYPE_CHARGER
+        if s.subentry_type == SUBENTRY_TYPE_SITE
+        for i in s.data[CONF_STATION_IDS]
     }
+
+
+def _site(entry: MockConfigEntry):
+    (site,) = [s for s in entry.subentries.values() if s.subentry_type == SUBENTRY_TYPE_SITE]
+    return site
+
+
+async def _start_change_chargers(hass: HomeAssistant, entry: MockConfigEntry):
+    return await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_SITE),
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "subentry_id": _site(entry).subentry_id,
+        },
+    )
+
+
+async def _pick_netpark(hass: HomeAssistant, entry: MockConfigEntry):
+    result = await _start_add_charger(hass, entry)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_SEARCH: "netpark"}
+    )
+    return await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_SITE_ID: "2877"}
+    )
 
 
 # ----- initial setup: credentials only -------------------------------------
@@ -142,7 +166,7 @@ async def test_options_interval(
 # ----- add charger subentry flow -------------------------------------------
 
 
-async def test_add_chargers_creates_one_subentry_each(
+async def test_add_chargers_creates_one_site_subentry(
     hass: HomeAssistant, mock_client: MagicMock
 ) -> None:
     entry = make_config_entry([])
@@ -173,30 +197,75 @@ async def test_add_chargers_creates_one_subentry_each(
         result["flow_id"], {CONF_STATION_IDS: ["6042", "6041"]}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == f"Business Durham - NETPark 4 - Explorer 2 ({SITE_NAME})"
+    assert result["title"] == SITE_NAME
     assert result["data"] == {
-        CONF_STATION_ID: 6041,
-        CONF_STATION_NAME: "Business Durham - NETPark 4 - Explorer 2",
         CONF_SITE_ID: 2877,
         CONF_SITE_NAME: SITE_NAME,
+        CONF_STATION_IDS: [6042, 6041],
     }
-    assert result["unique_id"] == "station_6041"
+    assert result["unique_id"] == "site_2877"
     await hass.async_block_till_done()
 
-    assert _charger_station_ids(entry) == {6042, 6041}
-    assert {s.unique_id for s in entry.subentries.values()} == {"station_6042", "station_6041"}
-    # The entry reloaded with the new chargers: their devices exist, under their subentries.
+    # One group for the site on the integration page, holding both chargers' devices.
+    site = _site(entry)
     registry = dr.async_get(hass)
     for station_id in (6042, 6041):
         device = registry.async_get_device_by_identifier(
             (DOMAIN, f"station_{station_id}"), entry.entry_id
         )
         assert device is not None
-        subentry_ids = device.config_entries_subentries[entry.entry_id]
-        assert len(subentry_ids) == 1
-        (subentry_id,) = subentry_ids
-        assert entry.subentries[subentry_id].data[CONF_STATION_ID] == station_id
+        assert device.config_entries_subentries[entry.entry_id] == {site.subentry_id}
     assert entry.runtime_data.station_ids == [6042, 6041]
+
+
+async def test_add_charger_at_existing_site_joins_its_subentry(
+    hass: HomeAssistant, mock_client: MagicMock
+) -> None:
+    entry = make_config_entry([6042])
+    await setup_integration(hass, entry)
+    result = await _pick_netpark(hass, entry)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_STATION_IDS: ["6041"]}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "stations_added"
+    await hass.async_block_till_done()
+    assert len(entry.subentries) == 1
+    assert _site(entry).data[CONF_STATION_IDS] == [6042, 6041]
+    assert entry.runtime_data.station_ids == [6042, 6041]
+    registry = dr.async_get(hass)
+    assert registry.async_get_device_by_identifier((DOMAIN, "station_6041"), entry.entry_id)
+
+
+async def test_change_chargers_unticks_one_and_removes_its_device(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    await setup_integration(hass, mock_config_entry)
+    registry = dr.async_get(hass)
+    entry_id = mock_config_entry.entry_id
+    assert registry.async_get_device_by_identifier((DOMAIN, "station_6041"), entry_id)
+
+    result = await _start_change_chargers(hass, mock_config_entry)
+    assert result["step_id"] == "reconfigure"
+    assert result["data_schema"]({})[CONF_STATION_IDS] == ["6042", "6041"]
+    assert result["description_placeholders"] == {"site": SITE_NAME}
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_STATION_IDS: []}
+    )
+    assert result["errors"] == {"base": "no_stations_selected"}
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_STATION_IDS: ["6042"]}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()
+
+    assert _charger_station_ids(mock_config_entry) == {6042}
+    assert mock_config_entry.runtime_data.station_ids == [6042]
+    assert registry.async_get_device_by_identifier((DOMAIN, "station_6041"), entry_id) is None
+    assert registry.async_get_device_by_identifier((DOMAIN, "station_6042"), entry_id)
 
 
 async def test_add_charger_hides_already_added(hass: HomeAssistant, mock_client: MagicMock) -> None:
@@ -257,25 +326,25 @@ async def test_add_charger_no_site_match_and_login_failures(
     assert result["reason"] == "cannot_connect"
 
 
-async def test_remove_charger_subentry_removes_device_and_reloads(
+async def test_delete_site_removes_its_chargers(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     registry = dr.async_get(hass)
     entry_id = mock_config_entry.entry_id
-    assert registry.async_get_device_by_identifier((DOMAIN, "station_6041"), entry_id)
-    subentry = next(
-        s for s in mock_config_entry.subentries.values() if s.data[CONF_STATION_ID] == 6041
-    )
 
-    hass.config_entries.async_remove_subentry(mock_config_entry, subentry.subentry_id)
+    hass.config_entries.async_remove_subentry(
+        mock_config_entry, _site(mock_config_entry).subentry_id
+    )
     await hass.async_block_till_done()
 
-    assert registry.async_get_device_by_identifier((DOMAIN, "station_6041"), entry_id) is None
-    assert registry.async_get_device_by_identifier((DOMAIN, "station_6042"), entry_id)
-    assert _charger_station_ids(mock_config_entry) == {6042}
-    assert mock_config_entry.runtime_data.station_ids == [6042]
-    assert hass.states.get("sensor.business_durham_netpark_4_explorer_2_status") is None
+    for station_id in (6042, 6041):
+        assert (
+            registry.async_get_device_by_identifier((DOMAIN, f"station_{station_id}"), entry_id)
+            is None
+        )
+    assert mock_config_entry.runtime_data.station_ids == []
+    assert registry.async_get_device_by_identifier((DOMAIN, f"account_{entry_id}"), entry_id)
 
 
 async def test_add_charger_can_go_back_a_step(hass: HomeAssistant, mock_client: MagicMock) -> None:

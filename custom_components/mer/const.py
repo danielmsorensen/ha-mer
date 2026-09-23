@@ -12,15 +12,16 @@ CONF_BASE_URL = "base_url"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_SEARCH = "search"
 
-# Each monitored charger is a config subentry of this type on the account entry.
-# Its data holds the four keys below; the site ones are informational.
-SUBENTRY_TYPE_CHARGER = "charger"
-CONF_STATION_ID = "station_id"
-CONF_STATION_NAME = "station_name"
+# Each charging site with monitored chargers is a config subentry of this type on the
+# account entry, so the integration page groups a site's chargers together. Its data
+# holds the site id and name and the ids of the chargers monitored there.
+SUBENTRY_TYPE_SITE = "site"
 CONF_SITE_ID = "site_id"
 CONF_SITE_NAME = "site_name"
-# Transient key of the multi-select in the add-charger flow.
 CONF_STATION_IDS = "station_ids"
+# Version 2 entries had one subentry per charger; kept for the migration only.
+LEGACY_SUBENTRY_TYPE_CHARGER = "charger"
+LEGACY_CONF_STATION_ID = "station_id"
 
 DEFAULT_BASE_URL = "https://driver.uk.mer.eco"
 DEFAULT_SCAN_INTERVAL = 60

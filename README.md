@@ -27,13 +27,13 @@ your own account, for your own personal use.
 ## Setup
 
 Go to **Settings → Devices & services → Add integration**, and search for
-**Mer EV Charging**. Setup asks only for the e-mail and password you use for
+**Mer**. Setup asks only for the e-mail and password you use for
 the Mer Connect / driver portal app. That creates the account, with its own
 device and entities, but no chargers yet.
 
 Chargers are added afterwards, from the integration's page (**Settings →
-Devices & services → Mer EV Charging**), where each charger you add gets its
-own card and there is an **Add charger** button:
+Devices & services → Mer**), with the **Add charger** button. The page groups
+chargers by charging site:
 
 1. **Search for the site** by typing any part of its name as it appears in
    the Mer app. The search is not case-sensitive and matches anywhere in the
@@ -42,16 +42,23 @@ own card and there is an **Add charger** button:
    Pick the site from the matches.
 2. **Tick the chargers** you want to monitor at that site. Chargers you have
    already added are not offered again. Every ticked charger becomes its own
-   card on the integration page and its own device, with its socket entities
-   attached to it.
+   device, with its socket entities attached to it, inside that site's group
+   on the integration page. Adding more chargers at a site you already have
+   puts them in the same group.
 
 Picked the wrong site? The site list ends with **Search again**, and the
 chargers step has a **go back and choose a different site** checkbox, since
 Home Assistant's setup dialogs have no back button of their own.
 
-You can repeat Add charger for chargers at other sites. To stop monitoring a
-charger, open the menu on its card and choose **Delete**; Home Assistant
-removes its device and entities and the integration reloads.
+You can repeat Add charger for chargers at other sites. To stop monitoring
+one charger, open its site's menu, choose **Change chargers** and untick it.
+To stop monitoring a whole site, choose **Delete** from the same menu. Either
+way Home Assistant removes the devices and entities and the integration
+reloads.
+
+The account device sits in a separate group labelled "Devices that don't
+belong to a sub-entry". That label is Home Assistant's own: the account
+belongs to the whole integration rather than to any one site.
 
 ## Entities
 
@@ -67,7 +74,7 @@ One device per charger you added, linked to the account device.
 | --- | --- | --- |
 | Status | sensor | The charger's own status (`available`, `charging`, `faulted`, …) |
 | Identity key | sensor (diagnostic) | The charger's portal identity key, e.g. `MER-FS-AD00137` |
-| Session energy | sensor | Energy delivered by *your* active session, only while it is running on this charger |
+| Session energy | sensor | Energy delivered by *your* active session, only while it is running on this charger; unavailable otherwise |
 | Session cost | sensor | Cost of that active session so far |
 | Session started | sensor | When that active session started |
 | Session duration | sensor | How long that active session has been running |
@@ -82,8 +89,8 @@ have a "Left" and a "Right" socket):
 | Entity | Platform | Meaning |
 | --- | --- | --- |
 | *Socket* status | sensor | The socket's own status |
-| *Socket* available | binary sensor | On if this socket is `AVAILABLE` |
-| *Socket* price | sensor | Your tariff's price per kWh on this socket |
+| *Socket* available | binary sensor | **Available** or **Not available** |
+| *Socket* price | sensor | Your tariff's price per kWh on this socket; the billing plan, fixed price, per-minute rate and transaction fee are attributes |
 | *Socket* max power | sensor (diagnostic) | The socket's maximum power in kW |
 | *Socket* start charge | button | Starts a charge on this socket |
 
@@ -94,11 +101,11 @@ your active session (wherever it is running) and your charging history.
 
 | Entity | Platform | Meaning |
 | --- | --- | --- |
-| Any socket available | binary sensor | On if any socket on any charger you added is `AVAILABLE` |
+| Any socket available | binary sensor | **Available** if any socket on any charger you added is free, otherwise **None available** |
 | Available sockets | sensor | Count of sockets on your added chargers currently `AVAILABLE` |
 | Sockets in use | sensor | Count of sockets on your added chargers in any "in use" state |
 | Charging | binary sensor | On while you have an active session, on any charger |
-| Active session charger | sensor | Name of the charger your active session is running on |
+| Active session charger | sensor | Name of the charger your active session is running on. This and the other active session sensors are unavailable while you are not charging |
 | Active session socket | sensor | Name of the socket your active session is running on |
 | Active session started | sensor | When the active session started |
 | Active session energy | sensor | Energy delivered so far in the active session |
@@ -119,7 +126,7 @@ Changing it reloads the integration so the new value takes effect
 immediately.
 
 Chargers are not managed here but on the integration's page, with **Add
-charger** and each charger card's **Delete**, as described under
+charger** and each site's **Change chargers** and **Delete**, as described under
 [Setup](#setup). Adding or deleting a charger also reloads the integration.
 
 If your Mer password changes and the integration can no longer log in, Home

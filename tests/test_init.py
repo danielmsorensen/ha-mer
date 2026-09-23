@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from types import MappingProxyType
 from unittest.mock import MagicMock
 
-from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentryData
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.mer.const import DOMAIN, SUBENTRY_TYPE_CHARGER
+from custom_components.mer.const import (
+    CONF_STATION_IDS,
+    DOMAIN,
+    SUBENTRY_TYPE_SITE,
+)
 from custom_components.mer.driivz.exceptions import AuthError, DriivzConnectionError
-from tests.conftest import charger_subentry, make_config_entry
+from tests.conftest import SITE_ID, SITE_NAME, make_config_entry
 from tests.helpers import setup_integration
 from tests.test_sensor import state_by_unique_id
 
@@ -91,13 +94,11 @@ async def test_devices_hang_off_the_account(
 async def test_subentry_added_during_setup_is_picked_up(
     hass: HomeAssistant, mock_client: MagicMock
 ) -> None:
-    """Adding two chargers in one flow adds two subentries a moment apart.
+    """A subentry change that lands while setup is running must still be picked up.
 
-    The first addition reloads the entry. If the second lands while that reload's
-    setup is already running, it must still end up with entities: the update
-    listener is registered before setup awaits anything, so the late addition
-    queues one more reload instead of being lost. This is the bug seen live, where
-    Explorer 2 had a card but no device.
+    The update listener is registered before setup awaits anything, so the late
+    change queues one more reload instead of being lost. This was the bug seen live
+    where a newly added charger had a card but no device.
     """
     entry = make_config_entry([6042])
     entry.add_to_hass(hass)
@@ -114,15 +115,9 @@ async def test_subentry_added_during_setup_is_picked_up(
     setup_task = hass.async_create_task(hass.config_entries.async_setup(entry.entry_id))
     await setup_started.wait()
     # Setup is mid-way through its first refresh, having already read the subentries.
-    data = charger_subentry(6041)
-    hass.config_entries.async_add_subentry(
-        entry,
-        ConfigSubentry(
-            data=MappingProxyType(data["data"]),
-            subentry_type=SUBENTRY_TYPE_CHARGER,
-            title=data["title"],
-            unique_id=data["unique_id"],
-        ),
+    (site,) = entry.subentries.values()
+    hass.config_entries.async_update_subentry(
+        entry, site, data={**site.data, CONF_STATION_IDS: [6042, 6041]}
     )
     release.set()
     await setup_task
@@ -135,3 +130,45 @@ async def test_subentry_added_during_setup_is_picked_up(
         assert registry.async_get_device_by_identifier(
             (DOMAIN, f"station_{station_id}"), entry.entry_id
         ), f"station {station_id} has no device"
+
+
+async def test_migrates_per_charger_subentries_to_one_per_site(
+    hass: HomeAssistant, mock_client: MagicMock
+) -> None:
+    """Version 2 had a subentry per charger; they merge into one for their site."""
+    legacy = [
+        ConfigSubentryData(
+            data={
+                "station_id": station_id,
+                "station_name": name,
+                "site_id": SITE_ID,
+                "site_name": SITE_NAME,
+            },
+            subentry_type="charger",
+            title=f"{name} ({SITE_NAME})",
+            unique_id=f"station_{station_id}",
+        )
+        for station_id, name in ((6042, "Explorer 1"), (6041, "Explorer 2"))
+    ]
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        title="user@example.com",
+        unique_id="user@example.com",
+        data=make_config_entry([]).data,
+        options={"scan_interval": 60},
+        subentries_data=legacy,
+    )
+    await setup_integration(hass, entry)
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.version == 3
+    (site,) = entry.subentries.values()
+    assert site.subentry_type == SUBENTRY_TYPE_SITE
+    assert site.title == SITE_NAME
+    assert site.unique_id == f"site_{SITE_ID}"
+    assert site.data[CONF_STATION_IDS] == [6042, 6041]
+    registry = dr.async_get(hass)
+    device = registry.async_get_device_by_identifier((DOMAIN, "station_6041"), entry.entry_id)
+    assert device is not None
+    assert device.config_entries_subentries[entry.entry_id] == {site.subentry_id}

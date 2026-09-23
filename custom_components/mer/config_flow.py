@@ -1,10 +1,9 @@
-"""Config, options and charger subentry flows for the Mer EV Charging integration."""
+"""Config, options and charging-site subentry flows for the Mer integration."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 import logging
-from types import MappingProxyType
 from typing import Any
 
 from homeassistant.config_entries import (
@@ -40,15 +39,13 @@ from .const import (
     CONF_SEARCH,
     CONF_SITE_ID,
     CONF_SITE_NAME,
-    CONF_STATION_ID,
     CONF_STATION_IDS,
-    CONF_STATION_NAME,
     DEFAULT_BASE_URL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
-    SUBENTRY_TYPE_CHARGER,
+    SUBENTRY_TYPE_SITE,
 )
 from .driivz.client import DriivzDriverClient
 from .driivz.exceptions import AuthError, DriivzError
@@ -75,17 +72,18 @@ REAUTH_SCHEMA = vol.Schema(
 )
 
 
+def site_subentries(entry: ConfigEntry) -> list[ConfigSubentry]:
+    """The entry's charging-site subentries, in the order they were added."""
+    return [s for s in entry.subentries.values() if s.subentry_type == SUBENTRY_TYPE_SITE]
+
+
 def configured_station_ids(entry: ConfigEntry) -> list[int]:
-    """Station ids of the charger subentries, in the order they were added."""
-    return [
-        int(subentry.data[CONF_STATION_ID])
-        for subentry in entry.subentries.values()
-        if subentry.subentry_type == SUBENTRY_TYPE_CHARGER
-    ]
+    """Every monitored station id across all sites, in the order they were added."""
+    return [int(i) for s in site_subentries(entry) for i in s.data[CONF_STATION_IDS]]
 
 
-def charger_subentry_title(station: Station, site: Site) -> str:
-    return f"{station.display_name} ({site.name})"
+def site_unique_id(site_id: int) -> str:
+    return f"site_{site_id}"
 
 
 async def _login(
@@ -114,7 +112,7 @@ async def _find_site_stations(client: DriivzDriverClient, site: Site) -> list[St
 class MerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Sign in once; chargers are added afterwards as subentries."""
 
-    VERSION = 2
+    VERSION = 3
 
     @staticmethod
     @callback
@@ -126,7 +124,7 @@ class MerConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_supported_subentry_types(
         cls, config_entry: ConfigEntry
     ) -> dict[str, type[ConfigSubentryFlow]]:
-        return {SUBENTRY_TYPE_CHARGER: MerChargerSubentryFlow}
+        return {SUBENTRY_TYPE_SITE: MerSiteSubentryFlow}
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -219,14 +217,14 @@ class MerOptionsFlow(OptionsFlow):
         return self.async_show_form(step_id="init", data_schema=schema)
 
 
-class MerChargerSubentryFlow(ConfigSubentryFlow):
-    """Add chargers to the account: find a site by name, then pick chargers at it.
+class MerSiteSubentryFlow(ConfigSubentryFlow):
+    """Add chargers ("Add charger") and change a site's chargers ("Change chargers").
 
-    Every ticked charger becomes its own subentry, so each one has a card on the
-    integration page and can be removed on its own. A flow can only return one
-    subentry, so all but the last are added directly through the config entries
-    manager first; each addition notifies the entry's update listener, which
-    reloads the integration, so the new devices appear without further action.
+    One subentry per charging site, holding the ids of the chargers monitored there,
+    so the integration page shows each site as a group with its chargers' devices
+    inside. Adding chargers at a site that already has a subentry adds them to it.
+    Every change notifies the entry's update listener, which reloads the entry; the
+    reload removes the devices of chargers that are no longer monitored.
     """
 
     _client: DriivzDriverClient
@@ -235,21 +233,40 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
     _site: Site | None = None
     _candidates: list[Station]
 
+    async def _ensure_client(self) -> SubentryFlowResult | None:
+        """Log in with the account's credentials; returns an abort result on failure."""
+        if hasattr(self, "_client"):
+            return None
+        data = self._get_entry().data
+        try:
+            self._client = await _login(
+                self.hass,
+                data[CONF_USERNAME],
+                data[CONF_PASSWORD],
+                data.get(CONF_BASE_URL, DEFAULT_BASE_URL),
+            )
+        except AuthError:
+            return self.async_abort(reason="invalid_auth")
+        except DriivzError:
+            return self.async_abort(reason="cannot_connect")
+        return None
+
+    def _existing_site_subentry(self, site_id: int) -> ConfigSubentry | None:
+        return next(
+            (
+                s
+                for s in site_subentries(self._get_entry())
+                if s.unique_id == site_unique_id(site_id)
+            ),
+            None,
+        )
+
+    # ----- Add charger ---------------------------------------------------
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        if (abort := await self._ensure_client()) is not None:
+            return abort
         errors: dict[str, str] = {}
-        if not hasattr(self, "_client"):
-            data = self._get_entry().data
-            try:
-                self._client = await _login(
-                    self.hass,
-                    data[CONF_USERNAME],
-                    data[CONF_PASSWORD],
-                    data.get(CONF_BASE_URL, DEFAULT_BASE_URL),
-                )
-            except AuthError:
-                return self.async_abort(reason="invalid_auth")
-            except DriivzError:
-                return self.async_abort(reason="cannot_connect")
         if user_input is not None:
             self._search = user_input[CONF_SEARCH].strip()
             query = self._search.lower()
@@ -312,7 +329,7 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
                 return await self.async_step_site_select()
             ids = [int(value) for value in user_input[CONF_STATION_IDS]]
             if ids:
-                return self._create_subentries(ids)
+                return self._add_stations(ids)
             errors["base"] = "no_stations_selected"
         if not self._candidates:
             try:
@@ -346,33 +363,84 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
             last_step=True,
         )
 
-    def _create_subentries(self, station_ids: list[int]) -> SubentryFlowResult:
+    def _add_stations(self, station_ids: list[int]) -> SubentryFlowResult:
         assert self._site is not None
         entry = self._get_entry()
-        by_id = {s.id: s for s in self._candidates}
-        chosen = [by_id[sid] for sid in station_ids if sid in by_id]
-        *extra, last = chosen
-        for station in extra:
-            self.hass.config_entries.async_add_subentry(
-                entry,
-                ConfigSubentry(
-                    data=MappingProxyType(self._subentry_data(station)),
-                    subentry_type=SUBENTRY_TYPE_CHARGER,
-                    title=charger_subentry_title(station, self._site),
-                    unique_id=f"station_{station.id}",
-                ),
+        existing = self._existing_site_subentry(self._site.id)
+        if existing is not None:
+            current = [int(i) for i in existing.data[CONF_STATION_IDS]]
+            merged = current + [sid for sid in station_ids if sid not in current]
+            self.hass.config_entries.async_update_subentry(
+                entry, existing, data={**existing.data, CONF_STATION_IDS: merged}
+            )
+            return self.async_abort(
+                reason="stations_added", description_placeholders={"site": self._site.name}
             )
         return self.async_create_entry(
-            title=charger_subentry_title(last, self._site),
-            data=self._subentry_data(last),
-            unique_id=f"station_{last.id}",
+            title=self._site.name,
+            data={
+                CONF_SITE_ID: self._site.id,
+                CONF_SITE_NAME: self._site.name,
+                CONF_STATION_IDS: station_ids,
+            },
+            unique_id=site_unique_id(self._site.id),
         )
 
-    def _subentry_data(self, station: Station) -> dict[str, Any]:
-        assert self._site is not None
-        return {
-            CONF_STATION_ID: station.id,
-            CONF_STATION_NAME: station.display_name,
-            CONF_SITE_ID: self._site.id,
-            CONF_SITE_NAME: self._site.name,
-        }
+    # ----- Change chargers -------------------------------------------------
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Tick or untick the monitored chargers at this site."""
+        subentry = self._get_reconfigure_subentry()
+        if (abort := await self._ensure_client()) is not None:
+            return abort
+        current = [int(i) for i in subentry.data[CONF_STATION_IDS]]
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            ids = [int(value) for value in user_input[CONF_STATION_IDS]]
+            if ids:
+                # Plain update, not update-and-reload: the entry's update listener
+                # already reloads it, and HA refuses to combine the two.
+                return self.async_update_and_abort(
+                    self._get_entry(), subentry, data={**subentry.data, CONF_STATION_IDS: ids}
+                )
+            errors["base"] = "no_stations_selected"
+        if not getattr(self, "_candidates", None):
+            site_id = int(subentry.data[CONF_SITE_ID])
+            try:
+                site = next(
+                    (
+                        s
+                        for s in await self._client.find_sites_in_bounds(Bounds.UK)
+                        if s.id == site_id
+                    ),
+                    None,
+                )
+                found = await _find_site_stations(self._client, site) if site else []
+            except DriivzError:
+                return self.async_abort(reason="cannot_connect")
+            # Keep monitored chargers listed even if the portal stopped returning them,
+            # so they can still be unticked.
+            known = {s.id for s in found}
+            self._candidates = found + [
+                Station(id=sid, caption=f"Charger {sid}") for sid in current if sid not in known
+            ]
+        options = [
+            SelectOptionDict(value=str(s.id), label=s.display_name) for s in self._candidates
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_STATION_IDS, default=[str(i) for i in current]): SelectSelector(
+                    SelectSelectorConfig(
+                        options=options, multiple=True, mode=SelectSelectorMode.LIST
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"site": subentry.title},
+        )

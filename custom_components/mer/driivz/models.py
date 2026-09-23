@@ -130,6 +130,7 @@ class SocketPrice:
     plug_in_minute_rate: float | None
     transaction_fee: float | None
     currency: str | None
+    fix_price: float | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SocketPrice:
@@ -140,7 +141,19 @@ class SocketPrice:
             plug_in_minute_rate=_float(data.get("plugInMinuteRate")),
             transaction_fee=_float(data.get("transactionFee")),
             currency=_str(data.get("currency") or data.get("billingSpCurrencyCurrency")),
+            fix_price=_float(data.get("fixPrice")),
         )
+
+    @property
+    def energy_price(self) -> float:
+        """Price per kWh; a tariff with no `kwhPrice` has no energy component.
+
+        The portal omits tariff components that are not in use: a flat-rate plan
+        (observed live in September 2026) arrives with `fixPrice` and no `kwhPrice`
+        at all, where older responses carried `kwhPrice: 0`. Either way nothing is
+        charged per kWh, so absence is 0 rather than unknown.
+        """
+        return self.kwh_price if self.kwh_price is not None else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +189,8 @@ class Socket:
 
     @property
     def price_per_kwh(self) -> float | None:
-        return self.prices[0].kwh_price if self.prices else None
+        """Per-kWh price of the driver's tariff; None only when no tariff was returned."""
+        return self.prices[0].energy_price if self.prices else None
 
     @property
     def is_available(self) -> bool:

@@ -55,6 +55,19 @@ def _socket_status_attributes(data: MerData, socket: Socket) -> dict[str, Any]:
     return {"my_session": data.active is not None and data.active.socket_id == socket.id}
 
 
+def _socket_price_attributes(_data: MerData, socket: Socket) -> dict[str, Any]:
+    """The rest of the driver's tariff on this socket, beside the per-kWh price."""
+    if not socket.prices:
+        return {}
+    price = socket.prices[0]
+    return {
+        "billing_plan": price.billing_plan_code,
+        "fixed_price": price.fix_price,
+        "per_minute_rate": price.plug_in_minute_rate,
+        "transaction_fee": price.transaction_fee,
+    }
+
+
 def _socket_price_unit(socket: Socket) -> str:
     """Return the tariff currency's unit, falling back to the tenant's default."""
     currency = socket.prices[0].currency if socket.prices else None
@@ -92,6 +105,7 @@ SOCKET_SENSORS: tuple[MerSocketSensorDescription, ...] = (
         suggested_display_precision=2,
         value_fn=lambda socket: socket.price_per_kwh,
         unit_fn=_socket_price_unit,
+        attributes_fn=_socket_price_attributes,
     ),
     MerSocketSensorDescription(
         key="max_power",
@@ -111,6 +125,8 @@ class MerAccountSensorDescription(SensorEntityDescription):
     value_fn: Callable[[MerCoordinator, MerData], StateType | datetime]
     unit_fn: Callable[[MerData], str | None] | None = None
     attributes_fn: Callable[[MerCoordinator, MerData], dict[str, str]] | None = None
+    # Describes the active session: unavailable, not unknown, while there is none.
+    requires_session: bool = False
 
 
 def _count_sockets(coordinator: MerCoordinator, predicate: Callable[[Socket], bool]) -> int:
@@ -129,14 +145,12 @@ AGGREGATE_SENSORS: tuple[MerAccountSensorDescription, ...] = (
     MerAccountSensorDescription(
         key="available_sockets",
         translation_key="account_available_sockets",
-        icon="mdi:ev-plug-type2",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda coordinator, _d: _count_sockets(coordinator, lambda s: s.is_available),
     ),
     MerAccountSensorDescription(
         key="sockets_in_use",
         translation_key="account_sockets_in_use",
-        icon="mdi:ev-plug-type2",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda coordinator, _d: _count_sockets(coordinator, lambda s: s.is_in_use),
     ),
@@ -219,19 +233,21 @@ def _session_currency(session: ActiveSession | None, data: MerData) -> str:
 ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
     MerAccountSensorDescription(
         key="active_station",
+        requires_session=True,
         translation_key="active_station",
-        icon="mdi:ev-station",
         value_fn=_active_station_name,
         attributes_fn=_active_attributes,
     ),
     MerAccountSensorDescription(
         key="active_started",
+        requires_session=True,
         translation_key="active_started",
         device_class=SensorDeviceClass.TIMESTAMP,
         value_fn=lambda _c, data: _session_started(data.active),
     ),
     MerAccountSensorDescription(
         key="active_energy",
+        requires_session=True,
         translation_key="active_energy",
         device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
@@ -240,6 +256,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
     ),
     MerAccountSensorDescription(
         key="active_cost",
+        requires_session=True,
         translation_key="active_cost",
         device_class=SensorDeviceClass.MONETARY,
         suggested_display_precision=2,
@@ -248,6 +265,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
     ),
     MerAccountSensorDescription(
         key="active_duration",
+        requires_session=True,
         translation_key="active_duration",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.SECONDS,
@@ -258,6 +276,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
     ),
     MerAccountSensorDescription(
         key="active_socket",
+        requires_session=True,
         translation_key="active_socket",
         value_fn=lambda _c, data: data.active.socket_name if data.active else None,
     ),
@@ -393,6 +412,15 @@ class MerStationSessionSensor(MerStationEntity, SensorEntity):
         return _active_session_for(self.coordinator.data, self.station_id)
 
     @property
+    def available(self) -> bool:
+        """Unavailable, not unknown, while none of your sessions runs on this charger.
+
+        "Unknown" reads as a fault; there is simply nothing to report until you charge
+        here. "My session here" on the same device says why.
+        """
+        return super().available and self._session() is not None
+
+    @property
     def native_value(self) -> StateType | datetime:
         return self.entity_description.session_fn(self._session())
 
@@ -441,6 +469,14 @@ class MerAccountSensor(MerAccountEntity, SensorEntity):
     """A sensor about the driver's account or session."""
 
     entity_description: MerAccountSensorDescription
+
+    @property
+    def available(self) -> bool:
+        if not super().available:
+            return False
+        return (
+            not self.entity_description.requires_session or self.coordinator.data.active is not None
+        )
 
     @property
     def native_value(self) -> StateType | datetime:

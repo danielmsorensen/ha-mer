@@ -12,14 +12,12 @@ from .coordinator import MerConfigEntry, MerCoordinator
 from .driivz.exceptions import DriivzError
 from .entity import MerAccountEntity, MerSocketEntity, MerStationEntity
 
-START_CHARGE = ButtonEntityDescription(
-    key="start_charge", translation_key="socket_start_charge", icon="mdi:play-circle"
-)
+START_CHARGE = ButtonEntityDescription(key="start_charge", translation_key="socket_start_charge")
 ACCOUNT_STOP_CHARGE = ButtonEntityDescription(
-    key="stop_charge", translation_key="account_stop_charge", icon="mdi:stop-circle"
+    key="stop_charge", translation_key="account_stop_charge"
 )
 STATION_STOP_CHARGE = ButtonEntityDescription(
-    key="stop_charge", translation_key="station_stop_charge", icon="mdi:stop-circle"
+    key="stop_charge", translation_key="station_stop_charge"
 )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from unittest.mock import MagicMock
 
@@ -15,7 +16,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mer.const import DOMAIN
 from custom_components.mer.driivz.models import Socket, SocketPrice
-from tests.helpers import setup_integration
+from tests.helpers import setup_integration, station_from_fixture
 
 
 def state_by_unique_id(hass: HomeAssistant, platform: str, unique_id: str):
@@ -161,12 +162,18 @@ async def test_account_sensors_idle(
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_station").state == "unknown"
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_energy").state == "unknown"
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_cost").state == "unknown"
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_started").state == "unknown"
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration").state == "unknown"
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_socket").state == "unknown"
+    assert (
+        state_by_unique_id(hass, "sensor", f"{eid}_account_active_station").state == "unavailable"
+    )
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_energy").state == "unavailable"
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_cost").state == "unavailable"
+    assert (
+        state_by_unique_id(hass, "sensor", f"{eid}_account_active_started").state == "unavailable"
+    )
+    assert (
+        state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration").state == "unavailable"
+    )
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_socket").state == "unavailable"
     wallet = state_by_unique_id(hass, "sensor", f"{eid}_account_wallet_balance")
     assert wallet.state == "12.5"
     assert wallet.attributes["unit_of_measurement"] == "GBP"
@@ -180,12 +187,13 @@ async def test_account_sensors_idle(
     assert last_started.attributes["device_class"] == "timestamp"
     assert last_started.attributes["station"] == "Business Durham - NETPark 4 - Explorer 2"
 
-    # No station is mid-charge, so the mirrored charger-device sensors read unknown too.
+    # No session anywhere: session sensors are unavailable, not unknown, since there is
+    # nothing to report rather than a missing value.
     for station_id in (6042, 6041):
         for key in ("session_energy", "session_cost", "session_started", "session_duration"):
             assert (
                 state_by_unique_id(hass, "sensor", f"{eid}_station_{station_id}_{key}").state
-                == "unknown"
+                == "unavailable"
             )
 
 
@@ -230,9 +238,12 @@ async def test_account_sensors_charging(
     assert float(duration.state) == pytest.approx(953.825 / 3600)
     assert duration.attributes["unit_of_measurement"] == "h"
 
-    # ...while the charger the user did not select (6042) stays unknown.
+    # ...while the charger with no session of yours (6042) reports its session sensors
+    # as unavailable rather than unknown.
     for key in ("session_energy", "session_cost", "session_started", "session_duration"):
-        assert state_by_unique_id(hass, "sensor", f"{eid}_station_6042_{key}").state == "unknown"
+        assert (
+            state_by_unique_id(hass, "sensor", f"{eid}_station_6042_{key}").state == "unavailable"
+        )
 
 
 async def test_socket_status_marks_my_session(
@@ -252,3 +263,64 @@ async def test_socket_status_marks_my_session(
     assert mine.attributes["my_session"] is True
     other = state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status")
     assert other.attributes["my_session"] is False
+
+
+async def test_price_from_tariff_without_kwh_component(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """The live portal now sends flat-rate tariffs as fixPrice with no kwhPrice at all.
+
+    That must read as 0 per kWh, not unknown, with the other tariff parts as attributes.
+    """
+    live_price = {
+        "billingPlanId": 3465,
+        "billingPlanCode": "DCC IP",
+        "currency": "GBP",
+        "fixPrice": 0.0,
+        "futureReservationFee": 0.0,
+    }
+    detail = station_from_fixture("station_6042.json")
+    live_detail = replace(
+        detail,
+        sockets=tuple(
+            replace(sock, prices=(SocketPrice.from_dict(live_price),)) for sock in detail.sockets
+        ),
+    )
+    original = mock_client.find_station_by_id.side_effect
+    mock_client.find_station_by_id.side_effect = lambda station_id, billing_plan_id=None: (
+        live_detail if station_id == 6042 else original(station_id)
+    )
+    await setup_integration(hass, mock_config_entry)
+    price = state_by_unique_id(hass, "sensor", f"{mock_config_entry.entry_id}_socket_11243_price")
+    assert price.state == "0.0"
+    assert price.attributes["unit_of_measurement"] == "GBP/kWh"
+    assert price.attributes["billing_plan"] == "DCC IP"
+    assert price.attributes["fixed_price"] == 0.0
+
+
+async def test_every_entity_has_an_icon(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """No entity may fall back to the frontend's generic eye icon.
+
+    An entity has an icon if its device class gives one, or icons.json defines one
+    for its translation key.
+    """
+    import json
+    from pathlib import Path
+
+    from homeassistant.helpers import entity_registry as er
+
+    icons = json.loads(
+        (Path(__file__).parent.parent / "custom_components/mer/icons.json").read_text()
+    )["entity"]
+    await setup_integration(hass, mock_config_entry)
+    registry = er.async_get(hass)
+    missing = []
+    for entry in er.async_entries_for_config_entry(registry, mock_config_entry.entry_id):
+        state = hass.states.get(entry.entity_id)
+        has_device_class = state is not None and "device_class" in state.attributes
+        in_icons = entry.translation_key in icons.get(entry.domain, {})
+        if not (has_device_class or in_icons):
+            missing.append(entry.entity_id)
+    assert missing == []

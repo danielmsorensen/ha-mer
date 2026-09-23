@@ -22,8 +22,8 @@ async def test_diagnostics_redacts_secrets(
     assert diag["entry"]["data"]["username"] == "**REDACTED**"
     assert diag["entry"]["data"]["password"] == "**REDACTED**"
     assert diag["entry"]["title"] == "**REDACTED**"  # the account e-mail
-    assert [c["station_id"] for c in diag["entry"]["chargers"]] == [6042, 6041]
-    assert diag["entry"]["chargers"][0]["site_id"] == 2877
+    assert [s["station_ids"] for s in diag["entry"]["sites"]] == [[6042, 6041]]
+    assert diag["entry"]["sites"][0]["site_id"] == 2877
     assert diag["rate_limit_remaining"] == 9
     assert diag["data"]["customer_id"] == "**REDACTED**"
     assert diag["data"]["wallet"]["balance"] == 12.5

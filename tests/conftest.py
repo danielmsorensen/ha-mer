@@ -15,11 +15,10 @@ from custom_components.mer.const import (
     CONF_SCAN_INTERVAL,
     CONF_SITE_ID,
     CONF_SITE_NAME,
-    CONF_STATION_ID,
-    CONF_STATION_NAME,
+    CONF_STATION_IDS,
     DEFAULT_BASE_URL,
     DOMAIN,
-    SUBENTRY_TYPE_CHARGER,
+    SUBENTRY_TYPE_SITE,
 )
 from custom_components.mer.driivz.models import (
     ActiveTransaction,
@@ -45,26 +44,21 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     return
 
 
-def charger_subentry(station_id: int) -> ConfigSubentryData:
-    """Subentry data for one of the NETPark chargers, as the add-charger flow stores it."""
+def site_subentry(station_ids: list[int]) -> ConfigSubentryData:
+    """The NETPark site subentry monitoring the given chargers, as the flow stores it."""
     return ConfigSubentryData(
-        data={
-            CONF_STATION_ID: station_id,
-            CONF_STATION_NAME: STATION_NAMES[station_id],
-            CONF_SITE_ID: SITE_ID,
-            CONF_SITE_NAME: SITE_NAME,
-        },
-        subentry_type=SUBENTRY_TYPE_CHARGER,
-        title=f"{STATION_NAMES[station_id]} ({SITE_NAME})",
-        unique_id=f"station_{station_id}",
+        data={CONF_SITE_ID: SITE_ID, CONF_SITE_NAME: SITE_NAME, CONF_STATION_IDS: station_ids},
+        subentry_type=SUBENTRY_TYPE_SITE,
+        title=SITE_NAME,
+        unique_id=f"site_{SITE_ID}",
     )
 
 
 def make_config_entry(station_ids: list[int]) -> MockConfigEntry:
-    """An account entry with a charger subentry per station id."""
+    """An account entry; the NETPark site subentry is present when station ids are given."""
     return MockConfigEntry(
         domain=DOMAIN,
-        version=2,
+        version=3,
         title="user@example.com",
         unique_id="user@example.com",
         data={
@@ -73,7 +67,7 @@ def make_config_entry(station_ids: list[int]) -> MockConfigEntry:
             CONF_BASE_URL: DEFAULT_BASE_URL,
         },
         options={CONF_SCAN_INTERVAL: 60},
-        subentries_data=[charger_subentry(sid) for sid in station_ids],
+        subentries_data=[site_subentry(station_ids)] if station_ids else [],
     )
 
 

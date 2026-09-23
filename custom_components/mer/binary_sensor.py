@@ -68,7 +68,6 @@ SOCKET_BINARY_SENSORS: tuple[MerSocketBinaryDescription, ...] = (
     MerSocketBinaryDescription(
         key="available",
         translation_key="socket_available",
-        icon="mdi:ev-station",
         is_on_fn=lambda socket: socket.is_available,
     ),
 )
@@ -78,7 +77,6 @@ ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
     MerAccountBinaryDescription(
         key="any_available",
         translation_key="account_any_available",
-        icon="mdi:ev-station",
         is_on_fn=lambda coordinator, _d: any(
             socket.is_available
             for station in coordinator.configured_stations()

@@ -16,7 +16,6 @@ from .entity import MerStationEntity
 NOTIFY_AVAILABLE = SwitchEntityDescription(
     key="notify_available",
     translation_key="notify_available",
-    icon="mdi:bell-ring-outline",
     entity_category=EntityCategory.CONFIG,
 )
 

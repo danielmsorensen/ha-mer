@@ -263,3 +263,17 @@ chargers are ticked the extras are added through `async_add_subentry` before the
 flow finishes; each addition triggers a reload, which is fine for the handful of
 chargers anyone monitors. Aggregate unique ids moved from `<entry>_site_<key>` to
 `<entry>_account_<key>`.
+
+## 2026-09-23: one subentry per site, not per charger
+
+**Decision.** A charging site is the subentry (type `site`, data `site_id`, `site_name`,
+`station_ids`); its chargers' devices are registered under it, so the integration page
+shows one group per site with its chargers inside. Adding chargers at a site that
+already has a subentry extends it. A site's "Change chargers" (subentry reconfigure)
+unticks chargers; setup then deletes devices of chargers no longer monitored. Entry
+`VERSION` 3, with a migration from version 2's one-subentry-per-charger.
+
+**Why.** Per-charger subentries put every charger in its own group titled with its own
+name, a duplicate of the device inside it. Daniel asked for chargers to sit together
+under their site. The account device's "Devices that don't belong to a sub-entry"
+group is Home Assistant's fixed label for entry-level devices and cannot be renamed.

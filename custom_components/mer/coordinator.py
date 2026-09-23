@@ -18,7 +18,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_SCAN_INTERVAL,
-    CONF_STATION_ID,
+    CONF_STATION_IDS,
     DEFAULT_SCAN_INTERVAL,
     DETAIL_REFRESH,
     DOMAIN,
@@ -26,7 +26,7 @@ from .const import (
     RATE_LIMIT_SKIP_THRESHOLD,
     RATE_LIMIT_WARN_INTERVAL,
     REFRESH_AFTER_COMMAND_SECONDS,
-    SUBENTRY_TYPE_CHARGER,
+    SUBENTRY_TYPE_SITE,
     WALLET_REFRESH,
 )
 from .driivz.client import DriivzDriverClient
@@ -82,16 +82,19 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             update_interval=timedelta(seconds=interval),
         )
         self.client = client
-        # One charger subentry per monitored station. Adding or removing one reloads
-        # the entry (see __init__), so this list is fixed for the coordinator's life.
-        self.charger_subentries: list[ConfigSubentry] = [
+        # One subentry per charging site, listing its monitored chargers. Any change
+        # reloads the entry (see __init__), so these are fixed for the coordinator's life.
+        self.site_subentries: list[ConfigSubentry] = [
             subentry
             for subentry in entry.subentries.values()
-            if subentry.subentry_type == SUBENTRY_TYPE_CHARGER
+            if subentry.subentry_type == SUBENTRY_TYPE_SITE
         ]
-        self.station_ids: list[int] = [
-            int(subentry.data[CONF_STATION_ID]) for subentry in self.charger_subentries
-        ]
+        self._station_subentry: dict[int, ConfigSubentry] = {
+            int(station_id): subentry
+            for subentry in self.site_subentries
+            for station_id in subentry.data[CONF_STATION_IDS]
+        }
+        self.station_ids: list[int] = list(self._station_subentry)
         self._details: dict[int, Station] = {}
         self._notify: dict[int, bool] = {}
         self._notify_lock = asyncio.Lock()
@@ -331,18 +334,18 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         return [s for s in stations if s is not None]
 
     def charger_stations(self) -> list[tuple[ConfigSubentry, Station]]:
-        """Each charger subentry with its station, skipping any the portal did not return.
+        """Each monitored station with its site's subentry, skipping any the portal did not return.
 
-        Platforms add a charger's entities under its subentry id, so that removing the
-        subentry removes exactly that charger's device and entities.
+        Platforms add a charger's entities under its site's subentry id, so the
+        integration page groups them by site and deleting a site removes its chargers.
         """
         pairs: list[tuple[ConfigSubentry, Station]] = []
-        for subentry in self.charger_subentries:
-            station = self.get_station(int(subentry.data[CONF_STATION_ID]))
+        for station_id, subentry in self._station_subentry.items():
+            station = self.get_station(station_id)
             if station is None:
                 _LOGGER.warning(
-                    "Mer charger %s (%s) was not returned by the portal; skipping its entities",
-                    subentry.data[CONF_STATION_ID],
+                    "Mer charger %s at %s was not returned by the portal; skipping its entities",
+                    station_id,
                     subentry.title,
                 )
                 continue

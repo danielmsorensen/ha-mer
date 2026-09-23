@@ -61,10 +61,8 @@ async def async_get_config_entry_diagnostics(
                 "unique_id": entry.unique_id,
                 "data": dict(entry.data),
                 "options": dict(entry.options),
-                # One per added charger; station/site ids and names are shared resources.
-                "chargers": [
-                    {"name": s.title, **dict(s.data)} for s in coordinator.charger_subentries
-                ],
+                # One per site; station/site ids and names are shared resources.
+                "sites": [{"name": s.title, **dict(s.data)} for s in coordinator.site_subentries],
             },
             # The entry title is the account e-mail.
             TO_REDACT | {"title"},
