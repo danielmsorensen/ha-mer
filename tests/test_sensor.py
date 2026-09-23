@@ -212,9 +212,9 @@ async def test_account_sensors_charging(
         == expected_started
     )
     active_duration = state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration")
-    # 953.825 s, displayed in minutes by default.
-    assert float(active_duration.state) == pytest.approx(953.825 / 60)
-    assert active_duration.attributes["unit_of_measurement"] == "min"
+    # 953.825 s, displayed in hours by default.
+    assert float(active_duration.state) == pytest.approx(953.825 / 3600)
+    assert active_duration.attributes["unit_of_measurement"] == "h"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_socket").state == "Right"
 
     # The charger it is actually running on (6041) mirrors the same session...
@@ -227,8 +227,8 @@ async def test_account_sensors_charging(
     started = state_by_unique_id(hass, "sensor", f"{eid}_station_6041_session_started")
     assert started.state == expected_started
     duration = state_by_unique_id(hass, "sensor", f"{eid}_station_6041_session_duration")
-    assert float(duration.state) == pytest.approx(953.825 / 60)
-    assert duration.attributes["unit_of_measurement"] == "min"
+    assert float(duration.state) == pytest.approx(953.825 / 3600)
+    assert duration.attributes["unit_of_measurement"] == "h"
 
     # ...while the charger the user did not select (6042) stays unknown.
     for key in ("session_energy", "session_cost", "session_started", "session_duration"):

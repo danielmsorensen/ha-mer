@@ -251,9 +251,9 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         translation_key="active_duration",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.SECONDS,
-        # Shown in minutes by default; HA converts, and users can still pick another unit.
-        suggested_unit_of_measurement=UnitOfTime.MINUTES,
-        suggested_display_precision=0,
+        # Shown in hours by default; HA converts, and users can still pick another unit.
+        # No display precision, so the frontend's duration formatting shows h and min.
+        suggested_unit_of_measurement=UnitOfTime.HOURS,
         value_fn=lambda _c, data: _session_duration(data.active),
     ),
     MerAccountSensorDescription(
@@ -325,9 +325,9 @@ STATION_SESSION_SENSORS: tuple[MerStationSessionSensorDescription, ...] = (
         translation_key="station_session_duration",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.SECONDS,
-        # Shown in minutes by default; HA converts, and users can still pick another unit.
-        suggested_unit_of_measurement=UnitOfTime.MINUTES,
-        suggested_display_precision=0,
+        # Shown in hours by default; HA converts, and users can still pick another unit.
+        # No display precision, so the frontend's duration formatting shows h and min.
+        suggested_unit_of_measurement=UnitOfTime.HOURS,
         session_fn=_session_duration,
     ),
 )
