@@ -11,6 +11,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.mer.config_flow import CONF_BACK, SEARCH_AGAIN
 from custom_components.mer.const import (
     CONF_BASE_URL,
     CONF_SCAN_INTERVAL,
@@ -156,7 +157,7 @@ async def test_add_chargers_creates_one_subentry_each(
     )
     assert result["step_id"] == "site_select"
     options = result["data_schema"].schema[CONF_SITE_ID].config["options"]
-    assert [o["value"] for o in options] == ["2877", "3796"]
+    assert [o["value"] for o in options] == ["2877", "3796", SEARCH_AGAIN]
     assert "8 sockets" in options[0]["label"]
 
     result = await hass.config_entries.subentries.async_configure(
@@ -275,3 +276,52 @@ async def test_remove_charger_subentry_removes_device_and_reloads(
     assert _charger_station_ids(mock_config_entry) == {6042}
     assert mock_config_entry.runtime_data.station_ids == [6042]
     assert hass.states.get("sensor.business_durham_netpark_4_explorer_2_status") is None
+
+
+async def test_add_charger_can_go_back_a_step(hass: HomeAssistant, mock_client: MagicMock) -> None:
+    """Flows have no back button, so each step offers its own way back."""
+    entry = make_config_entry([])
+    await setup_integration(hass, entry)
+    result = await _start_add_charger(hass, entry)
+    assert result["last_step"] is False  # frontend shows "Next"
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_SEARCH: "netpark"}
+    )
+    assert result["step_id"] == "site_select"
+    assert result["last_step"] is False
+    assert result["description_placeholders"] == {"search": "netpark"}
+    site_options = result["data_schema"].schema[CONF_SITE_ID].config["options"]
+    assert site_options[-1]["value"] == SEARCH_AGAIN
+
+    # Back to the search, which remembers what was typed.
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_SITE_ID: SEARCH_AGAIN}
+    )
+    assert result["step_id"] == "user"
+    assert result["data_schema"]({})[CONF_SEARCH] == "netpark"
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_SEARCH: "netpark"}
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_SITE_ID: "3796"}
+    )
+    assert result["step_id"] == "stations"
+    assert result["last_step"] is True  # frontend shows "Submit"
+    assert [
+        o["value"] for o in result["data_schema"].schema[CONF_STATION_IDS].config["options"]
+    ] == ["17886"]
+
+    # Wrong site: tick "go back" and pick the other one.
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_STATION_IDS: [], CONF_BACK: True}
+    )
+    assert result["step_id"] == "site_select"
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_SITE_ID: "2877"}
+    )
+    assert result["step_id"] == "stations"
+    assert sorted(
+        o["value"] for o in result["data_schema"].schema[CONF_STATION_IDS].config["options"]
+    ) == ["6041", "6042"]

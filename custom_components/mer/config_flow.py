@@ -19,6 +19,7 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -56,6 +57,10 @@ from .driivz.models import Bounds, Site, Station
 _LOGGER = logging.getLogger(__name__)
 
 MAX_SITE_MATCHES = 25
+# Pseudo-option in the site list that returns to the search form.
+SEARCH_AGAIN = "__search_again__"
+# Checkbox on the chargers step that returns to the site list.
+CONF_BACK = "back"
 
 USER_SCHEMA = vol.Schema(
     {
@@ -225,6 +230,7 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
     """
 
     _client: DriivzDriverClient
+    _search: str = ""
     _sites: dict[int, Site]
     _site: Site | None = None
     _candidates: list[Station]
@@ -245,7 +251,8 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
             except DriivzError:
                 return self.async_abort(reason="cannot_connect")
         if user_input is not None:
-            query = user_input[CONF_SEARCH].strip().lower()
+            self._search = user_input[CONF_SEARCH].strip()
+            query = self._search.lower()
             try:
                 sites = await self._client.find_sites_in_bounds(Bounds.UK)
             except DriivzError:
@@ -257,13 +264,18 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
                 else:
                     self._sites = {s.id: s for s in matches}
                     return await self.async_step_site_select()
-        schema = vol.Schema({vol.Required(CONF_SEARCH, default=""): TextSelector()})
-        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+        schema = vol.Schema({vol.Required(CONF_SEARCH, default=self._search): TextSelector()})
+        # last_step=False makes the frontend label the button "Next" instead of "Submit".
+        return self.async_show_form(
+            step_id="user", data_schema=schema, errors=errors, last_step=False
+        )
 
     async def async_step_site_select(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
         if user_input is not None:
+            if user_input[CONF_SITE_ID] == SEARCH_AGAIN:
+                return await self.async_step_user()
             self._site = self._sites[int(user_input[CONF_SITE_ID])]
             self._candidates = []
             return await self.async_step_stations()
@@ -274,6 +286,8 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
             )
             for site in self._sites.values()
         ]
+        # Flows have no back button, so going back is an option in the list itself.
+        options.append(SelectOptionDict(value=SEARCH_AGAIN, label="Search again"))
         schema = vol.Schema(
             {
                 vol.Required(CONF_SITE_ID): SelectSelector(
@@ -281,7 +295,12 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
                 )
             }
         )
-        return self.async_show_form(step_id="site_select", data_schema=schema)
+        return self.async_show_form(
+            step_id="site_select",
+            data_schema=schema,
+            description_placeholders={"search": self._search},
+            last_step=False,
+        )
 
     async def async_step_stations(
         self, user_input: dict[str, Any] | None = None
@@ -289,6 +308,8 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
         assert self._site is not None
         errors: dict[str, str] = {}
         if user_input is not None:
+            if user_input.get(CONF_BACK):
+                return await self.async_step_site_select()
             ids = [int(value) for value in user_input[CONF_STATION_IDS]]
             if ids:
                 return self._create_subentries(ids)
@@ -313,7 +334,8 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
                     SelectSelectorConfig(
                         options=options, multiple=True, mode=SelectSelectorMode.LIST
                     )
-                )
+                ),
+                vol.Optional(CONF_BACK, default=False): BooleanSelector(),
             }
         )
         return self.async_show_form(
@@ -321,6 +343,7 @@ class MerChargerSubentryFlow(ConfigSubentryFlow):
             data_schema=schema,
             errors=errors,
             description_placeholders={"site": self._site.name},
+            last_step=True,
         )
 
     def _create_subentries(self, station_ids: list[int]) -> SubentryFlowResult:

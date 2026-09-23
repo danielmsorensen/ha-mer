@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+from types import MappingProxyType
 from unittest.mock import MagicMock
 
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.mer.const import DOMAIN
+from custom_components.mer.const import DOMAIN, SUBENTRY_TYPE_CHARGER
 from custom_components.mer.driivz.exceptions import AuthError, DriivzConnectionError
-from tests.conftest import make_config_entry
+from tests.conftest import charger_subentry, make_config_entry
 from tests.helpers import setup_integration
 from tests.test_sensor import state_by_unique_id
 
@@ -84,3 +86,52 @@ async def test_devices_hang_off_the_account(
     # No site device any more: account plus one device per charger.
     assert len(dr.async_entries_for_config_entry(registry, entry_id)) == 3
     assert registry.async_get_device_by_identifier((DOMAIN, "site_2877"), entry_id) is None
+
+
+async def test_subentry_added_during_setup_is_picked_up(
+    hass: HomeAssistant, mock_client: MagicMock
+) -> None:
+    """Adding two chargers in one flow adds two subentries a moment apart.
+
+    The first addition reloads the entry. If the second lands while that reload's
+    setup is already running, it must still end up with entities: the update
+    listener is registered before setup awaits anything, so the late addition
+    queues one more reload instead of being lost. This is the bug seen live, where
+    Explorer 2 had a card but no device.
+    """
+    entry = make_config_entry([6042])
+    entry.add_to_hass(hass)
+    setup_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_wallet():
+        setup_started.set()
+        await release.wait()
+        return mock_client.find_wallet.return_value
+
+    mock_client.find_wallet.side_effect = slow_wallet
+
+    setup_task = hass.async_create_task(hass.config_entries.async_setup(entry.entry_id))
+    await setup_started.wait()
+    # Setup is mid-way through its first refresh, having already read the subentries.
+    data = charger_subentry(6041)
+    hass.config_entries.async_add_subentry(
+        entry,
+        ConfigSubentry(
+            data=MappingProxyType(data["data"]),
+            subentry_type=SUBENTRY_TYPE_CHARGER,
+            title=data["title"],
+            unique_id=data["unique_id"],
+        ),
+    )
+    release.set()
+    await setup_task
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.station_ids == [6042, 6041]
+    registry = dr.async_get(hass)
+    for station_id in (6042, 6041):
+        assert registry.async_get_device_by_identifier(
+            (DOMAIN, f"station_{station_id}"), entry.entry_id
+        ), f"station {station_id} has no device"

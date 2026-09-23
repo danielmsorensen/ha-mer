@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -11,11 +12,13 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntityDescription,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from .const import DOMAIN
 from .coordinator import MerConfigEntry, MerCoordinator, MerData
 from .driivz.models import Socket
-from .entity import MerAccountEntity, MerSocketEntity, MerStationEntity
+from .entity import MerAccountEntity, MerSocketEntity, MerStationEntity, socket_label
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -26,6 +29,34 @@ class MerSocketBinaryDescription(BinarySensorEntityDescription):
 @dataclass(frozen=True, kw_only=True)
 class MerAccountBinaryDescription(BinarySensorEntityDescription):
     is_on_fn: Callable[[MerCoordinator, MerData], bool]
+    attributes_fn: Callable[[MerCoordinator, MerData], dict[str, Any]] | None = None
+
+
+def _available_sockets(coordinator: MerCoordinator, _data: MerData) -> dict[str, Any]:
+    """List every free socket with the entity id of its start-charge button.
+
+    This is what lets an automation do more than "something is free": it can name
+    the free sockets in a notification, or press the first one's button.
+    """
+    registry = er.async_get(coordinator.hass)
+    entry_id = coordinator.config_entry.entry_id
+    free: list[dict[str, Any]] = []
+    for station in coordinator.configured_stations():
+        for socket in station.sockets:
+            if not socket.is_available:
+                continue
+            free.append(
+                {
+                    "charger": station.display_name,
+                    "socket": socket_label(socket),
+                    "station_id": station.id,
+                    "socket_id": socket.id,
+                    "start_button": registry.async_get_entity_id(
+                        "button", DOMAIN, f"{entry_id}_socket_{socket.id}_start_charge"
+                    ),
+                }
+            )
+    return {"available_sockets": free}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -53,6 +84,7 @@ ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
             for station in coordinator.configured_stations()
             for socket in station.sockets
         ),
+        attributes_fn=_available_sockets,
     ),
     MerAccountBinaryDescription(
         key="charging",
@@ -116,6 +148,12 @@ class MerAccountBinarySensor(MerAccountEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         return self.entity_description.is_on_fn(self.coordinator, self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.entity_description.attributes_fn is None:
+            return None
+        return self.entity_description.attributes_fn(self.coordinator, self.coordinator.data)
 
 
 class MerStationBinarySensor(MerStationEntity, BinarySensorEntity):

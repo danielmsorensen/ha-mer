@@ -228,3 +228,22 @@ async def test_account_sensors_charging(
     # ...while the charger the user did not select (6042) stays unknown.
     for key in ("session_energy", "session_cost", "session_started", "session_duration"):
         assert state_by_unique_id(hass, "sensor", f"{eid}_station_6042_{key}").state == "unknown"
+
+
+async def test_socket_status_marks_my_session(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket: Socket,
+) -> None:
+    """The charging socket is only *mine* when the account's active session is on it."""
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    # The live-status fixture and the active-session fixture were captured at different
+    # moments, so 11242's status here is not "charging"; the attribute is what is under
+    # test, and it follows the active session, not the socket status.
+    mine = state_by_unique_id(hass, "sensor", f"{eid}_socket_11242_status")
+    assert mine.attributes["my_session"] is True
+    other = state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status")
+    assert other.attributes["my_session"] is False

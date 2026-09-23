@@ -44,6 +44,10 @@ own card and there is an **Add charger** button:
    card on the integration page and its own device, with its socket entities
    attached to it.
 
+Picked the wrong site? The site list ends with **Search again**, and the
+chargers step has a **go back and choose a different site** checkbox, since
+Home Assistant's setup dialogs have no back button of their own.
+
 You can repeat Add charger for chargers at other sites. To stop monitoring a
 charger, open the menu on its card and choose **Delete**; Home Assistant
 removes its device and entities and the integration reloads.
@@ -59,7 +63,7 @@ account wallet balance".
 One device per charger you added, linked to the account device.
 
 | Entity | Platform | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | Status | sensor | The charger's own status (`available`, `charging`, `faulted`, …) |
 | Identity key | sensor (diagnostic) | The charger's portal identity key, e.g. `MER-FS-AD00137` |
 | Session energy | sensor | Energy delivered by *your* active session, only while it is running on this charger |
@@ -75,7 +79,7 @@ named after the socket (a charger can have more than one — some Mer chargers
 have a "Left" and a "Right" socket):
 
 | Entity | Platform | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | *Socket* status | sensor | The socket's own status |
 | *Socket* available | binary sensor | On if this socket is `AVAILABLE` |
 | *Socket* price | sensor | Your tariff's price per kWh on this socket |
@@ -88,7 +92,7 @@ One device per Mer account. It aggregates the chargers you added, and covers
 your active session (wherever it is running) and your charging history.
 
 | Entity | Platform | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | Any socket available | binary sensor | On if any socket on any charger you added is `AVAILABLE` |
 | Available sockets | sensor | Count of sockets on your added chargers currently `AVAILABLE` |
 | Sockets in use | sensor | Count of sockets on your added chargers in any "in use" state |
@@ -123,11 +127,12 @@ it and enter the new password to resume without redoing the whole setup.
 
 ## Example automation
 
-Get a phone notification on weekday mornings if a socket frees up at your
-work site, so you know before you set off whether you'll get a spot:
+Say you have added the two chargers at the retail park where you work. Get a
+phone notification on weekday mornings when a socket there frees up, naming
+the free sockets, so you know before you set off whether you'll get a spot:
 
 ```yaml
-alias: Notify when a NETPark socket frees up
+alias: Notify when a work charger frees up
 triggers:
   - trigger: state
     entity_id: binary_sensor.mer_account_any_socket_available
@@ -145,8 +150,10 @@ conditions:
 actions:
   - action: notify.mobile_app_your_phone
     data:
-      title: NETPark charger free
-      message: A socket at NETPark is available now.
+      title: Work charger free
+      message: >-
+        Free now: {{ state_attr('binary_sensor.mer_account_any_socket_available',
+        'available_sockets') | map(attribute='socket') | list | join(', ') }}
 mode: single
 ```
 
@@ -154,6 +161,26 @@ The entity above is the account device's **Any socket available**, which
 covers every charger you have added. Its id follows from the device name
 "Mer account", so it is the same for everyone unless you rename the device;
 if in doubt, open **Developer Tools → States** and copy the real id.
+
+Its `available_sockets` attribute lists every free socket as `charger`,
+`socket`, `station_id`, `socket_id` and `start_button`, the entity id of that
+socket's start-charge button. That is enough for an automation to choose for
+you, for example pressing the first free socket's button once you have
+plugged in:
+
+```yaml
+actions:
+  - action: button.press
+    target:
+      entity_id: >-
+        {{ (state_attr('binary_sensor.mer_account_any_socket_available',
+        'available_sockets') | first).start_button }}
+```
+
+Starting a charge only works on the socket your car is actually plugged into,
+so pair this with something that tells the automation you have arrived and
+plugged in, such as your phone's location or the socket's own status leaving
+`available`.
 
 There is no charger-level availability entity — availability is a property
 of a socket, and a charger with two sockets (e.g. Left and Right) has two
@@ -210,7 +237,7 @@ From then on:
   CI parity.
 - `scripts/format` runs `ruff format` to fix formatting in place.
 - `scripts/dev-hass` starts a throwaway Home Assistant instance at
-  http://localhost:8123 that loads this checkout's integration directly, for
+  <http://localhost:8123> that loads this checkout's integration directly, for
   manual testing without touching a real installation. Its config lives in the
   WSL home directory (`~/ha-mer-dev`) and can be deleted at any time;
   `scripts/dev-hass --reset` wipes it and starts fresh. The first launch

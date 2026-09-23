@@ -13,6 +13,15 @@ from .coordinator import MerConfigEntry, MerCoordinator
 
 async def async_setup_entry(hass: HomeAssistant, entry: MerConfigEntry) -> bool:
     """Set up Mer from a config entry."""
+    # Registered before any awaiting, deliberately. The listener fires on options
+    # changes and on every subentry added or removed; chargers are subentries, so it
+    # is what brings a newly added charger's entities up. Adding two chargers in one
+    # flow adds two subentries a moment apart: the first triggers a reload, and if
+    # the second landed while that reload's setup was already past reading the
+    # subentries but had not yet registered the listener, nothing would ever pick it
+    # up. Registering first means a change during setup queues another reload, which
+    # waits for this setup to finish and then starts over with the full set.
+    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     client = create_client(
         hass,
         entry.data[CONF_USERNAME],
@@ -24,9 +33,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: MerConfigEntry) -> bool:
     entry.runtime_data = coordinator
     _async_register_account_device(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    # Fires on options changes and on every subentry added or removed: chargers are
-    # subentries, so this is what brings a newly added charger's entities up.
-    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     return True
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -42,6 +43,16 @@ class MerSocketSensorDescription(SensorEntityDescription):
 
     value_fn: Callable[[Socket], StateType]
     unit_fn: Callable[[Socket], str | None] | None = None
+    attributes_fn: Callable[[MerData, Socket], dict[str, Any]] | None = None
+
+
+def _socket_status_attributes(data: MerData, socket: Socket) -> dict[str, Any]:
+    """Whether the account's own session is the one running on this socket.
+
+    The status alone says "charging" for anyone's car; this tells the charger's
+    own device page that it is yours.
+    """
+    return {"my_session": data.active is not None and data.active.socket_id == socket.id}
 
 
 def _socket_price_unit(socket: Socket) -> str:
@@ -73,6 +84,7 @@ SOCKET_SENSORS: tuple[MerSocketSensorDescription, ...] = (
         device_class=SensorDeviceClass.ENUM,
         options=STATUS_OPTIONS,
         value_fn=lambda socket: status_option(socket.status),
+        attributes_fn=_socket_status_attributes,
     ),
     MerSocketSensorDescription(
         key="price",
@@ -410,6 +422,13 @@ class MerSocketSensor(MerSocketEntity, SensorEntity):
         if self.entity_description.unit_fn is not None and socket is not None:
             return self.entity_description.unit_fn(socket)
         return self.entity_description.native_unit_of_measurement
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        socket = self.socket
+        if self.entity_description.attributes_fn is None or socket is None:
+            return None
+        return self.entity_description.attributes_fn(self.coordinator.data, socket)
 
 
 class MerAccountSensor(MerAccountEntity, SensorEntity):

@@ -102,3 +102,28 @@ async def test_session_here_off_for_both_when_idle(
         state_by_unique_id(hass, "binary_sensor", f"{eid}_station_6042_session_here").state
         == STATE_OFF
     )
+
+
+async def test_any_available_lists_free_sockets_with_start_buttons(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    # Platforms set up concurrently, so at the very first state write the button
+    # entities may not be registered yet; the attribute fills in on the next poll.
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    state = state_by_unique_id(hass, "binary_sensor", f"{eid}_account_any_available")
+    free = state.attributes["available_sockets"]
+    # Explorer 1: both free; Explorer 2: Left charging, Right free.
+    assert [(f["charger"], f["socket"]) for f in free] == [
+        ("Business Durham - NETPark 3 - Explorer 1", "Left"),
+        ("Business Durham - NETPark 3 - Explorer 1", "Right"),
+        ("Business Durham - NETPark 4 - Explorer 2", "Right"),
+    ]
+    assert free[0]["station_id"] == 6042
+    assert free[0]["socket_id"] == 11243
+    assert (
+        free[0]["start_button"] == "button.business_durham_netpark_3_explorer_1_left_start_charge"
+    )
+    assert hass.states.get(free[0]["start_button"]) is not None

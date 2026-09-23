@@ -54,6 +54,7 @@
         },
         "site_select": {
           "title": "Choose the site",
+          "description": "Sites matching \"{search}\". Not the right one? Pick \"Search again\" at the bottom.",
           "data": {
             "site_id": "Site"
           }
@@ -62,7 +63,8 @@
           "title": "Choose the chargers to add",
           "description": "Chargers at {site} that you have not added yet. Each one becomes its own device.",
           "data": {
-            "station_ids": "Chargers"
+            "station_ids": "Chargers",
+            "back": "Not here? Go back and choose a different site"
           }
         }
       },
