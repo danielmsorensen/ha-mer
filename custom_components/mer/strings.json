@@ -46,10 +46,13 @@
       },
       "step": {
         "user": {
-          "title": "Find the charging site",
-          "description": "Type part of the site name as shown in the Mer app, e.g. NETPark.",
+          "title": "Search for a charging site",
+          "description": "Type any part of the site's name as it appears in the Mer app. The search is not case-sensitive and matches anywhere in the name, so a single distinctive word such as the town, the street or the business is enough. You will pick the site from the matches on the next page.",
           "data": {
-            "search": "Site name"
+            "search": "Search site names for"
+          },
+          "data_description": {
+            "search": "For example, part of a town name or a car park's name."
           }
         },
         "site_select": {

@@ -35,10 +35,11 @@ Chargers are added afterwards, from the integration's page (**Settings →
 Devices & services → Mer EV Charging**), where each charger you add gets its
 own card and there is an **Add charger** button:
 
-1. **Search for the site** by typing part of its name — the search matches
-   anywhere in the name, so "NETPark" is enough to find "Durham County
-   Council - Business Durham NETPark" without typing it in full. Pick the
-   site from the matches.
+1. **Search for the site** by typing any part of its name as it appears in
+   the Mer app. The search is not case-sensitive and matches anywhere in the
+   name, so one distinctive word is enough: the town, the street or the
+   business, for example "riverside" for "Riverside Retail Park - Anytown".
+   Pick the site from the matches.
 2. **Tick the chargers** you want to monitor at that site. Chargers you have
    already added are not offered again. Every ticked charger becomes its own
    card on the integration page and its own device, with its socket entities
