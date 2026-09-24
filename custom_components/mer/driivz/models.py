@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import re
 from typing import Any, ClassVar
 
-from .const import IN_USE_STATUSES, STATUS_AVAILABLE, STATUS_UNKNOWN
+from .const import IN_USE_STATUSES, STARTABLE_STATUSES, STATUS_AVAILABLE, STATUS_UNKNOWN
 
 _RESTRICTED_PREFIX = "[RESTRICTED ACCESS]"
 _CODE_RE = re.compile(r"\(\s*MER-[A-Z0-9-]+\s*\)")
@@ -199,6 +199,11 @@ class Socket:
     @property
     def is_in_use(self) -> bool:
         return self.status in IN_USE_STATUSES
+
+    @property
+    def can_start(self) -> bool:
+        """Whether a start command has any chance of being accepted right now."""
+        return self.status in STARTABLE_STATUSES
 
 
 @dataclass(frozen=True, slots=True)

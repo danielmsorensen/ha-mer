@@ -90,13 +90,15 @@ async def test_stop_charge_button(
     await hass.async_block_till_done()
 
 
-async def test_stop_charge_without_session_raises(
+async def test_stop_charge_without_session_is_unavailable(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
+    """No session: the button is unavailable, and the press service skips it."""
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    with pytest.raises(HomeAssistantError):
-        await press(hass, entity_id_for(hass, f"{eid}_account_stop_charge"))
+    entity_id = entity_id_for(hass, f"{eid}_account_stop_charge")
+    assert hass.states.get(entity_id).state == "unavailable"
+    await press(hass, entity_id)
     mock_client.stop_charge.assert_not_awaited()
 
 
@@ -122,27 +124,61 @@ async def test_station_stop_charge_button_on_correct_station(
     await hass.async_block_till_done()
 
 
-async def test_station_stop_charge_button_on_wrong_station_raises(
+async def test_station_stop_charge_button_on_wrong_station_unavailable(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
     charging_socket: Socket,
 ) -> None:
-    """Charger 6042's stop button raises, because the session is on 6041, not here."""
+    """Charger 6042's stop button is unavailable: the session is on 6041, not here."""
     mock_client.find_last_active_charge_socket.return_value = charging_socket
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    with pytest.raises(HomeAssistantError):
-        await press(hass, entity_id_for(hass, f"{eid}_station_6042_stop_charge"))
+    entity_id = entity_id_for(hass, f"{eid}_station_6042_stop_charge")
+    assert hass.states.get(entity_id).state == "unavailable"
+    await press(hass, entity_id)
     mock_client.stop_charge.assert_not_awaited()
 
 
-async def test_station_stop_charge_button_without_session_raises(
+async def test_station_stop_charge_button_without_session_unavailable(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
-    """No active session anywhere: the station button raises too."""
+    """No active session anywhere: the station button is unavailable too."""
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    with pytest.raises(HomeAssistantError):
-        await press(hass, entity_id_for(hass, f"{eid}_station_6041_stop_charge"))
+    entity_id = entity_id_for(hass, f"{eid}_station_6041_stop_charge")
+    assert hass.states.get(entity_id).state == "unavailable"
+    await press(hass, entity_id)
     mock_client.stop_charge.assert_not_awaited()
+
+
+async def test_buttons_unavailable_when_pressing_would_do_nothing(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket: Socket,
+) -> None:
+    """Buttons grey out rather than offer a press the portal would reject.
+
+    Session on 6041's socket 11242; in the live-status fixture 11241 is in use and
+    11243/11244 are free.
+    """
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+
+    def state(unique_id: str) -> str:
+        return hass.states.get(entity_id_for(hass, unique_id)).state
+
+    assert state(f"{eid}_account_stop_charge") != "unavailable"
+    assert state(f"{eid}_station_6041_stop_charge") != "unavailable"
+    assert state(f"{eid}_station_6042_stop_charge") == "unavailable"
+    assert state(f"{eid}_socket_11243_start_charge") != "unavailable"  # free
+    assert state(f"{eid}_socket_11241_start_charge") == "unavailable"  # in use
+
+    # Session ends: every stop button greys out.
+    mock_client.find_last_active_charge_socket.return_value = None
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert state(f"{eid}_account_stop_charge") == "unavailable"
+    assert state(f"{eid}_station_6041_stop_charge") == "unavailable"

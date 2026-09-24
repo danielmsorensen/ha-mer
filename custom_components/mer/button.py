@@ -57,6 +57,19 @@ class MerStartChargeButton(MerSocketEntity, ButtonEntity):
     def __init__(self, coordinator: MerCoordinator, station_id: int, socket_id: int) -> None:
         super().__init__(coordinator, station_id, socket_id, START_CHARGE)
 
+    @property
+    def available(self) -> bool:
+        """Greyed out unless the socket is free or plugged in and waiting.
+
+        Home Assistant has no disabled state for a button; unavailable is the closest.
+        The UI greys it out, and the button.press service skips unavailable entities
+        (with a warning in the log), so automations cannot press it either. The checks
+        in the stop buttons' `async_press` remain only as a guard against the state
+        changing between the availability check and the press.
+        """
+        socket = self.socket
+        return super().available and socket is not None and socket.can_start
+
     async def async_press(self) -> None:
         try:
             await self.coordinator.client.start_charge(self.socket_id)
@@ -71,6 +84,11 @@ class MerAccountStopChargeButton(MerAccountEntity, ButtonEntity):
     def __init__(self, coordinator: MerCoordinator) -> None:
         super().__init__(coordinator, ACCOUNT_STOP_CHARGE)
 
+    @property
+    def available(self) -> bool:
+        """Greyed out while there is no session of yours to stop."""
+        return super().available and self.coordinator.data.active is not None
+
     async def async_press(self) -> None:
         active = self.coordinator.data.active
         if active is None:
@@ -83,6 +101,12 @@ class MerStationStopChargeButton(MerStationEntity, ButtonEntity):
 
     def __init__(self, coordinator: MerCoordinator, station_id: int) -> None:
         super().__init__(coordinator, station_id, STATION_STOP_CHARGE)
+
+    @property
+    def available(self) -> bool:
+        """Greyed out unless your session is running on this charger."""
+        active = self.coordinator.data.active
+        return super().available and active is not None and active.station_id == self.station_id
 
     async def async_press(self) -> None:
         active = self.coordinator.data.active

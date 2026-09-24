@@ -54,6 +54,12 @@ STATUSES: tuple[str, ...] = (
     STATUS_UNKNOWN,
 )
 
+# A charge can be started on a socket that is free, or plugged in but not yet
+# charging. Anything mid-session, reserved, faulted or offline rejects a start.
+STARTABLE_STATUSES: frozenset[str] = frozenset(
+    {STATUS_AVAILABLE, STATUS_PREPARING, STATUS_OCCUPIED}
+)
+
 IN_USE_STATUSES: frozenset[str] = frozenset(
     {
         STATUS_OCCUPIED,

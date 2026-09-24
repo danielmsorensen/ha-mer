@@ -79,7 +79,7 @@ One device per charger you added, linked to the account device.
 | Session started | sensor | When that active session started |
 | Session duration | sensor | How long that active session has been running |
 | My session here | binary sensor | On while your active session is running on this charger |
-| Stop charge | button | Stops your active session, but only if it is running on this charger |
+| Stop charge | button | Stops your active session, but only if it is running on this charger; greyed out otherwise |
 | Notify me when available | switch | See [The notify-me switch](#the-notify-me-switch) below |
 
 Each socket on the charger adds its own entities to the same charger device,
@@ -92,7 +92,7 @@ have a "Left" and a "Right" socket):
 | *Socket* available | binary sensor | **Available** or **Not available** |
 | *Socket* price | sensor | Your tariff's price per kWh on this socket; the billing plan, fixed price, per-minute rate and transaction fee are attributes |
 | *Socket* max power | sensor (diagnostic) | The socket's maximum power in kW |
-| *Socket* start charge | button | Starts a charge on this socket |
+| *Socket* start charge | button | Starts a charge on this socket; greyed out unless the socket is free, or plugged in and waiting |
 
 ### Account device
 
@@ -111,7 +111,7 @@ your active session (wherever it is running) and your charging history.
 | Active session energy | sensor | Energy delivered so far in the active session |
 | Active session cost | sensor | Cost so far in the active session |
 | Active session duration | sensor | How long the active session has been running |
-| Stop charge | button | Stops the active session, wherever it is running |
+| Stop charge | button | Stops the active session, wherever it is running; greyed out while you are not charging |
 | Last session energy | sensor | Energy delivered in your last completed session |
 | Last session cost | sensor | Cost of your last completed session |
 | Last session started | sensor | When your last completed session started |
