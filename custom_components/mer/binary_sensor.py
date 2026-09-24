@@ -149,6 +149,25 @@ class MerSocketBinarySensor(MerSocketEntity, BinarySensorEntity):
         socket = self.socket
         return self.entity_description.is_on_fn(socket) if socket else None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Name the charger and socket, and point at this socket's start button.
+
+        Lets an automation or blueprint work from the availability sensor alone: it
+        can say "Explorer 2 Left is free" and press the right button without knowing
+        anything about how entities are named.
+        """
+        station, socket = self.station, self.socket
+        if station is None or socket is None:
+            return None
+        return {
+            "charger": station.display_name,
+            "socket": socket_label(socket),
+            "start_button": er.async_get(self.hass).async_get_entity_id(
+                "button", DOMAIN, f"{self.entry_id}_socket_{self.socket_id}_start_charge"
+            ),
+        }
+
 
 class MerAccountBinarySensor(MerAccountEntity, BinarySensorEntity):
     entity_description: MerAccountBinaryDescription

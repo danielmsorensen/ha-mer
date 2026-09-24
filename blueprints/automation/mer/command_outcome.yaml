@@ -1,0 +1,51 @@
+blueprint:
+  name: "Mer: report the outcome of a start or stop"
+  description: >-
+    Sends a notification with the result of every start or stop command made through the
+    Mer integration, whether from a notification action, a dashboard button or an
+    automation: charging, ready to plug the cable in, stopped, rejected by Mer, or
+    accepted but not yet confirmed.
+  domain: automation
+  source_url: https://github.com/danielmsorensen/ha-mer/blob/main/blueprints/automation/mer/command_outcome.yaml
+  author: danielmsorensen
+  homeassistant:
+    min_version: 2026.9.0
+  input:
+    notify_device:
+      name: Phone
+      description: The phone (Home Assistant Companion app) to notify.
+      selector:
+        device:
+          filter:
+            integration: mobile_app
+
+mode: queued
+max_exceeded: silent
+
+triggers:
+  - trigger: event
+    event_type: mer_command_result
+
+variables:
+  notify_device: !input notify_device
+  notify_service: "notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}"
+  outcome: >-
+    {% set words = {
+      'charging': 'Charging',
+      'awaiting_cable': 'Ready, plug the cable in now',
+      'stopped': 'Stopped',
+      'rejected': 'Rejected by Mer',
+      'unconfirmed': 'Accepted, but the charger has not confirmed it yet. Check the charger.',
+    } %}
+    {{ words.get(trigger.event.data.result, trigger.event.data.result) }}
+
+actions:
+  - action: "{{ notify_service }}"
+    data:
+      title: >-
+        {{ trigger.event.data.command | capitalize }} on
+        {{ trigger.event.data.station_name }} {{ trigger.event.data.socket_name }}
+      message: >-
+        {{ outcome }}{% if trigger.event.data.message %}: {{ trigger.event.data.message }}{% endif %}
+      data:
+        tag: mer_command_outcome

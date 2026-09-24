@@ -139,3 +139,20 @@ def test_availability_states_have_descriptive_names() -> None:
     )["entity"]["binary_sensor"]
     for key in ("socket_available", "account_any_available"):
         assert set(strings[key]["state"]) == {"on", "off"}
+
+
+async def test_socket_available_names_its_charger_socket_and_start_button(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Blueprints work from these attributes instead of parsing entity ids."""
+    await setup_integration(hass, mock_config_entry)
+    await mock_config_entry.runtime_data.async_refresh()  # buttons registered by now
+    await hass.async_block_till_done()
+    eid = mock_config_entry.entry_id
+    state = state_by_unique_id(hass, "binary_sensor", f"{eid}_socket_11243_available")
+    assert state.attributes["charger"] == "Business Durham - NETPark 3 - Explorer 1"
+    assert state.attributes["socket"] == "Left"
+    assert (
+        state.attributes["start_button"]
+        == "button.business_durham_netpark_3_explorer_1_left_start_charge"
+    )

@@ -167,54 +167,36 @@ actions:
         {{ trigger.event.data.result }}
 ```
 
-## Example automation
+## Blueprints
 
-For a complete, ready-to-paste set (arrival at work offers the best free
-socket with a Start action, a socket freeing up while you are there does the
-same, the tap is handled, and every start/stop outcome is reported), see
-[`docs/examples/work-charger-automations.yaml`](docs/examples/work-charger-automations.yaml).
-The short version:
+Two automation blueprints ship with the repository. Import each with the
+button, or paste its URL into **Settings → Automations → Blueprints → Import
+blueprint**, then create an automation from it and fill in the fields.
 
-Say you have added the two chargers at the retail park where you work. Get a
-phone notification on weekday mornings when a socket there frees up, naming
-the free sockets, so you know before you set off whether you'll get a spot:
+**Offer a free charger when you arrive.** Pick who, which zone (a Work zone
+around the car park, say), the sockets to offer **in order of preference**,
+and your phone. On arrival while not charging, it names the first free socket
+in your order and the notification carries a **Start** action; while you stay
+there without charging it does the same whenever a socket frees up, after it
+has been free for 30 seconds so a car swapping over does not trigger it. Tap
+Start and it presses that socket's start button, or tells you the socket has
+been taken. Once you are charging the offer is cleared.
 
-```yaml
-alias: Notify when a work charger frees up
-triggers:
-  - trigger: state
-    entity_id: binary_sensor.mer_account_any_socket_available
-    to: "on"
-conditions:
-  - condition: time
-    after: "07:00:00"
-    before: "09:30:00"
-    weekday:
-      - mon
-      - tue
-      - wed
-      - thu
-      - fri
-actions:
-  - action: notify.mobile_app_your_phone
-    data:
-      title: Work charger free
-      message: >-
-        Free now: {{ state_attr('binary_sensor.mer_account_any_socket_available',
-        'available_sockets') | map(attribute='socket') | list | join(', ') }}
-mode: single
-```
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fdanielmsorensen%2Fha-mer%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmer%2Foffer_free_charger.yaml)
 
-The entity above is the account device's **Any socket available**, which
-covers every charger you have added. Its id follows from the device name
-"Mer account", so it is the same for everyone unless you rename the device;
-if in doubt, open **Developer Tools → States** and copy the real id.
+**Report the outcome of a start or stop.** Notifies the result of every start
+or stop made through the integration, from a notification tap, a dashboard or
+an automation: charging, ready to plug the cable in, stopped, rejected, or
+accepted but not yet confirmed.
 
-Its `available_sockets` attribute lists every free socket as `charger`,
-`socket`, `station_id`, `socket_id` and `start_button`, the entity id of that
-socket's start-charge button. That is enough for an automation to choose for
-you, for example pressing the first free socket's button once you have
-plugged in:
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fdanielmsorensen%2Fha-mer%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmer%2Fcommand_outcome.yaml)
+
+Both work from entity attributes rather than names, so they do not care what
+your chargers or sockets are called. Each socket's **available** sensor
+carries `charger`, `socket` and `start_button` attributes, and the account's
+**Any socket available** sensor lists every free socket the same way under
+`available_sockets`, which is enough for your own automations too, for
+example to press the first free socket's button once you have plugged in:
 
 ```yaml
 actions:
@@ -225,18 +207,10 @@ actions:
         'available_sockets') | first).start_button }}
 ```
 
-Starting a charge only works on the socket your car is actually plugged into,
-so pair this with something that tells the automation you have arrived and
-plugged in, such as your phone's location or the socket's own status leaving
-`available`.
-
-There is no charger-level availability entity — availability is a property
-of a socket, and a charger with two sockets (e.g. Left and Right) has two
-independent availability states. To watch one specific socket instead of
-all your chargers, trigger on that socket's own availability sensor, e.g.
-`binary_sensor.explorer_1_left_available` for the "Left" socket on a charger
-device named "Explorer 1" — again, check Developer Tools for the id your
-own charger and socket names actually produce.
+A start on a free socket makes the charger wait for the cable, and the portal
+does not say for how long, so tap Start when you are at the charger, or plug
+in first: the button stays available while the socket is plugged in and
+waiting, and the outcome is then "Charging" rather than "Ready, plug in".
 
 ## Live updates and polling
 

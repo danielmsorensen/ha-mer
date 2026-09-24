@@ -1,0 +1,205 @@
+blueprint:
+  name: "Mer: offer a free charger when you arrive"
+  description: >-
+    When you arrive at a place (work, say) and are not charging, this tells you which of
+    your chosen sockets is free and offers a **Start** action on the notification. While
+    you stay there without charging, it does the same whenever a socket frees up. Tapping
+    Start presses that socket's start button; the outcome comes back through the "Mer:
+    report the outcome of a start or stop" blueprint.
+
+    Pick the sockets in order of preference: the first free one in your order is the one
+    offered. A start on a free socket makes the charger wait for the cable, so tap Start
+    when you are at the charger, or plug in first: the button stays available while the
+    socket is plugged in and waiting.
+  domain: automation
+  source_url: https://github.com/danielmsorensen/ha-mer/blob/main/blueprints/automation/mer/offer_free_charger.yaml
+  author: danielmsorensen
+  homeassistant:
+    min_version: 2026.9.0
+  input:
+    person:
+      name: Who
+      description: The person whose arrival triggers the offer.
+      selector:
+        entity:
+          filter:
+            domain: person
+    zone:
+      name: Where
+      description: The zone to watch for, for example a Work zone around the car park.
+      selector:
+        entity:
+          filter:
+            domain: zone
+    sockets:
+      name: Sockets, in order of preference
+      description: >-
+        The "available" sensors of the sockets to offer. The first free one, in this
+        order, is the one offered. Drag to reorder.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            integration: mer
+            domain: binary_sensor
+    charging:
+      name: Charging sensor
+      description: The Mer account's "Charging" sensor; offers are only made while it is off.
+      default: binary_sensor.mer_account_charging
+      selector:
+        entity:
+          filter:
+            integration: mer
+            domain: binary_sensor
+            device_class: battery_charging
+    notify_device:
+      name: Phone
+      description: The phone (Home Assistant Companion app) to notify.
+      selector:
+        device:
+          filter:
+            integration: mobile_app
+    freed_for:
+      name: Free for at least
+      description: >-
+        How long a socket must stay free before it is offered, so a car swapping over does
+        not trigger a notification.
+      default:
+        seconds: 30
+      selector:
+        duration: {}
+    notify_none_free:
+      name: Say when nothing is free on arrival
+      description: Also send a notification on arrival when every chosen socket is taken.
+      default: true
+      selector:
+        boolean: {}
+
+mode: queued
+max_exceeded: silent
+
+triggers:
+  - trigger: zone
+    id: arrive
+    entity_id: !input person
+    zone: !input zone
+    event: enter
+  - trigger: state
+    id: freed
+    entity_id: !input sockets
+    to: "on"
+    for: !input freed_for
+  - trigger: event
+    id: start_tapped
+    event_type: mobile_app_notification_action
+    event_data:
+      action: MER_START_CHARGE
+  - trigger: state
+    id: charging_started
+    entity_id: !input charging
+    to: "on"
+
+variables:
+  sockets: !input sockets
+  notify_device: !input notify_device
+  notify_service: "notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}"
+  notify_none_free: !input notify_none_free
+  # Offers from this automation share one tag, so a newer offer replaces the older one
+  # and it can be cleared once you are charging.
+  tag: "mer_free_charger_{{ this.entity_id }}"
+  free: "{{ sockets | select('is_state', 'on') | list }}"
+  best: "{{ free[0] if free else none }}"
+  best_name: >-
+    {{ (state_attr(best, 'charger') ~ ' ' ~ state_attr(best, 'socket')) if best else '' }}
+
+actions:
+  - choose:
+      # ---- Start tapped on one of this automation's notifications ------------------
+      - conditions:
+          - condition: trigger
+            id: start_tapped
+          - "{{ trigger.event.data.action_data.automation == this.entity_id }}"
+        sequence:
+          - variables:
+              start_button: "{{ trigger.event.data.action_data.start_button }}"
+              name: "{{ trigger.event.data.action_data.name }}"
+          - if:
+              # The button is unavailable once the socket is taken or already charging,
+              # and Home Assistant would silently skip the press.
+              - "{{ states(start_button) == 'unavailable' }}"
+            then:
+              - action: "{{ notify_service }}"
+                data:
+                  title: Too late
+                  message: "{{ name }} is no longer free."
+                  data:
+                    tag: "{{ tag }}"
+            else:
+              - action: "{{ notify_service }}"
+                data:
+                  message: "Starting {{ name }}..."
+                  data:
+                    tag: "{{ tag }}"
+              # Holds until the charger confirms; the outcome is reported by the
+              # companion blueprint.
+              - action: button.press
+                target:
+                  entity_id: "{{ start_button }}"
+                continue_on_error: true
+
+      # ---- Charging has started: the offer is moot ----------------------------------
+      - conditions:
+          - condition: trigger
+            id: charging_started
+        sequence:
+          - action: "{{ notify_service }}"
+            data:
+              message: clear_notification
+              data:
+                tag: "{{ tag }}"
+
+      # ---- Arrived, or a socket freed up while here: offer the best free socket -----
+      - conditions:
+          - condition: trigger
+            id:
+              - arrive
+              - freed
+          - condition: state
+            entity_id: !input charging
+            state: "off"
+          - condition: zone
+            entity_id: !input person
+            zone: !input zone
+          - "{{ best is not none }}"
+        sequence:
+          - action: "{{ notify_service }}"
+            data:
+              title: Charger free
+              message: >-
+                {{ best_name }} is free{% if free | count > 1 %}
+                ({{ free | count }} sockets free){% endif %}. Start charging?
+              data:
+                tag: "{{ tag }}"
+                actions:
+                  - action: MER_START_CHARGE
+                    title: "Start {{ best_name }}"
+                action_data:
+                  automation: "{{ this.entity_id }}"
+                  start_button: "{{ state_attr(best, 'start_button') }}"
+                  name: "{{ best_name }}"
+
+      # ---- Arrived and nothing is free ----------------------------------------------
+      - conditions:
+          - condition: trigger
+            id: arrive
+          - "{{ notify_none_free }}"
+          - condition: state
+            entity_id: !input charging
+            state: "off"
+        sequence:
+          - action: "{{ notify_service }}"
+            data:
+              title: No charger free
+              message: Every socket is taken. You will be told when one frees up.
+              data:
+                tag: "{{ tag }}"
