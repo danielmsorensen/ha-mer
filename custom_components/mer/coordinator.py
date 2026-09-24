@@ -584,13 +584,25 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._push_event.clear()
         return True
 
+    def _publish(self, data: MerData) -> None:
+        """Hand new data to the entities without disturbing the poll schedule.
+
+        `async_set_updated_data` would also push the next scheduled poll back by a full
+        interval. With the push channel delivering an estimate every 45 s or so, that
+        starved the 5-minute poll completely: energy kept updating from pushes while
+        everything only a poll provides (session duration, wallet, history) froze.
+        Seen live on 2026-09-24.
+        """
+        self.data = data
+        self.async_update_listeners()
+
     def _publish_poll(self, station: Station | None, active: ActiveSession | None) -> None:
         if self.data is None:
             return
         stations = dict(self.data.stations)
         if station is not None:
             stations[station.id] = station
-        self.async_set_updated_data(replace(self.data, stations=stations, active=active))
+        self._publish(replace(self.data, stations=stations, active=active))
 
     def _record_command(
         self,
@@ -616,7 +628,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         )
         self._last_command = record
         if self.data is not None:
-            self.async_set_updated_data(replace(self.data, last_command=record))
+            self._publish(replace(self.data, last_command=record))
         self.hass.bus.async_fire(EVENT_COMMAND_RESULT, record.as_event_data())
         return record
 
@@ -742,7 +754,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             and push.socket_status not in _CHARGING_STATUSES
         ):
             active = None
-        self.async_set_updated_data(replace(self.data, stations=stations, active=active))
+        self._publish(replace(self.data, stations=stations, active=active))
         self._push_event.set()
 
     def _apply_estimate_push(self, push: EstimatePush) -> None:
@@ -756,13 +768,17 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             ):
                 self.hass.async_create_task(self.async_request_refresh())
             return
+        now = dt_util.utcnow()
         updated = replace(
             active,
             energy_kwh=push.energy_kwh if push.energy_kwh is not None else active.energy_kwh,
             cost=push.cost if push.cost is not None else active.cost,
             currency=push.currency or active.currency,
+            # The estimate carries no duration; advance it from the known start so the
+            # duration sensors keep moving between polls.
+            duration=(now - active.started_at) if active.started_at else active.duration,
         )
-        self.async_set_updated_data(replace(self.data, active=updated))
+        self._publish(replace(self.data, active=updated))
         self._push_event.set()
 
 

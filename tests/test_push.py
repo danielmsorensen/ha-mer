@@ -321,3 +321,40 @@ async def test_silent_channel_is_dropped_and_reopened_with_fresh_login(
         eid = mock_config_entry.entry_id
         assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11244_status").state == "occupied"
         assert coordinator.last_push_at is not None
+
+
+async def test_frequent_pushes_do_not_starve_the_poll(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+    charging_socket: Socket,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Live failure: estimates every ~45 s kept pushing the 5-minute poll back forever.
+
+    Energy updated from the pushes while the session duration, which only a poll
+    refreshes, froze for over an hour.
+    """
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await setup_integration(hass, mock_config_entry)
+    await _settle(hass)
+    eid = mock_config_entry.entry_id
+    polls = mock_client.find_stations_by_ids.await_count
+    duration_before = float(
+        state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration").state
+    )
+
+    # Six pushes 60 s apart: more than one poll interval of constant push traffic.
+    for i in range(6):
+        freezer.tick(timedelta(seconds=60))
+        fake_ws.push(estimate_push(11242, 2.0 + i, 0.0))
+        async_fire_time_changed(hass)
+        await _settle(hass)
+
+    assert mock_client.find_stations_by_ids.await_count >= polls + 1, "poll was starved"
+    # And the duration kept moving on the pushes themselves.
+    duration_after = float(
+        state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration").state
+    )
+    assert duration_after > duration_before
