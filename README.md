@@ -215,20 +215,49 @@ waiting, and the outcome is then "Charging" rather than "Ready, plug in".
 ## Live updates and polling
 
 Besides polling, the integration keeps a websocket open to the portal, the
-same channel the web app uses. Through it the portal pushes every socket
-status change the moment it happens, and an updated energy and cost estimate
-for your running charge every minute or so. Pushes for chargers you have not
-added are ignored. While the channel is connected the **Live updates** sensor
-on the account device is on, and polling drops to every 5 minutes, since it
-then only has to cover the wallet, history and charger details. If the
-channel drops, the sensor goes off, one poll runs straight away to catch up,
-polling returns to the configured interval, and the integration reconnects
-with increasing delays up to 5 minutes. A channel that stays open but goes
-quiet for 3 minutes is treated as dead too, since the portal normally pushes
-something every second or so; it is closed and reopened after a fresh login,
-with a warning in the log. Pushes cost nothing against the rate
-limit described below, and start and stop presses resolve on the pushed
-change instead of polling for it.
+same channel the web app uses. Pushes for chargers you have not added are
+ignored. While the channel is connected the **Live updates** sensor on the
+account device is on and polling drops to every 5 minutes; if it drops, the
+sensor goes off, one poll runs straight away to catch up, polling returns to
+the configured interval, and the integration reconnects with increasing
+delays up to 5 minutes. A channel that stays open but goes quiet for
+3 minutes is treated as dead too, since the portal normally pushes something
+every second or so; it is closed and reopened after a fresh login, with a
+warning in the log. Pushes cost nothing against the rate limit described
+below.
+
+### What comes from where
+
+| Data | Pushed the moment it changes | Polled |
+|---|---|---|
+| Charger and socket status, so availability too | Yes | Every poll as well |
+| Your running session's energy and cost | Yes, about every 45 seconds | Every poll as well |
+| Whether a session is running, and where | A socket leaving the charging states ends it at once; a new one is detected from its first estimate, which triggers a poll | Every poll |
+| Session start time | No | Every poll |
+| Session duration | No, see below | Every poll, which is the source of truth |
+| Wallet balance, last completed session | No | Every 15 minutes |
+| Socket names, tariffs, charger model | No | Once an hour per charger |
+| Notify-me subscription state | No | Once an hour per charger |
+
+A poll also runs on demand: straight after a start or stop command resolves,
+when the push channel drops, when a pushed estimate arrives for a session the
+integration does not know about yet, and when you press **Reload** on the
+integration.
+
+### How the session duration keeps moving
+
+Nothing pushes the duration, and polling it every 5 minutes would make the
+sensors jump in 5-minute steps. So while a session with a known start time is
+in the data, a local ticker advances the duration every 30 seconds from that
+start time. Every poll re-reads the duration from the portal, which corrects
+any drift, and whenever the session is seen to have ended, by a poll, by a
+pushed status change, or by a stop command completing, the ticker stops with
+it, so the duration never runs on after the charge has finished. The tick is
+30 seconds rather than every second because the sensors display hours and
+minutes and every change is written to the recorder database. For a
+per-second live readout, use the **Active session started** timestamp
+sensor: dashboards render a timestamp as a live "2 hours 5 minutes ago"
+without any state changes at all.
 
 ## Polling and rate limits
 

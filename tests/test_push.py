@@ -17,7 +17,11 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
-from custom_components.mer.const import PUSH_POLL_INTERVAL_SECONDS, PUSH_SILENCE_TIMEOUT_SECONDS
+from custom_components.mer.const import (
+    PUSH_POLL_INTERVAL_SECONDS,
+    PUSH_SILENCE_TIMEOUT_SECONDS,
+    SESSION_TICK_SECONDS,
+)
 from custom_components.mer.driivz.exceptions import DriivzConnectionError
 from custom_components.mer.driivz.models import Socket
 from tests.helpers import setup_integration
@@ -358,3 +362,50 @@ async def test_frequent_pushes_do_not_starve_the_poll(
         state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration").state
     )
     assert duration_after > duration_before
+
+
+async def test_session_duration_ticks_between_polls_and_stops_with_the_session(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+    charging_socket: Socket,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Duration advances locally every tick, with no request; ends when the session does."""
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await setup_integration(hass, mock_config_entry)
+    await _settle(hass)
+    eid = mock_config_entry.entry_id
+    polls = mock_client.find_stations_by_ids.await_count
+    started = state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration")
+    before_h = float(started.state)
+
+    # Two ticks: one minute, and still no poll (the poll interval is 5 minutes).
+    for _ in range(2):
+        freezer.tick(timedelta(seconds=SESSION_TICK_SECONDS))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+    after_h = float(state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration").state)
+    # The first value came from the portal's estimate, the ticks from the start time;
+    # the two disagree by a fraction of a second, hence the tolerance of a few seconds.
+    assert after_h - before_h == pytest.approx(2 * SESSION_TICK_SECONDS / 3600, abs=1e-3)
+    assert mock_client.find_stations_by_ids.await_count == polls
+    station_h = float(
+        state_by_unique_id(hass, "sensor", f"{eid}_station_6041_session_duration").state
+    )
+    assert station_h == pytest.approx(after_h)
+
+    # The session ends (pushed status change): duration goes unavailable and stays there.
+    fake_ws.push(status_push(6041, 11242, "FINISHING"))
+    await _settle(hass)
+    assert (
+        state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration").state == "unavailable"
+    )
+    assert mock_config_entry.runtime_data._cancel_session_ticker is None
+    freezer.tick(timedelta(seconds=SESSION_TICK_SECONDS))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert (
+        state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration").state == "unavailable"
+    )

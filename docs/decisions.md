@@ -300,3 +300,27 @@ rate limit, and carries exactly the socket status and pending-command flags need
 channel is down; it stops early at rate-limit headroom 2. Wallet, history and details
 still come from the poll. Connection behaviour over many hours is untested; the loop
 assumes drops and reconnects, and the "Live updates" diagnostic sensor shows the state.
+
+## 2026-09-24: pushes must not reschedule the poll; session duration is a local ticker
+
+**Decision.** Pushed updates, command polls and command results are published through
+`MerCoordinator._publish`, which sets the data and notifies entities without touching
+the poll schedule. The running session's duration is advanced by a local 30-second
+ticker (`async_track_time_interval`) that runs only while a session with a known start
+is in the data; it is re-evaluated after every publish via `async_update_listeners`, so
+a poll, a pushed status change or a completed stop command that ends the session also
+stops the ticker. Each poll re-reads the duration from the portal and corrects drift.
+
+**Why.** `async_set_updated_data` pushes the next scheduled poll a full interval into the
+future. With estimates arriving every ~45 s over the push channel, the 5-minute poll
+never ran: energy tracked the app while the duration, wallet and history froze for over
+an hour on Daniel's live instance (diagnostics, 2026-09-24). Nothing pushes the duration,
+and polling it every 5 minutes would make it jump in 5-minute steps, so it is kept
+locally. 30 s rather than 1 s because the sensors show hours and minutes and every state
+change is recorded; the "Active session started" timestamp sensor gives a live
+per-second readout for free.
+
+**Consequences.** The ticker is not registered as a coordinator listener (that would keep
+the coordinator polling after entities unload); it hooks `async_update_listeners`. It is
+cancelled on entry unload and Home Assistant shutdown. README's "What comes from where"
+table records which data is pushed and which is polled.
