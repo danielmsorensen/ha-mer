@@ -156,3 +156,19 @@ async def test_socket_available_names_its_charger_socket_and_start_button(
         state.attributes["start_button"]
         == "button.business_durham_netpark_3_explorer_1_left_start_charge"
     )
+
+
+async def test_session_here_names_the_socket(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket: Socket,
+) -> None:
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    here = state_by_unique_id(hass, "binary_sensor", f"{eid}_station_6041_session_here")
+    assert here.state == "on"
+    assert here.attributes["socket"] == "Right"
+    elsewhere = state_by_unique_id(hass, "binary_sensor", f"{eid}_station_6042_session_here")
+    assert elsewhere.attributes["socket"] is None

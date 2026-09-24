@@ -62,7 +62,7 @@ belongs to the whole integration rather than to any one site.
 
 ## Entities
 
-Names below are the entity's own name; the full entity name Home Assistant
+The charger's model and identity key are on its device page (model and serial number). Names below are the entity's own name; the full entity name Home Assistant
 shows is "*device name* *entity name*", e.g. "Explorer 1 status" or "Mer
 account wallet balance".
 
@@ -73,12 +73,11 @@ One device per charger you added, linked to the account device.
 | Entity | Platform | Meaning |
 | --- | --- | --- |
 | Status | sensor | The charger's own status (`available`, `charging`, `faulted`, …) |
-| Identity key | sensor (diagnostic) | The charger's portal identity key, e.g. `MER-FS-AD00137` |
 | Session energy | sensor | Energy delivered by *your* active session, only while it is running on this charger; unavailable otherwise |
 | Session cost | sensor | Cost of that active session so far |
 | Session started | sensor | When that active session started |
 | Session duration | sensor | How long that active session has been running |
-| My session here | binary sensor | On while your active session is running on this charger |
+| My session here | binary sensor | On while your active session is running on this charger; the `socket` attribute says which socket |
 | Stop charge | button | Stops your active session, but only if it is running on this charger; greyed out otherwise |
 | Notify me when available | switch | See [The notify-me switch](#the-notify-me-switch) below |
 
@@ -88,10 +87,9 @@ have a "Left" and a "Right" socket):
 
 | Entity | Platform | Meaning |
 | --- | --- | --- |
-| *Socket* status | sensor | The socket's own status |
+| *Socket* status | sensor | The socket's own status, whoever is using it; `my_session` attribute is true when it is your session, plus `max_power_kw` and `connector` |
 | *Socket* available | binary sensor | **Available** or **Not available** |
 | *Socket* price | sensor | Your tariff's price per kWh on this socket; the billing plan, fixed price, per-minute rate and transaction fee are attributes |
-| *Socket* max power | sensor (diagnostic) | The socket's maximum power in kW |
 | *Socket* start charge | button | Starts a charge on this socket; greyed out unless the socket is free, or plugged in and waiting. See [Start and stop feedback](#start-and-stop-feedback) |
 
 ### Account device
@@ -109,8 +107,7 @@ your active session (wherever it is running) and your charging history.
 | Last poll | sensor (diagnostic) | When the portal was last polled successfully; attributes give the current poll interval, whether the last poll succeeded, and its error if not. Stays visible while polls fail |
 | Portal requests remaining | sensor (diagnostic) | The portal's rate-limit headroom after the last request; see [Polling and rate limits](#polling-and-rate-limits) |
 | Refresh now | button (diagnostic) | Polls the portal immediately instead of waiting for the next scheduled poll |
-| Active session charger | sensor | Name of the charger your active session is running on. This and the other active session sensors are unavailable while you are not charging |
-| Active session socket | sensor | Name of the socket your active session is running on |
+| Active session | sensor | Where your active session is running, as *charger socket*, with `charger`, `socket`, `station_id` and `socket_id` attributes. This and the other active session sensors are unavailable while you are not charging |
 | Active session started | sensor | When the active session started |
 | Active session energy | sensor | Energy delivered so far in the active session |
 | Active session cost | sensor | Cost so far in the active session |
@@ -214,6 +211,17 @@ A start on a free socket makes the charger wait for the cable, and the portal
 does not say for how long, so tap Start when you are at the charger, or plug
 in first: the button stays available while the socket is plugged in and
 waiting, and the outcome is then "Charging" rather than "Ready, plug in".
+
+## One session at a time
+
+The portal reports one active session per account, the one started most
+recently. If you run two charges on the same account at once, on two sockets
+or two chargers, the integration shows that most recent one: the account's
+session sensors, **My session here** and the socket's `my_session` attribute
+all follow it. The other socket still shows **Charging** in its status, since
+that comes from the charger, but it is not marked as yours. Pushed estimates
+for the second session are ignored rather than triggering polls, so running
+two at once does not use up the portal's rate limit.
 
 ## Live status and polling
 

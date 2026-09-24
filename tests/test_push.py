@@ -116,7 +116,7 @@ async def test_connected_channel_slows_polling_and_reports_live(
     assert coordinator.push_connected is True
     assert coordinator.update_interval == timedelta(seconds=PUSH_POLL_INTERVAL_SECONDS)
     eid = mock_config_entry.entry_id
-    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_updates").state == "on"
+    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_status").state == "on"
 
 
 async def test_status_push_updates_socket_without_polling(
@@ -157,7 +157,7 @@ async def test_push_for_other_station_is_ignored(
     fake_ws.queue.put_nowait(FakeMessage("not json"))
     await _settle(hass)
     assert {s.entity_id: s.state for s in hass.states.async_all()} == before
-    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_updates").state == "on"
+    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_status").state == "on"
 
 
 async def test_estimate_push_updates_running_session(
@@ -217,7 +217,7 @@ async def test_disconnect_restores_polling_and_catches_up(
     await _settle(hass)
     assert coordinator.push_connected is False
     assert coordinator.update_interval == timedelta(seconds=60)
-    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_updates").state == "off"
+    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_status").state == "off"
     assert mock_client.find_stations_by_ids.await_count == polls + 1  # the catch-up poll
 
 
@@ -271,7 +271,7 @@ async def test_channel_recovers_after_failed_reconnect(
     assert coordinator.push_connected is True
     assert mock_client.connect_push.await_count == 3  # first, failed retry, recovery
     assert coordinator.update_interval == timedelta(seconds=PUSH_POLL_INTERVAL_SECONDS)
-    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_updates").state == "on"
+    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_status").state == "on"
     # The new connection delivers pushes like the first did.
     second_ws.push(status_push(6042, 11244, "OCCUPIED"))
     await _settle(hass)
@@ -363,6 +363,27 @@ async def test_live_status_reports_connected_since(
     await setup_integration(hass, mock_config_entry)
     await _settle(hass)
     eid = mock_config_entry.entry_id
-    state = state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_updates")
+    state = state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_status")
     assert state.name == "Mer account Live status"
     assert state.attributes["connected_since"] is not None
+
+
+async def test_second_session_estimates_do_not_trigger_polls(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+    charging_socket: Socket,
+) -> None:
+    """Two charges on one account: the portal reports one; the other's estimates are ignored."""
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await setup_integration(hass, mock_config_entry)
+    await _settle(hass)
+    eid = mock_config_entry.entry_id
+    polls = mock_client.find_stations_by_ids.await_count
+    for _ in range(3):
+        fake_ws.push(estimate_push(11243, 5.0, 0.0))  # a socket on the other charger
+        await _settle(hass)
+    assert mock_client.find_stations_by_ids.await_count == polls
+    # The known session is untouched.
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_energy").state == "1.606"

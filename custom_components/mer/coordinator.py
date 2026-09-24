@@ -765,13 +765,18 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
     def _apply_estimate_push(self, push: EstimatePush) -> None:
         assert self.data is not None
         active = self.data.active
-        if active is None or active.socket_id != push.socket_id:
+        if active is None:
             # A session we do not know about yet (started at the charger, or by the
             # app): fetch it properly rather than guess at it.
             if any(
                 push.socket_id == s.id for st in self.data.stations.values() for s in st.sockets
             ):
                 self.hass.async_create_task(self.async_request_refresh())
+            return
+        if active.socket_id != push.socket_id:
+            # A second session on the same account. The portal only reports one active
+            # session ("last active"), so a poll would not tell us more, and polling on
+            # every one of its estimates would burn the rate limit. Ignore it.
             return
         updated = replace(
             active,

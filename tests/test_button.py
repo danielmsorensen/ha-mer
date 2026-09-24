@@ -295,7 +295,7 @@ async def test_command_and_poll_entities_are_diagnostic(
         ("sensor", "account_last_command"),
         ("sensor", "account_last_poll"),
         ("sensor", "account_requests_remaining"),
-        ("binary_sensor", "account_live_updates"),
+        ("binary_sensor", "account_live_status"),
         ("button", "account_refresh"),
     ):
         entity_id = registry.async_get_entity_id(domain, DOMAIN, f"{eid}_{key}")

@@ -93,10 +93,9 @@ ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
     ),
     # Whether the portal's push channel is connected. It carries charger and socket
     # status and session estimates the moment they change; everything else is polled.
-    # Off means status also arrives by the normal poll only. The key stays
-    # "live_updates" from when it was named that, so existing history carries over.
+    # Off means status also arrives by the normal poll only.
     MerAccountBinaryDescription(
-        key="live_updates",
+        key="live_status",
         translation_key="account_live_status",
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -208,3 +207,12 @@ class MerStationBinarySensor(MerStationEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         return self.entity_description.is_on_fn(self.coordinator.data, self.station_id)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Which of this charger's sockets your session is on."""
+        active = self.coordinator.data.active
+        if active is None or active.station_id != self.station_id:
+            return {"socket": None}
+        socket = self.coordinator.get_socket(self.station_id, active.socket_id)
+        return {"socket": socket_label(socket) if socket else active.socket_name}

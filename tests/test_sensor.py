@@ -42,14 +42,6 @@ async def test_station_and_socket_sensors(
     charging = state_by_unique_id(hass, "sensor", f"{eid}_station_6041_status")
     assert charging.state == "charging"
 
-    identity = state_by_unique_id(hass, "sensor", f"{eid}_station_6042_identity_key")
-    assert identity.state == "MER-FS-AD00137"
-    registry_entry = er.async_get(hass).async_get(identity.entity_id)
-    assert (
-        registry_entry is not None
-        and registry_entry.entity_category == er.EntityCategory.DIAGNOSTIC
-    )
-
     left = state_by_unique_id(hass, "sensor", f"{eid}_socket_11241_status")
     assert left.state == "charging"
     assert left.name == "Business Durham - NETPark 4 - Explorer 2 Left status"
@@ -60,10 +52,8 @@ async def test_station_and_socket_sensors(
     assert price.state == "0.0"
     assert price.attributes["unit_of_measurement"] == "GBP/kWh"
 
-    power = state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_max_power")
-    assert power.state == "7.0"
-    assert power.attributes["unit_of_measurement"] == "kW"
-    assert power.attributes["device_class"] == "power"
+    left_status = state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status")
+    assert left_status.attributes["max_power_kw"] == 7.0
 
 
 async def test_unknown_status_maps_to_unknown_option(
@@ -163,7 +153,7 @@ async def test_account_sensors_idle(
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     assert (
-        state_by_unique_id(hass, "sensor", f"{eid}_account_active_station").state == "unavailable"
+        state_by_unique_id(hass, "sensor", f"{eid}_account_active_session").state == "unavailable"
     )
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_energy").state == "unavailable"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_cost").state == "unavailable"
@@ -173,7 +163,6 @@ async def test_account_sensors_idle(
     assert (
         state_by_unique_id(hass, "sensor", f"{eid}_account_active_duration").state == "unavailable"
     )
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_socket").state == "unavailable"
     wallet = state_by_unique_id(hass, "sensor", f"{eid}_account_wallet_balance")
     assert wallet.state == "12.5"
     assert wallet.attributes["unit_of_measurement"] == "GBP"
@@ -210,9 +199,11 @@ async def test_account_sensors_charging(
     eid = mock_config_entry.entry_id
     expected_started = (now - timedelta(milliseconds=953622)).isoformat(timespec="seconds")
 
-    station = state_by_unique_id(hass, "sensor", f"{eid}_account_active_station")
-    assert station.state == "Business Durham - NETPark 4 - Explorer 2"
-    assert station.attributes["socket"] == "Right"
+    session = state_by_unique_id(hass, "sensor", f"{eid}_account_active_session")
+    assert session.state == "Business Durham - NETPark 4 - Explorer 2 Right"
+    assert session.attributes["charger"] == "Business Durham - NETPark 4 - Explorer 2"
+    assert session.attributes["socket"] == "Right"
+    assert session.attributes["socket_id"] == 11242
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_energy").state == "1.606"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_cost").state == "0.0"
     assert (
@@ -223,7 +214,6 @@ async def test_account_sensors_charging(
     # 953.825 s, displayed in hours by default.
     assert float(active_duration.state) == pytest.approx(953.825 / 3600)
     assert active_duration.attributes["unit_of_measurement"] == "h"
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_socket").state == "Right"
 
     # The charger it is actually running on (6041) mirrors the same session...
     energy = state_by_unique_id(hass, "sensor", f"{eid}_station_6041_session_energy")

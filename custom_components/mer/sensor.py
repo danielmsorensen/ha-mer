@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfPower, UnitOfTime
+from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
@@ -58,7 +58,11 @@ def _socket_status_attributes(data: MerData, socket: Socket) -> dict[str, Any]:
     The status alone says "charging" for anyone's car; this tells the charger's
     own device page that it is yours.
     """
-    return {"my_session": data.active is not None and data.active.socket_id == socket.id}
+    return {
+        "my_session": data.active is not None and data.active.socket_id == socket.id,
+        "max_power_kw": socket.max_power_kw,
+        "connector": socket.socket_type,
+    }
 
 
 def _socket_price_attributes(_data: MerData, socket: Socket) -> dict[str, Any]:
@@ -88,12 +92,6 @@ STATION_SENSORS: tuple[MerStationSensorDescription, ...] = (
         options=STATUS_OPTIONS,
         value_fn=lambda station: status_option(station.status),
     ),
-    MerStationSensorDescription(
-        key="identity_key",
-        translation_key="identity_key",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda station: station.identity_key,
-    ),
 )
 
 SOCKET_SENSORS: tuple[MerSocketSensorDescription, ...] = (
@@ -113,14 +111,6 @@ SOCKET_SENSORS: tuple[MerSocketSensorDescription, ...] = (
         unit_fn=_socket_price_unit,
         attributes_fn=_socket_price_attributes,
     ),
-    MerSocketSensorDescription(
-        key="max_power",
-        translation_key="socket_max_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.KILO_WATT,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda socket: socket.max_power_kw,
-    ),
 )
 
 
@@ -130,7 +120,7 @@ class MerAccountSensorDescription(SensorEntityDescription):
 
     value_fn: Callable[[MerCoordinator, MerData], StateType | datetime]
     unit_fn: Callable[[MerData], str | None] | None = None
-    attributes_fn: Callable[[MerCoordinator, MerData], dict[str, str]] | None = None
+    attributes_fn: Callable[[MerCoordinator, MerData], dict[str, Any]] | None = None
     # Describes the active session: unavailable, not unknown, while there is none.
     requires_session: bool = False
     # Stays available when polls fail: it is how you find out that they are failing.
@@ -173,7 +163,7 @@ class MerStationSessionSensorDescription(SensorEntityDescription):
     unit_fn: Callable[[ActiveSession | None, MerData], str | None] | None = None
 
 
-def _active_station_name(coordinator: MerCoordinator, data: MerData) -> str | None:
+def _active_charger_name(coordinator: MerCoordinator, data: MerData) -> str | None:
     if data.active is None:
         return None
     if data.active.station_caption:
@@ -182,14 +172,37 @@ def _active_station_name(coordinator: MerCoordinator, data: MerData) -> str | No
         station = coordinator.get_station(data.active.station_id)
         if station is not None:
             return station.display_name
-    return f"Socket {data.active.socket_id}"
+    return None
 
 
-def _active_attributes(coordinator: MerCoordinator, data: MerData) -> dict[str, str]:
-    if data.active is None or data.active.station_id is None:
+def _active_socket_name(coordinator: MerCoordinator, data: MerData) -> str | None:
+    if data.active is None:
+        return None
+    if data.active.station_id is not None:
+        socket = coordinator.get_socket(data.active.station_id, data.active.socket_id)
+        if socket is not None:
+            return socket_label(socket)
+    return data.active.socket_name or f"Socket {data.active.socket_id}"
+
+
+def _active_session_name(coordinator: MerCoordinator, data: MerData) -> str | None:
+    """Where the session is running, as "<charger> <socket>"."""
+    if data.active is None:
+        return None
+    charger = _active_charger_name(coordinator, data)
+    socket = _active_socket_name(coordinator, data)
+    return f"{charger} {socket}" if charger else socket
+
+
+def _active_attributes(coordinator: MerCoordinator, data: MerData) -> dict[str, Any]:
+    if data.active is None:
         return {}
-    socket = coordinator.get_socket(data.active.station_id, data.active.socket_id)
-    return {"socket": socket_label(socket)} if socket else {}
+    return {
+        "charger": _active_charger_name(coordinator, data),
+        "socket": _active_socket_name(coordinator, data),
+        "station_id": data.active.station_id,
+        "socket_id": data.active.socket_id,
+    }
 
 
 def _last(data: MerData) -> Transaction | None:
@@ -240,10 +253,10 @@ def _session_currency(session: ActiveSession | None, data: MerData) -> str:
 
 ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
     MerAccountSensorDescription(
-        key="active_station",
+        key="active_session",
         requires_session=True,
-        translation_key="active_station",
-        value_fn=_active_station_name,
+        translation_key="active_session",
+        value_fn=_active_session_name,
         attributes_fn=_active_attributes,
     ),
     MerAccountSensorDescription(
@@ -281,12 +294,6 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         # No display precision, so the frontend's duration formatting shows h and min.
         suggested_unit_of_measurement=UnitOfTime.HOURS,
         value_fn=lambda _c, data: _session_duration(data.active),
-    ),
-    MerAccountSensorDescription(
-        key="active_socket",
-        requires_session=True,
-        translation_key="active_socket",
-        value_fn=lambda _c, data: data.active.socket_name if data.active else None,
     ),
     MerAccountSensorDescription(
         key="last_energy",

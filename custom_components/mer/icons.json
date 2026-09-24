@@ -22,19 +22,10 @@
       "socket_price": {
         "default": "mdi:cash"
       },
-      "identity_key": {
-        "default": "mdi:identifier"
-      },
       "account_available_sockets": {
         "default": "mdi:ev-plug-type2"
       },
       "account_sockets_in_use": {
-        "default": "mdi:ev-plug-type2"
-      },
-      "active_station": {
-        "default": "mdi:ev-station"
-      },
-      "active_socket": {
         "default": "mdi:ev-plug-type2"
       },
       "last_command": {
@@ -49,6 +40,9 @@
       },
       "requests_remaining": {
         "default": "mdi:speedometer"
+      },
+      "active_session": {
+        "default": "mdi:ev-station"
       }
     },
     "binary_sensor": {

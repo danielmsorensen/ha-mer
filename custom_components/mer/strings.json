@@ -113,9 +113,6 @@
           "unknown": "Unknown"
         }
       },
-      "identity_key": {
-        "name": "Identity key"
-      },
       "socket_status": {
         "name": "{socket} status",
         "state": {
@@ -135,17 +132,11 @@
       "socket_price": {
         "name": "{socket} price"
       },
-      "socket_max_power": {
-        "name": "{socket} max power"
-      },
       "account_available_sockets": {
         "name": "Available sockets"
       },
       "account_sockets_in_use": {
         "name": "Sockets in use"
-      },
-      "active_station": {
-        "name": "Active session charger"
       },
       "active_started": {
         "name": "Active session started"
@@ -158,9 +149,6 @@
       },
       "active_duration": {
         "name": "Active session duration"
-      },
-      "active_socket": {
-        "name": "Active session socket"
       },
       "last_energy": {
         "name": "Last session energy"
@@ -201,6 +189,9 @@
       },
       "requests_remaining": {
         "name": "Portal requests remaining"
+      },
+      "active_session": {
+        "name": "Active session"
       }
     },
     "binary_sensor": {
