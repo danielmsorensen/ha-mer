@@ -238,3 +238,34 @@ async def test_start_press_resolves_on_push_without_polling(
     mock_client.start_charge.assert_awaited_once_with(11243)
     assert mock_client.find_stations_by_ids.await_count == polls  # resolved by push alone
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").state == "charging"
+
+
+async def test_channel_recovers_after_failed_reconnect(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+) -> None:
+    """Drop, one failed reconnect, then success: polling returns to 5 min and pushes apply."""
+    second_ws = FakeWebSocket()
+    mock_client.connect_push.side_effect = [fake_ws, DriivzConnectionError("still down"), second_ws]
+    with patch("custom_components.mer.coordinator.PUSH_RECONNECT_MIN_SECONDS", 0):
+        await setup_integration(hass, mock_config_entry)
+        await _settle(hass)
+        coordinator = mock_config_entry.runtime_data
+        eid = mock_config_entry.entry_id
+        assert coordinator.push_connected is True
+
+        fake_ws.disconnect()
+        for _ in range(10):
+            await asyncio.sleep(0)
+        await hass.async_block_till_done()
+
+    assert coordinator.push_connected is True
+    assert mock_client.connect_push.await_count == 3  # first, failed retry, recovery
+    assert coordinator.update_interval == timedelta(seconds=PUSH_POLL_INTERVAL_SECONDS)
+    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_updates").state == "on"
+    # The new connection delivers pushes like the first did.
+    second_ws.push(status_push(6042, 11244, "OCCUPIED"))
+    await _settle(hass)
+    assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11244_status").state == "occupied"
