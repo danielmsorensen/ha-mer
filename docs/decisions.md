@@ -277,3 +277,26 @@ unticks chargers; setup then deletes devices of chargers no longer monitored. En
 name, a duplicate of the device inside it. Daniel asked for chargers to sit together
 under their site. The account device's "Devices that don't belong to a sub-entry"
 group is Home Assistant's fixed label for entry-level devices and cannot be renamed.
+
+## 2026-09-24: start/stop presses wait for the outcome; push channel for live status
+
+**Decision.** A start or stop press holds the service call open until the charger shows
+the result (charging / ready for cable / stopped), raising after 60 s if the portal
+accepted the command but nothing visible happened. Outcomes are recorded on a "Last
+command" sensor and fired as `mer_command_result`. The coordinator also keeps the
+portal websocket open: pushed socket status changes for monitored chargers and session
+estimates are applied immediately, the waiter resolves on them, and polling drops to
+5 minutes while connected, returning to the configured interval (with an immediate
+catch-up poll) when the channel drops. Reconnects back off from 5 s to 5 min.
+
+**Why.** Before, a press returned on the portal's acknowledgement and one poll ran 5 s
+later, usually before the charger had changed state, so the UI gave no feedback and the
+entities lagged up to a minute. HA's frontend already shows a spinner, tick or cross for
+a held-open press, so waiting is the native way to show the outcome. The websocket was
+probed read-only first: it is a broadcast the client filters, costs nothing against the
+rate limit, and carries exactly the socket status and pending-command flags needed.
+
+**Consequences.** Command polling costs up to 12 requests per press when the push
+channel is down; it stops early at rate-limit headroom 2. Wallet, history and details
+still come from the poll. Connection behaviour over many hours is untested; the loop
+assumes drops and reconnects, and the "Live updates" diagnostic sensor shows the state.

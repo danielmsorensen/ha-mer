@@ -69,6 +69,10 @@ async def async_get_config_entry_diagnostics(
         ),
         "rate_limit_remaining": coordinator.client.rate_limit_remaining,
         "last_update_success": coordinator.last_update_success,
+        "push_connected": coordinator.push_connected,
+        "update_interval_seconds": (
+            coordinator.update_interval.total_seconds() if coordinator.update_interval else None
+        ),
         "data": async_redact_data(
             {
                 "customer_id": data.customer_id,

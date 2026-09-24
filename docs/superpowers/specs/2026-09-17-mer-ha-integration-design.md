@@ -97,7 +97,7 @@ search, websocket message classes).
 - Charging speed: `SLOW`, `SEMI_FAST`, `FAST`, `ULTRA_FAST`.
 - Socket type: `TYPE_2_MENNEKES`, `TYPE_COMBO_GERMANY`, `TYPE_4_CHADEMO` (others exist).
 
-### 2.5 Websocket (deferred)
+### 2.5 Websocket (deferred in v1; adopted 2026-09-24, see docs/api.md and docs/decisions.md)
 
 `wss://<host>/websocket`; client sends `"0"` on open; server pushes JSON messages whose
 `@c` (or `@class`) field names the DTO, e.g. `StationStatusSummaryDtoImp` with

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
+import contextlib
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+import json
 import logging
 from typing import Any
 
+from aiohttp import WSMsgType
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -27,6 +30,9 @@ from .const import (
     DOMAIN,
     EVENT_COMMAND_RESULT,
     HISTORY_LOOKBACK,
+    PUSH_POLL_INTERVAL_SECONDS,
+    PUSH_RECONNECT_MAX_SECONDS,
+    PUSH_RECONNECT_MIN_SECONDS,
     RATE_LIMIT_SKIP_THRESHOLD,
     RATE_LIMIT_WARN_INTERVAL,
     REFRESH_AFTER_COMMAND_SECONDS,
@@ -42,7 +48,15 @@ from .driivz.const import (
     STATUS_PREPARING,
 )
 from .driivz.exceptions import AuthError, DriivzError, RateLimitError
-from .driivz.models import Socket, Station, Transaction, Wallet
+from .driivz.models import (
+    EstimatePush,
+    Socket,
+    Station,
+    StatusPush,
+    Transaction,
+    Wallet,
+    parse_push,
+)
 
 # Socket statuses that mean a charge is in progress.
 _CHARGING_STATUSES = frozenset({STATUS_CHARGING, STATUS_DISCHARGING, STATUS_PAUSED})
@@ -143,6 +157,11 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             update_interval=timedelta(seconds=interval),
         )
         self.client = client
+        self._poll_interval = timedelta(seconds=interval)
+        # Push channel state. `_push_event` wakes the command waiter on every pushed
+        # change for one of our chargers.
+        self.push_connected = False
+        self._push_event = asyncio.Event()
         # One subentry per charging site, listing its monitored chargers. Any change
         # reloads the entry (see __init__), so these are fixed for the coordinator's life.
         self.site_subentries: list[ConfigSubentry] = [
@@ -517,15 +536,24 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         socket_id: int,
         done: Callable[[Station | None, int | None], str | None],
     ) -> str:
-        """Poll the charger and the active session until `done` says so, or time runs out.
+        """Wait until `done` says so, or time runs out.
 
-        Every poll is published to the entities, so status, availability and the
-        session sensors update live while the button shows its spinner. Polling stops
-        early when the portal's rate-limit headroom gets low; the normal refresh then
-        picks the outcome up.
+        With the push channel connected, each pushed change for one of our chargers
+        wakes this immediately and the check runs on the data it already updated, so
+        no request is spent. Otherwise, or when the push channel is quiet, the charger
+        and the active session are polled; every poll is published to the entities, so
+        status, availability and the session sensors update live while the button shows
+        its spinner. Polling stops early when the portal's rate-limit headroom gets low;
+        the normal refresh then picks the outcome up.
         """
         for _ in range(COMMAND_MAX_POLLS):
-            await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
+            woken_by_push = await self._wait_for_push(COMMAND_POLL_INTERVAL_SECONDS)
+            if woken_by_push and self.push_connected:
+                merged = self.get_station(station_id) if station_id is not None else None
+                active = self.data.active if self.data else None
+                if (result := done(merged, active.socket_id if active else None)) is not None:
+                    return result
+                continue
             remaining = self.client.rate_limit_remaining
             if remaining is not None and remaining <= COMMAND_RATE_LIMIT_FLOOR:
                 _LOGGER.debug("Stopping command polling early; rate limit remaining %s", remaining)
@@ -544,6 +572,15 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             if (result := done(merged, active.socket_id if active else None)) is not None:
                 return result
         return RESULT_UNCONFIRMED
+
+    async def _wait_for_push(self, timeout: float) -> bool:
+        """Sleep up to `timeout` seconds, returning early (True) on a pushed change."""
+        try:
+            await asyncio.wait_for(self._push_event.wait(), timeout)
+        except TimeoutError:
+            return False
+        self._push_event.clear()
+        return True
 
     def _publish_poll(self, station: Station | None, active: ActiveSession | None) -> None:
         if self.data is None:
@@ -580,6 +617,112 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             self.async_set_updated_data(replace(self.data, last_command=record))
         self.hass.bus.async_fire(EVENT_COMMAND_RESULT, record.as_event_data())
         return record
+
+    # ----- push channel -----------------------------------------------------
+
+    async def async_run_push(self) -> None:
+        """Keep the portal websocket open for as long as the entry is loaded.
+
+        Runs as a config-entry background task. Connected, socket status changes for
+        our chargers and estimates for the running session are applied the moment they
+        arrive and the poll drops to a slow safety net. Any failure reconnects with
+        backoff; while disconnected the poll runs at its configured interval again.
+        """
+        backoff = PUSH_RECONNECT_MIN_SECONDS
+        while True:
+            try:
+                ws = await self.client.connect_push()
+            except Exception as err:
+                _LOGGER.debug("Mer push channel unavailable (%s); retry in %ss", err, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, PUSH_RECONNECT_MAX_SECONDS)
+                continue
+            backoff = PUSH_RECONNECT_MIN_SECONDS
+            self._set_push_connected(True)
+            try:
+                async for message in ws:
+                    if message.type != WSMsgType.TEXT:
+                        continue
+                    self._handle_push_text(message.data)
+            except Exception as err:
+                _LOGGER.debug("Mer push channel error: %s", err)
+            finally:
+                with contextlib.suppress(Exception):
+                    await ws.close()
+                self._set_push_connected(False)
+            _LOGGER.debug("Mer push channel closed; reconnecting in %ss", backoff)
+            await asyncio.sleep(backoff)
+
+    def _set_push_connected(self, connected: bool) -> None:
+        if connected == self.push_connected:
+            return
+        self.push_connected = connected
+        self.update_interval = (
+            timedelta(seconds=PUSH_POLL_INTERVAL_SECONDS) if connected else self._poll_interval
+        )
+        _LOGGER.info(
+            "Mer live updates %s; polling every %ss",
+            "connected" if connected else "disconnected",
+            int(self.update_interval.total_seconds()),
+        )
+        if self.data is not None:
+            # Re-publishing applies the new interval to the next scheduled poll and lets
+            # the "Live updates" sensor follow the connection state.
+            self.async_set_updated_data(self.data)
+        if not connected:
+            # Whatever changed while the channel was down is caught up now, not in 5 min.
+            self.hass.async_create_task(self.async_request_refresh())
+
+    def _handle_push_text(self, text: str) -> None:
+        try:
+            push = parse_push(json.loads(text))
+        except ValueError:
+            return
+        if push is None or self.data is None:
+            return
+        if isinstance(push, StatusPush):
+            self._apply_status_push(push)
+        else:
+            self._apply_estimate_push(push)
+
+    def _apply_status_push(self, push: StatusPush) -> None:
+        assert self.data is not None
+        if push.station_id not in self.data.stations:
+            return  # the broadcast covers every charger on the network
+        stations = dict(self.data.stations)
+        stations[push.station_id] = stations[push.station_id].with_push(push)
+        active = self.data.active
+        # A session whose socket left the charging states is over; the next poll fills
+        # in the history, but the entities should not claim you are charging meanwhile.
+        if (
+            active is not None
+            and push.socket_id == active.socket_id
+            and push.socket_status is not None
+            and push.socket_status not in _CHARGING_STATUSES
+        ):
+            active = None
+        self.async_set_updated_data(replace(self.data, stations=stations, active=active))
+        self._push_event.set()
+
+    def _apply_estimate_push(self, push: EstimatePush) -> None:
+        assert self.data is not None
+        active = self.data.active
+        if active is None or active.socket_id != push.socket_id:
+            # A session we do not know about yet (started at the charger, or by the
+            # app): fetch it properly rather than guess at it.
+            if any(
+                push.socket_id == s.id for st in self.data.stations.values() for s in st.sockets
+            ):
+                self.hass.async_create_task(self.async_request_refresh())
+            return
+        updated = replace(
+            active,
+            energy_kwh=push.energy_kwh if push.energy_kwh is not None else active.energy_kwh,
+            cost=push.cost if push.cost is not None else active.cost,
+            currency=push.currency or active.currency,
+        )
+        self.async_set_updated_data(replace(self.data, active=updated))
+        self._push_event.set()
 
 
 def _socket_of(station: Station | None, socket_id: int) -> Socket | None:

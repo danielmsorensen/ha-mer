@@ -20,6 +20,7 @@ from custom_components.mer.const import (
     DOMAIN,
     SUBENTRY_TYPE_SITE,
 )
+from custom_components.mer.driivz.exceptions import DriivzConnectionError
 from custom_components.mer.driivz.models import (
     ActiveTransaction,
     SessionEstimate,
@@ -120,6 +121,8 @@ def mock_client() -> Generator[MagicMock]:
             )
         )
         client.start_charge = AsyncMock()
+        # No push channel unless a test provides one; the loop then backs off quietly.
+        client.connect_push = AsyncMock(side_effect=DriivzConnectionError("no push in tests"))
         client.stop_charge = AsyncMock()
         # Mirrors the real account: 6042 is subscribed via the Mer app, 6041 is not.
         client.is_subscribed_to_availability = AsyncMock(

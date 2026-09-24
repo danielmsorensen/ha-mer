@@ -49,6 +49,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: MerConfigEntry) -> bool:
     _async_register_account_device(hass, entry)
     _async_remove_unmonitored_chargers(hass, entry, coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Cancelled automatically when the entry unloads.
+    entry.async_create_background_task(hass, coordinator.async_run_push(), "mer push channel")
     return True
 
 

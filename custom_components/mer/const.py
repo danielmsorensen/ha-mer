@@ -48,5 +48,10 @@ COMMAND_MAX_POLLS = COMMAND_TIMEOUT_SECONDS // COMMAND_POLL_INTERVAL_SECONDS
 COMMAND_RATE_LIMIT_FLOOR = 2
 # Fired with the outcome of every start/stop command, for automations to notify on.
 EVENT_COMMAND_RESULT = "mer_command_result"
+# While the push channel is connected, socket status arrives instantly, so the poll
+# only has to cover wallet, history and details; it drops to this interval.
+PUSH_POLL_INTERVAL_SECONDS = 300
+PUSH_RECONNECT_MIN_SECONDS = 5
+PUSH_RECONNECT_MAX_SECONDS = 300
 RATE_LIMIT_SKIP_THRESHOLD = 1
 RATE_LIMIT_WARN_INTERVAL = timedelta(hours=1)

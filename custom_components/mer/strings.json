@@ -217,6 +217,9 @@
       },
       "station_session_here": {
         "name": "My session here"
+      },
+      "account_live_updates": {
+        "name": "Live updates"
       }
     },
     "button": {

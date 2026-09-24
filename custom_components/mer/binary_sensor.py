@@ -11,6 +11,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -89,6 +90,15 @@ ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
         translation_key="account_charging",
         device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
         is_on_fn=lambda _c, data: data.active is not None,
+    ),
+    # Whether the portal's push channel is connected. Off means status arrives by the
+    # normal poll only, every scan interval, rather than the moment it changes.
+    MerAccountBinaryDescription(
+        key="live_updates",
+        translation_key="account_live_updates",
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        is_on_fn=lambda coordinator, _d: coordinator.push_connected,
     ),
 )
 

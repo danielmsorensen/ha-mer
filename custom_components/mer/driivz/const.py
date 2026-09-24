@@ -21,6 +21,12 @@ PATH_LAST_ACTIVE_SOCKET = "stationFacade/findLastActiveChargeSocket"
 PATH_TRANSACTION_START_TIME = "stationFacade/findCurrentTransactionStartTime"
 PATH_TRANSACTION_ESTIMATE = "stationFacade/findCurrentTransactionBillingChargingEstimation"
 PATH_START_CHARGE = "stationFacade/startChargeNow"
+# Push channel: the portal broadcasts status changes for every charger on the
+# network once the client has sent the greeting below.
+PATH_WEBSOCKET = "websocket"
+PUSH_GREETING = "0"
+PUSH_STATION_STATUS = "StationStatusSummaryDtoImp"
+PUSH_CHARGING_ESTIMATE = "BillingChargingEstimationMessageImp"
 PATH_STOP_CHARGE = "stationFacade/stopCharge"
 PATH_WALLET = "billingFacade/findCustomerDetailWalletByCustomerId"
 PATH_TRANSACTIONS = "customerFacade/findDriverChargeTransactionLogByView"

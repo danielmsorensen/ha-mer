@@ -8,7 +8,14 @@ from datetime import UTC, datetime, timedelta
 import re
 from typing import Any, ClassVar
 
-from .const import IN_USE_STATUSES, STARTABLE_STATUSES, STATUS_AVAILABLE, STATUS_UNKNOWN
+from .const import (
+    IN_USE_STATUSES,
+    PUSH_CHARGING_ESTIMATE,
+    PUSH_STATION_STATUS,
+    STARTABLE_STATUSES,
+    STATUS_AVAILABLE,
+    STATUS_UNKNOWN,
+)
 
 _RESTRICTED_PREFIX = "[RESTRICTED ACCESS]"
 _CODE_RE = re.compile(r"\(\s*MER-[A-Z0-9-]+\s*\)")
@@ -260,6 +267,75 @@ class Station:
         known = {s.id for s in merged}
         merged.extend(s for s in live.sockets if s.id not in known)
         return replace(self, status=live.status, sockets=tuple(merged))
+
+    def with_push(self, push: StatusPush) -> Station:
+        """Return this station with one pushed status change applied."""
+        sockets = tuple(
+            replace(s, status=push.socket_status)
+            if push.socket_id is not None and s.id == push.socket_id and push.socket_status
+            else s
+            for s in self.sockets
+        )
+        return replace(self, status=push.station_status or self.status, sockets=sockets)
+
+
+@dataclass(frozen=True, slots=True)
+class StatusPush:
+    """A pushed status change for one station and, usually, one of its sockets."""
+
+    station_id: int
+    station_status: str | None
+    socket_id: int | None
+    socket_status: str | None
+    start_pending: bool
+    stop_pending: bool
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> StatusPush:
+        station = data.get("stationStatusDto") or {}
+        socket = data.get("stationSocketStatusDto") or {}
+        return cls(
+            station_id=int(data["stationId"]),
+            station_status=_str(station.get("stationStatus")),
+            socket_id=_int(data.get("stationSocketId")),
+            socket_status=_str(socket.get("socketStatus")),
+            start_pending=bool(socket.get("approveStartChargePending", False)),
+            stop_pending=bool(socket.get("stopChargePending", False)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EstimatePush:
+    """A pushed energy/cost estimate for the customer's running charge."""
+
+    socket_id: int
+    energy_kwh: float | None
+    cost: float | None
+    currency: str | None
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> EstimatePush:
+        return cls(
+            socket_id=int(data["stationSocketId"]),
+            energy_kwh=_float(data.get("totalKw")),  # kWh despite the name; see docs/api.md
+            cost=_float(data.get("cost")),
+            currency=_str(data.get("currency")),
+        )
+
+
+def parse_push(data: Any) -> StatusPush | EstimatePush | None:
+    """Turn one websocket JSON message into a typed push, or None for anything else."""
+    if not isinstance(data, Mapping):
+        return None
+    kind = data.get("@c") or data.get("@class")
+    try:
+        if kind == PUSH_STATION_STATUS and data.get("stationId") is not None:
+            return StatusPush.from_dict(data)
+        if kind == PUSH_CHARGING_ESTIMATE and data.get("stationSocketId") is not None:
+            return EstimatePush.from_dict(data)
+    except (TypeError, ValueError):
+        return None
+    return None
 
 
 @dataclass(frozen=True, slots=True)

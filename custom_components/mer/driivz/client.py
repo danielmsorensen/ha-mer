@@ -38,6 +38,8 @@ from .const import (
     PATH_TRANSACTIONS,
     PATH_UNSUBSCRIBE_WHEN_AVAILABLE,
     PATH_WALLET,
+    PATH_WEBSOCKET,
+    PUSH_GREETING,
 )
 from .exceptions import ApiError, AuthError, DriivzConnectionError, RateLimitError
 from .models import (
@@ -261,6 +263,32 @@ class DriivzDriverClient:
                 raise AuthError(_error_type(payload) or "LOGIN_FAILED")
             self._logged_in = True
             await self._fetch_csrf(PATH_MAP)
+
+    # ----- push channel ------------------------------------------------
+
+    async def connect_push(self) -> aiohttp.ClientWebSocketResponse:
+        """Open the portal's websocket, logging in first if needed, and send the greeting.
+
+        The portal then pushes a status message for every charger on the network that
+        changes state, and periodic charging estimates for the customer's own session.
+        Raises `DriivzConnectionError` if the handshake fails; the login flag is dropped
+        so the next attempt authenticates again, since a refused handshake usually means
+        the session cookie has expired.
+        """
+        if not self._logged_in:
+            await self.login()
+        url = self._url(PATH_WEBSOCKET)
+        url = "wss://" + url.removeprefix("https://") if url.startswith("https://") else url
+        url = "ws://" + url.removeprefix("http://") if url.startswith("http://") else url
+        try:
+            ws = await self._session.ws_connect(
+                url, headers={"Origin": self._base_url}, heartbeat=30
+            )
+        except (aiohttp.ClientError, OSError, TimeoutError) as err:
+            self._logged_in = False
+            raise DriivzConnectionError(f"websocket: {err}") from err
+        await ws.send_str(PUSH_GREETING)
+        return ws
 
     # ----- stations and sites -------------------------------------------
 

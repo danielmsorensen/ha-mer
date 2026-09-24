@@ -190,12 +190,19 @@ already exposes.
   (others exist on the wider network but were not observed on the chargers
   this integration was developed against).
 
-## Websocket (not used)
+## Websocket (used since 2026-09-24 for live status)
 
 `wss://<host>/websocket`; the client sends the literal string `"0"` on open,
 and the server pushes JSON messages whose `@c` (or `@class`) field names the
 DTO, e.g. `StationStatusSummaryDtoImp` with `stationId`, `stationSocketId`,
 `stationSocketStatusDto.socketStatus`, plus `CustomerDetailChargeEventDtoImp`
-and `BillingChargingEstimationMessageImp` for session updates. This would let
-a future version push updates instead of polling, but it is not used in this
-integration.
+and `BillingChargingEstimationMessageImp` for session updates. The integration keeps this
+channel open (`DriivzDriverClient.connect_push`, applied in
+`MerCoordinator.async_run_push`): socket status changes for the monitored chargers and
+charging estimates for the customer's own session are applied as they arrive, and the
+poll drops to five minutes while connected. Observed live: it is a network-wide
+broadcast (84 messages over 90 s across 33 chargers), each status message carries
+`stationSocketId`, `stationSocketStatusDto.socketStatus`, the previous status, and the
+flags `approveStartChargePending` / `stopChargePending`; estimates arrive roughly every
+45 s while charging with `totalKw` (kWh), `cost`, `currency`, `tocSoc`. It does not
+count against `X-Rate-Limit-Remaining`.

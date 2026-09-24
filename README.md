@@ -105,6 +105,7 @@ your active session (wherever it is running) and your charging history.
 | Available sockets | sensor | Count of sockets on your added chargers currently `AVAILABLE` |
 | Sockets in use | sensor | Count of sockets on your added chargers in any "in use" state |
 | Charging | binary sensor | On while you have an active session, on any charger |
+| Live updates | binary sensor (diagnostic) | On while the portal's push channel is connected, so status changes arrive the moment they happen |
 | Active session charger | sensor | Name of the charger your active session is running on. This and the other active session sensors are unavailable while you are not charging |
 | Active session socket | sensor | Name of the socket your active session is running on |
 | Active session started | sensor | When the active session started |
@@ -230,6 +231,21 @@ all your chargers, trigger on that socket's own availability sensor, e.g.
 `binary_sensor.explorer_1_left_available` for the "Left" socket on a charger
 device named "Explorer 1" — again, check Developer Tools for the id your
 own charger and socket names actually produce.
+
+## Live updates and polling
+
+Besides polling, the integration keeps a websocket open to the portal, the
+same channel the web app uses. Through it the portal pushes every socket
+status change the moment it happens, and an updated energy and cost estimate
+for your running charge every minute or so. Pushes for chargers you have not
+added are ignored. While the channel is connected the **Live updates** sensor
+on the account device is on, and polling drops to every 5 minutes, since it
+then only has to cover the wallet, history and charger details. If the
+channel drops, the sensor goes off, one poll runs straight away to catch up,
+polling returns to the configured interval, and the integration reconnects
+with increasing delays up to 5 minutes. Pushes cost nothing against the rate
+limit described below, and start and stop presses resolve on the pushed
+change instead of polling for it.
 
 ## Polling and rate limits
 
