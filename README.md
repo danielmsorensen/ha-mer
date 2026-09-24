@@ -73,6 +73,7 @@ One device per charger you added, linked to the account device.
 | Entity | Platform | Meaning |
 | --- | --- | --- |
 | Status | sensor | The charger's own status (`available`, `charging`, `faulted`, …) |
+| Available sockets | sensor | How many of this charger's sockets are free; `total_sockets` attribute |
 | Session energy | sensor | Energy delivered by *your* active session, only while it is running on this charger; unavailable otherwise |
 | Session cost | sensor | Cost of that active session so far |
 | Session started | sensor | When that active session started |
@@ -99,8 +100,7 @@ your active session (wherever it is running) and your charging history.
 
 | Entity | Platform | Meaning |
 | --- | --- | --- |
-| Any socket available | binary sensor | **Available** if any socket on any charger you added is free, otherwise **None available** |
-| Available sockets | sensor | Count of sockets on your added chargers currently `AVAILABLE` |
+| Available sockets | sensor | How many sockets on your added chargers are free. Attributes: `available_sockets` (each free socket's `charger`, `socket`, `station_id`, `socket_id` and `start_button`, in charger order), `total_sockets` and `chargers` |
 | Sockets in use | sensor | Count of sockets on your added chargers in any "in use" state |
 | Charging | binary sensor | On while you have an active session, on any charger |
 | Live status | binary sensor (diagnostic) | On while the portal's push channel is connected, so charger and socket status and session estimates arrive the moment they change; `connected_since` attribute |
@@ -194,7 +194,7 @@ accepted but not yet confirmed.
 Both work from entity attributes rather than names, so they do not care what
 your chargers or sockets are called. Each socket's **available** sensor
 carries `charger`, `socket` and `start_button` attributes, and the account's
-**Any socket available** sensor lists every free socket the same way under
+**Available sockets** sensor lists every free socket the same way under
 `available_sockets`, which is enough for your own automations too, for
 example to press the first free socket's button once you have plugged in:
 
@@ -203,9 +203,24 @@ actions:
   - action: button.press
     target:
       entity_id: >-
-        {{ (state_attr('binary_sensor.mer_account_any_socket_available',
+        {{ (state_attr('sensor.mer_account_available_sockets',
         'available_sockets') | first).start_button }}
 ```
+
+To trigger on "anything free", use a numeric state trigger on that sensor
+with `above: 0`. To work across chargers and sockets without naming them, a
+template can iterate over the integration's entities, for example the free
+sockets' names from the socket sensors themselves:
+
+```yaml
+{{ integration_entities('mer')
+   | select('match', 'binary_sensor\..*_available$')
+   | select('is_state', 'on')
+   | map('state_attr', 'socket') | list }}
+```
+
+The `available_sockets` attribute above is usually simpler, since it is
+already filtered and in charger order.
 
 A start on a free socket makes the charger wait for the cable, and the portal
 does not say for how long, so tap Start when you are at the charger, or plug
@@ -219,7 +234,10 @@ recently. If you run two charges on the same account at once, on two sockets
 or two chargers, the integration shows that most recent one: the account's
 session sensors, **My session here** and the socket's `my_session` attribute
 all follow it. The other socket still shows **Charging** in its status, since
-that comes from the charger, but it is not marked as yours. Pushed estimates
+that comes from the charger, but it is not marked as yours. Every per-charger
+and per-socket lookup goes through `MerData.sessions`, so supporting several
+sessions later means filling that from wherever the portal exposes them,
+without touching the entities. Pushed estimates
 for the second session are ignored rather than triggering polls, so running
 two at once does not use up the portal's rate limit.
 

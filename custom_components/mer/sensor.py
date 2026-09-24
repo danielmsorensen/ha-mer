@@ -15,9 +15,11 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
+from .const import DOMAIN
 from .coordinator import (
     COMMAND_RESULTS,
     ActiveSession,
@@ -41,6 +43,7 @@ class MerStationSensorDescription(SensorEntityDescription):
     """Sensor reading a Station."""
 
     value_fn: Callable[[Station], StateType]
+    attributes_fn: Callable[[Station], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -59,7 +62,7 @@ def _socket_status_attributes(data: MerData, socket: Socket) -> dict[str, Any]:
     own device page that it is yours.
     """
     return {
-        "my_session": data.active is not None and data.active.socket_id == socket.id,
+        "my_session": data.session_on_socket(socket.id) is not None,
         "max_power_kw": socket.max_power_kw,
         "connector": socket.socket_type,
     }
@@ -91,6 +94,13 @@ STATION_SENSORS: tuple[MerStationSensorDescription, ...] = (
         device_class=SensorDeviceClass.ENUM,
         options=STATUS_OPTIONS,
         value_fn=lambda station: status_option(station.status),
+    ),
+    MerStationSensorDescription(
+        key="available_sockets",
+        translation_key="station_available_sockets",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda station: sum(1 for s in station.sockets if s.is_available),
+        attributes_fn=lambda station: {"total_sockets": len(station.sockets)},
     ),
 )
 
@@ -139,12 +149,43 @@ def _count_sockets(coordinator: MerCoordinator, predicate: Callable[[Socket], bo
 
 # Aggregates over the chargers you added, on the account device: the "is anything free
 # at work" view this integration exists for.
+def _free_sockets(coordinator: MerCoordinator, _data: MerData) -> dict[str, Any]:
+    """Every free socket, in charger order, with the entity id of its start button.
+
+    Enough for an automation to name the free sockets or press the first one's
+    button without knowing any entity names, plus the totals the count is out of.
+    """
+    registry = er.async_get(coordinator.hass)
+    entry_id = coordinator.config_entry.entry_id
+    stations = coordinator.configured_stations()
+    free: list[dict[str, Any]] = [
+        {
+            "charger": station.display_name,
+            "socket": socket_label(socket),
+            "station_id": station.id,
+            "socket_id": socket.id,
+            "start_button": registry.async_get_entity_id(
+                "button", DOMAIN, f"{entry_id}_socket_{socket.id}_start_charge"
+            ),
+        }
+        for station in stations
+        for socket in station.sockets
+        if socket.is_available
+    ]
+    return {
+        "available_sockets": free,
+        "total_sockets": sum(len(station.sockets) for station in stations),
+        "chargers": len(stations),
+    }
+
+
 AGGREGATE_SENSORS: tuple[MerAccountSensorDescription, ...] = (
     MerAccountSensorDescription(
         key="available_sockets",
         translation_key="account_available_sockets",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda coordinator, _d: _count_sockets(coordinator, lambda s: s.is_available),
+        attributes_fn=_free_sockets,
     ),
     MerAccountSensorDescription(
         key="sockets_in_use",
@@ -218,10 +259,8 @@ def _currency(data: MerData) -> str:
 
 
 def _active_session_for(data: MerData, station_id: int) -> ActiveSession | None:
-    """Return the active session only when it is running on this station."""
-    if data.active is not None and data.active.station_id == station_id:
-        return data.active
-    return None
+    """Return your session running on this station, if any."""
+    return data.session_on_station(station_id)
 
 
 # The account sensors read `data.active` unconditionally; the charger-device sensors read
@@ -457,6 +496,13 @@ class MerStationSensor(MerStationEntity, SensorEntity):
     def native_value(self) -> StateType:
         station = self.station
         return self.entity_description.value_fn(station) if station else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        station = self.station
+        if self.entity_description.attributes_fn is None or station is None:
+            return None
+        return self.entity_description.attributes_fn(station)
 
 
 class MerStationSessionSensor(MerStationEntity, SensorEntity):

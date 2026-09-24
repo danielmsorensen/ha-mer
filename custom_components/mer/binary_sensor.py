@@ -33,33 +33,6 @@ class MerAccountBinaryDescription(BinarySensorEntityDescription):
     attributes_fn: Callable[[MerCoordinator, MerData], dict[str, Any]] | None = None
 
 
-def _available_sockets(coordinator: MerCoordinator, _data: MerData) -> dict[str, Any]:
-    """List every free socket with the entity id of its start-charge button.
-
-    This is what lets an automation do more than "something is free": it can name
-    the free sockets in a notification, or press the first one's button.
-    """
-    registry = er.async_get(coordinator.hass)
-    entry_id = coordinator.config_entry.entry_id
-    free: list[dict[str, Any]] = []
-    for station in coordinator.configured_stations():
-        for socket in station.sockets:
-            if not socket.is_available:
-                continue
-            free.append(
-                {
-                    "charger": station.display_name,
-                    "socket": socket_label(socket),
-                    "station_id": station.id,
-                    "socket_id": socket.id,
-                    "start_button": registry.async_get_entity_id(
-                        "button", DOMAIN, f"{entry_id}_socket_{socket.id}_start_charge"
-                    ),
-                }
-            )
-    return {"available_sockets": free}
-
-
 @dataclass(frozen=True, kw_only=True)
 class MerStationBinaryDescription(BinarySensorEntityDescription):
     is_on_fn: Callable[[MerData, int], bool]
@@ -74,17 +47,6 @@ SOCKET_BINARY_SENSORS: tuple[MerSocketBinaryDescription, ...] = (
 )
 
 ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
-    # Aggregate over every charger you added: the single "is anything free" signal.
-    MerAccountBinaryDescription(
-        key="any_available",
-        translation_key="account_any_available",
-        is_on_fn=lambda coordinator, _d: any(
-            socket.is_available
-            for station in coordinator.configured_stations()
-            for socket in station.sockets
-        ),
-        attributes_fn=_available_sockets,
-    ),
     MerAccountBinaryDescription(
         key="charging",
         translation_key="account_charging",
@@ -115,8 +77,7 @@ STATION_BINARY_SENSORS: tuple[MerStationBinaryDescription, ...] = (
         key="session_here",
         translation_key="station_session_here",
         device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
-        is_on_fn=lambda data, station_id: data.active is not None
-        and data.active.station_id == station_id,
+        is_on_fn=lambda data, station_id: data.session_on_station(station_id) is not None,
     ),
 )
 
@@ -211,8 +172,8 @@ class MerStationBinarySensor(MerStationEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Which of this charger's sockets your session is on."""
-        active = self.coordinator.data.active
-        if active is None or active.station_id != self.station_id:
+        active = self.coordinator.data.session_on_station(self.station_id)
+        if active is None:
             return {"socket": None}
         socket = self.coordinator.get_socket(self.station_id, active.socket_id)
         return {"socket": socket_label(socket) if socket else active.socket_name}

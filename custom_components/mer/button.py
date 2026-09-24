@@ -116,12 +116,14 @@ class MerStationStopChargeButton(MerStationEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         """Greyed out unless your session is running on this charger."""
-        active = self.coordinator.data.active
-        return super().available and active is not None and active.station_id == self.station_id
+        return (
+            super().available
+            and self.coordinator.data.session_on_station(self.station_id) is not None
+        )
 
     async def async_press(self) -> None:
-        active = self.coordinator.data.active
-        if active is None or active.station_id != self.station_id:
+        active = self.coordinator.data.session_on_station(self.station_id)
+        if active is None:
             raise HomeAssistantError(translation_domain=DOMAIN, translation_key="session_not_here")
         await _run(self.coordinator, "stop", self.station_id, active.socket_id)
 

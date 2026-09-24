@@ -335,3 +335,14 @@ timestamp sensor is the live view.
 to reason about, and it matches how other integrations present a running total. The
 timestamp sensor already gives a per-second display for free, so the ticker bought
 little. The push-versus-poll table and the no-reschedule publish path stay.
+
+## 2026-09-24: counts instead of "any socket available"; per-charger count; session seam; no power sensor
+
+**Decision.** The account's "Any socket available" binary sensor is removed: a numeric
+trigger `above: 0` on "Available sockets" is no more work, and that sensor now carries
+the free-socket list plus `total_sockets` and `chargers`. Each charger gets its own
+"Available sockets" count with `total_sockets`. Per-charger and per-socket session
+lookups go through `MerData.sessions` / `session_on_station` / `session_on_socket`, so
+multi-session support later only changes how `sessions` is filled. No "session power"
+sensor: `rateEstimation` is not live power (see docs/api.md) and energy steps too coarsely
+to derive one usefully.

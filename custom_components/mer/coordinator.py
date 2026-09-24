@@ -140,6 +140,20 @@ class MerData:
     customer_id: int | None = None
     last_command: CommandResult | None = None
 
+    # Session lookups. Everything per charger or per socket goes through these rather
+    # than reading `active` directly, so supporting several simultaneous sessions later
+    # means changing how `sessions` is filled, not every entity. Today the portal
+    # reports one active session per account ("last active"), so there is at most one.
+    @property
+    def sessions(self) -> tuple[ActiveSession, ...]:
+        return (self.active,) if self.active is not None else ()
+
+    def session_on_station(self, station_id: int) -> ActiveSession | None:
+        return next((s for s in self.sessions if s.station_id == station_id), None)
+
+    def session_on_socket(self, socket_id: int) -> ActiveSession | None:
+        return next((s for s in self.sessions if s.socket_id == socket_id), None)
+
 
 class MerCoordinator(DataUpdateCoordinator[MerData]):
     """Polls the Driivz portal for the configured chargers and the account."""

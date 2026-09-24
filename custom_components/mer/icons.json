@@ -43,16 +43,13 @@
       },
       "active_session": {
         "default": "mdi:ev-station"
+      },
+      "station_available_sockets": {
+        "default": "mdi:ev-plug-type2"
       }
     },
     "binary_sensor": {
       "socket_available": {
-        "default": "mdi:ev-station",
-        "state": {
-          "off": "mdi:ev-plug-type2"
-        }
-      },
-      "account_any_available": {
         "default": "mdi:ev-station",
         "state": {
           "off": "mdi:ev-plug-type2"

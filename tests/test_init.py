@@ -49,7 +49,6 @@ async def test_setup_without_chargers_polls_account_only(
     eid = entry.entry_id
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_wallet_balance").state == "12.5"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_available_sockets").state == "0"
-    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_any_available").state == "off"
     registry = dr.async_get(hass)
     assert registry.async_get_device_by_identifier((DOMAIN, f"account_{eid}"), eid) is not None
     assert len(dr.async_entries_for_config_entry(registry, eid)) == 1

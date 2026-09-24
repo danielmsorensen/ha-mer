@@ -145,6 +145,22 @@ GET  configurationFacade/getAnonymousConfiguration           → feature flags (
 WS   /websocket  (send "0" on open) → JSON with "@c": StationStatusSummaryDtoImp {stationId, stationSocketId, stationSocketStatusDto{socketStatus}}, CustomerDetailChargeEventDtoImp, BillingChargingEstimationMessageImp, ...
 ```
 
+## Charging estimate fields (measured 2026-09-24)
+
+A 7-minute read-only capture of the pushed `BillingChargingEstimationMessageImp` for a
+running 7.4 kW AC charge:
+
+| Field | Observed | Meaning, as far as the data shows |
+|---|---|---|
+| `totalKw` | 27.678 for three messages, then 29.406 for three | Energy so far, kWh. It moves in steps of about 1.7 kWh, roughly every 16 minutes at this rate, when the charger reports a meter reading; pushes in between repeat the last value. |
+| `rateEstimation` | 6.516, then 6.552 when the energy stepped | Not live power. It stayed near the socket's maximum while the session's recent average fell to about 2.5 kW (3.4 kWh over the previous 82 minutes), so it looks like a projected rate for cost and time estimates. |
+| `tocSoc` | 100.0 throughout | Almost certainly a target state of charge; AC chargers do not know the car's. |
+| `cost`, `currency`, `firstTariffDescription.message` | 0.0, GBP, "flat £0.00" | As named. |
+
+No power field is exposed. A power reading derived from `totalKw` would be as coarse as
+its 16-minute steps, so the integration does not create one; a Home Assistant
+Derivative helper on the energy sensor gives the same thing if wanted.
+
 ## What the portal does not expose
 
 `getStationCapabilitiesAndValidate` returns a capability list per socket

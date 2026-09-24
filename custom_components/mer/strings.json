@@ -192,6 +192,9 @@
       },
       "active_session": {
         "name": "Active session"
+      },
+      "station_available_sockets": {
+        "name": "Available sockets"
       }
     },
     "binary_sensor": {
@@ -200,13 +203,6 @@
         "state": {
           "on": "Available",
           "off": "Not available"
-        }
-      },
-      "account_any_available": {
-        "name": "Any socket available",
-        "state": {
-          "on": "Available",
-          "off": "None available"
         }
       },
       "account_charging": {
