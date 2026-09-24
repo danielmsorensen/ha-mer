@@ -287,6 +287,28 @@ def _session_started(session: ActiveSession | None) -> datetime | None:
     return session.started_at if session else None
 
 
+def _session_price_per_kwh(session: ActiveSession | None) -> float | None:
+    return session.price.energy_price if session and session.price else None
+
+
+def _session_price_unit(session: ActiveSession | None, data: MerData) -> str:
+    currency = session.price.currency if session and session.price else None
+    return f"{currency or _currency(data)}/kWh"
+
+
+def _session_tariff_attributes(session: ActiveSession | None) -> dict[str, Any]:
+    if session is None:
+        return {}
+    price = session.price
+    return {
+        "tariff": session.tariff,
+        "billing_plan": session.billing_plan,
+        "fixed_price": price.fix_price if price else None,
+        "per_minute_rate": price.plug_in_minute_rate if price else None,
+        "transaction_fee": price.transaction_fee if price else None,
+    }
+
+
 def _session_rate(session: ActiveSession | None) -> float | None:
     return session.rate_kw if session else None
 
@@ -344,6 +366,15 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         # No display precision, so the frontend's duration formatting shows h and min.
         suggested_unit_of_measurement=UnitOfTime.HOURS,
         value_fn=lambda _c, data: _session_duration(data.active),
+    ),
+    MerAccountSensorDescription(
+        key="active_price",
+        requires_session=True,
+        translation_key="active_price",
+        suggested_display_precision=2,
+        value_fn=lambda _c, data: _session_price_per_kwh(data.active),
+        unit_fn=lambda data: _session_price_unit(data.active, data),
+        attributes_fn=lambda _c, data: _session_tariff_attributes(data.active),
     ),
     MerAccountSensorDescription(
         key="active_rate",

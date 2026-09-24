@@ -201,6 +201,9 @@
       },
       "station_session_rate": {
         "name": "Session charging rate"
+      },
+      "active_price": {
+        "name": "Active session price"
       }
     },
     "binary_sensor": {

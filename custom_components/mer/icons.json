@@ -46,6 +46,9 @@
       },
       "station_available_sockets": {
         "default": "mdi:ev-plug-type2"
+      },
+      "active_price": {
+        "default": "mdi:cash"
       }
     },
     "binary_sensor": {},

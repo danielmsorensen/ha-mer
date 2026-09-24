@@ -412,3 +412,31 @@ async def test_estimate_push_updates_charging_rate(
         state_by_unique_id(hass, "sensor", f"{eid}_station_6042_session_rate").state
         == "unavailable"
     )
+
+
+async def test_public_charger_session_start_and_end_by_push(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+) -> None:
+    """Start picked up from the first estimate, end from the socket's status, off-site too."""
+    await setup_integration(hass, mock_config_entry)
+    await _settle(hass)
+    eid = mock_config_entry.entry_id
+    polls = mock_client.find_last_active_charge_socket.await_count
+
+    public = Socket.from_dict(
+        {"id": 15028, "stationId": 17886, "name": "CCS", "socketStatusId": "CHARGING"}
+    )
+    mock_client.find_last_active_charge_socket.return_value = public
+    fake_ws.push(estimate_push(15028, 0.5, 0.0))
+    await _settle(hass)
+    await asyncio.sleep(0)
+    await hass.async_block_till_done()
+    assert mock_client.find_last_active_charge_socket.await_count > polls
+    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == "on"
+
+    fake_ws.push(status_push(17886, 15028, "FINISHING"))
+    await _settle(hass)
+    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == "off"

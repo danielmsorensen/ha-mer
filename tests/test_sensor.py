@@ -343,3 +343,49 @@ async def test_poll_diagnostics(
     assert (
         state_by_unique_id(hass, "sensor", f"{eid}_account_wallet_balance").state == "unavailable"
     )
+
+
+async def test_active_session_price_on_own_charger(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket: Socket,
+) -> None:
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    price = state_by_unique_id(hass, "sensor", f"{eid}_account_active_price")
+    assert price.state == "0.0"
+    assert price.attributes["unit_of_measurement"] == "GBP/kWh"
+    assert price.attributes["billing_plan"] == "Durham County Council - Netpark IP"
+
+
+async def test_session_on_charger_not_added(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """A public charger has no device, but the account's session sensors still work."""
+    public = Socket.from_dict(
+        {
+            "id": 15028,
+            "stationId": 17886,
+            "name": "CCS",
+            "socketStatusId": "CHARGING",
+            "stationCaption": "(MER-FS-ABT0105) Business Durham NETPark - Expansion Space Car Park",
+        }
+    )
+    mock_client.find_last_active_charge_socket.return_value = public
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    session = state_by_unique_id(hass, "sensor", f"{eid}_account_active_session")
+    assert session.state.startswith("Business Durham NETPark - Expansion Space Car Park")
+    assert session.attributes["socket"] == "CCS"
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_energy").state == "1.606"
+    # The price came from that charger's detail, fetched once for the session.
+    price = state_by_unique_id(hass, "sensor", f"{eid}_account_active_price")
+    assert price.state not in ("unknown", "unavailable")
+    fetched = [c.args[0] for c in mock_client.find_station_by_id.await_args_list]
+    assert fetched.count(17886) == 1
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    fetched = [c.args[0] for c in mock_client.find_station_by_id.await_args_list]
+    assert fetched.count(17886) == 1  # cached for the session

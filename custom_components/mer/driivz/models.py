@@ -313,6 +313,8 @@ class EstimatePush:
     cost: float | None
     currency: str | None
     rate_kw: float | None = None
+    billing_plan: str | None = None
+    tariff: str | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> EstimatePush:
@@ -322,7 +324,17 @@ class EstimatePush:
             cost=_float(data.get("cost")),
             currency=_str(data.get("currency")),
             rate_kw=_float(data.get("rateEstimation")),
+            billing_plan=_str(data.get("billingPlanDisplayCode")),
+            tariff=_tariff_text(data),
         )
+
+
+def _tariff_text(data: Mapping[str, Any]) -> str | None:
+    """The portal's one-line tariff summary, e.g. "flat £0.00"."""
+    description = data.get("firstTariffDescription")
+    if isinstance(description, Mapping):
+        return _str(description.get("message"))
+    return None
 
 
 def parse_push(data: Any) -> StatusPush | EstimatePush | None:
@@ -463,6 +475,8 @@ class SessionEstimate:
     currency: str | None
     duration: timedelta | None = None
     rate_estimation: float | None = None
+    billing_plan: str | None = None
+    tariff: str | None = None
 
     # findCurrentTransactionBillingChargingEstimation's `totalKw` is named as though it were
     # power, but it is kWh delivered: a live session showed 1.606 over 953 s on a 7.4 kW socket,
@@ -496,4 +510,6 @@ class SessionEstimate:
             currency=_str(data.get("currency")),
             duration=_elapsed(data),
             rate_estimation=_float(data.get("rateEstimation")),
+            billing_plan=_str(data.get("billingPlanDisplayCode")),
+            tariff=_tariff_text(data),
         )

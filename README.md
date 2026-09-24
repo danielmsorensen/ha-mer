@@ -112,6 +112,7 @@ your active session (wherever it is running) and your charging history.
 | Active session energy | sensor | Energy delivered so far in the active session |
 | Active session charging rate | sensor | The portal's estimated charging rate, kW at the charger (the car reports what reaches the battery, typically about 10% less); refreshed with each meter reading, every few minutes |
 | Active session cost | sensor | Cost so far in the active session |
+| Active session price | sensor | Your tariff's price per kWh on the socket in use; attributes give the portal's tariff summary (e.g. "flat £0.00"), billing plan, fixed price, per-minute rate and transaction fee |
 | Active session duration | sensor | How long the active session has been running |
 | Stop charge | button | Stops the active session, wherever it is running; greyed out while you are not charging |
 | Last session energy | sensor | Energy delivered in your last completed session |
@@ -228,6 +229,18 @@ A start on a free socket makes the charger wait for the cable, and the portal
 does not say for how long, so tap Start when you are at the charger, or plug
 in first: the button stays available while the socket is plugged in and
 waiting, and the outcome is then "Charging" rather than "Ready, plug in".
+
+## Charging on a charger you have not added
+
+The account's session sensors follow whatever your account is charging on,
+anywhere on Mer's network, because the portal reports the active session per
+account rather than per charger. On a public charger you have not added there
+is no charger device, but **Active session**, its energy, cost, price,
+charging rate, started and duration all work, and **Stop charge** on the
+account device stops it. The price comes from that charger's tariff, fetched
+once when the session is first seen. A session started there is picked up
+from its first pushed estimate, and its end from the socket's pushed status,
+the same as on your own chargers.
 
 ## One session at a time
 

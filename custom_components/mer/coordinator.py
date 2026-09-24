@@ -52,6 +52,7 @@ from .driivz.exceptions import AuthError, DriivzError, RateLimitError
 from .driivz.models import (
     EstimatePush,
     Socket,
+    SocketPrice,
     Station,
     StatusPush,
     Transaction,
@@ -96,6 +97,12 @@ class ActiveSession:
     # The portal's "estimated rate", kW at the charger. Refreshed with each meter reading
     # (every few minutes), not live; see docs/api.md.
     rate_kw: float | None = None
+    # The tariff on the socket in use. The price comes from the charger's detail (for a
+    # charger you have not added, fetched once per session); plan name and summary come
+    # from the estimates.
+    price: SocketPrice | None = None
+    billing_plan: str | None = None
+    tariff: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +211,9 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._last_transaction: Transaction | None = None
         self._customer_id: int | None = None
         self._last_command: CommandResult | None = None
+        # Detail of chargers you have not added but have a session on (public chargers),
+        # fetched once so the session's price is known. Keyed by station id.
+        self._session_station_details: dict[int, Station] = {}
         # Per station, not one timestamp for the whole set: the hourly detail work is
         # staggered so at most one charger is refreshed per cycle. See `_stations_due`.
         self._station_refreshed: dict[int, datetime] = {}
@@ -295,7 +305,32 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             currency=(estimate.currency if estimate else None)
             or (self._wallet.currency if self._wallet else None),
             rate_kw=estimate.rate_estimation if estimate else None,
+            price=await self._session_price(socket.station_id, socket.id),
+            billing_plan=estimate.billing_plan if estimate else None,
+            tariff=estimate.tariff if estimate else None,
         )
+
+    async def _session_price(self, station_id: int | None, socket_id: int) -> SocketPrice | None:
+        """Your tariff on the socket in use, from the charger's detail.
+
+        Chargers you have added already have their detail cached. For any other charger,
+        a public one say, its detail is fetched once and kept for the session. A failure
+        leaves the price unknown rather than failing the poll.
+        """
+        if station_id is None:
+            return None
+        detail = self._details.get(station_id) or self._session_station_details.get(station_id)
+        if detail is None:
+            try:
+                detail = await self.client.find_station_by_id(station_id)
+            except (AuthError, RateLimitError):
+                raise
+            except DriivzError as err:
+                _LOGGER.debug("Could not fetch charger %s for its tariff: %s", station_id, err)
+                return None
+            self._session_station_details = {station_id: detail}
+        socket = next((s for s in detail.sockets if s.id == socket_id), None)
+        return socket.prices[0] if socket and socket.prices else None
 
     async def _refresh_optional(self, what: str, work: Coroutine[Any, Any, None]) -> None:
         """Await one of the slower periodic refreshes without letting it fail the cycle.
@@ -763,11 +798,13 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
 
     def _apply_status_push(self, push: StatusPush) -> None:
         assert self.data is not None
-        if push.station_id not in self.data.stations:
+        active = self.data.active
+        on_active_socket = active is not None and push.socket_id == active.socket_id
+        if push.station_id not in self.data.stations and not on_active_socket:
             return  # the broadcast covers every charger on the network
         stations = dict(self.data.stations)
-        stations[push.station_id] = stations[push.station_id].with_push(push)
-        active = self.data.active
+        if push.station_id in stations:
+            stations[push.station_id] = stations[push.station_id].with_push(push)
         # A session whose socket left the charging states is over; the next poll fills
         # in the history, but the entities should not claim you are charging meanwhile.
         if (
@@ -784,12 +821,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         assert self.data is not None
         active = self.data.active
         if active is None:
-            # A session we do not know about yet (started at the charger, or by the
-            # app): fetch it properly rather than guess at it.
-            if any(
-                push.socket_id == s.id for st in self.data.stations.values() for s in st.sockets
-            ):
-                self.hass.async_create_task(self.async_request_refresh())
+            # A session we do not know about yet (started at the charger, by the app, or
+            # on a charger you have not added): estimates only ever arrive for this
+            # account's sessions, so fetch it properly rather than guess at it.
+            self.hass.async_create_task(self.async_request_refresh())
             return
         if active.socket_id != push.socket_id:
             # A second session on the same account. The portal only reports one active
@@ -802,6 +837,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             cost=push.cost if push.cost is not None else active.cost,
             currency=push.currency or active.currency,
             rate_kw=push.rate_kw if push.rate_kw is not None else active.rate_kw,
+            billing_plan=push.billing_plan or active.billing_plan,
+            tariff=push.tariff or active.tariff,
         )
         self._publish(replace(self.data, active=updated))
         self._push_event.set()
