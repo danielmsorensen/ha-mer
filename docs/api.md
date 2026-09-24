@@ -153,13 +153,13 @@ running 7.4 kW AC charge:
 | Field | Observed | Meaning, as far as the data shows |
 |---|---|---|
 | `totalKw` | 27.678 for three messages, then 29.406 for three | Energy so far, kWh. It moves in steps of about 1.7 kWh, roughly every 16 minutes at this rate, when the charger reports a meter reading; pushes in between repeat the last value. |
-| `rateEstimation` | 6.516, then 6.552 when the energy stepped | Not live power. It stayed near the socket's maximum while the session's recent average fell to about 2.5 kW (3.4 kWh over the previous 82 minutes), so it looks like a projected rate for cost and time estimates. |
-| `tocSoc` | 100.0 throughout | Almost certainly a target state of charge; AC chargers do not know the car's. |
+| `rateEstimation` | 6.516, then 6.552 when the energy stepped | The charging rate in kW at the charger, refreshed with each meter reading. The Mer app shows the same number as "estimated rate"; the car reported about 5.9 kW into the battery at the time, consistent with ~10% on-board charger loss. (An earlier reading of this table called it not live power, based on differences between energy snapshots; those snapshots lag the meter unpredictably, one pair implying 10.7 kW on a 7.4 kW socket, so they cannot be differenced.) |
+| `tocSoc` | 100.0 throughout, with the car's own target at 90% | Not the car's target. Most likely the portal's assumed "charge to full" for its estimates; not used. |
 | `cost`, `currency`, `firstTariffDescription.message` | 0.0, GBP, "flat £0.00" | As named. |
 
-No power field is exposed. A power reading derived from `totalKw` would be as coarse as
-its 16-minute steps, so the integration does not create one; a Home Assistant
-Derivative helper on the energy sensor gives the same thing if wanted.
+The integration exposes `rateEstimation` as the session "charging rate" sensors. Energy
+snapshots are not differenced: the whole-session average (29.4 kWh over 5.5 h, about
+5.3 kW) is the only difference that held up.
 
 ## What the portal does not expose
 

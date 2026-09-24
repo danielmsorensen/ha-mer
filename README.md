@@ -75,6 +75,7 @@ One device per charger you added, linked to the account device.
 | Status | sensor | The charger's own status (`available`, `charging`, `faulted`, …) |
 | Available sockets | sensor | How many of this charger's sockets are free; `total_sockets` attribute |
 | Session energy | sensor | Energy delivered by *your* active session, only while it is running on this charger; unavailable otherwise |
+| Session charging rate | sensor | The portal's estimated charging rate for your session here, in kW at the charger; refreshed with each meter reading, every few minutes |
 | Session cost | sensor | Cost of that active session so far |
 | Session started | sensor | When that active session started |
 | Session duration | sensor | How long that active session has been running |
@@ -88,8 +89,7 @@ have a "Left" and a "Right" socket):
 
 | Entity | Platform | Meaning |
 | --- | --- | --- |
-| *Socket* status | sensor | The socket's own status, whoever is using it; `my_session` attribute is true when it is your session, plus `max_power_kw` and `connector` |
-| *Socket* available | binary sensor | **Available** or **Not available** |
+| *Socket* status | sensor | The socket's own status, whoever is using it (`available`, `charging`, `faulted`, ...). Attributes: `charger`, `socket`, `start_button` (this socket's start button), `my_session` (true when it is your session), `max_power_kw`, `connector` |
 | *Socket* price | sensor | Your tariff's price per kWh on this socket; the billing plan, fixed price, per-minute rate and transaction fee are attributes |
 | *Socket* start charge | button | Starts a charge on this socket; greyed out unless the socket is free, or plugged in and waiting. See [Start and stop feedback](#start-and-stop-feedback) |
 
@@ -110,6 +110,7 @@ your active session (wherever it is running) and your charging history.
 | Active session | sensor | Where your active session is running, as *charger socket*, with `charger`, `socket`, `station_id` and `socket_id` attributes. This and the other active session sensors are unavailable while you are not charging |
 | Active session started | sensor | When the active session started |
 | Active session energy | sensor | Energy delivered so far in the active session |
+| Active session charging rate | sensor | The portal's estimated charging rate, kW at the charger (the car reports what reaches the battery, typically about 10% less); refreshed with each meter reading, every few minutes |
 | Active session cost | sensor | Cost so far in the active session |
 | Active session duration | sensor | How long the active session has been running |
 | Stop charge | button | Stops the active session, wherever it is running; greyed out while you are not charging |
@@ -174,7 +175,8 @@ button, or paste its URL into **Settings → Automations → Blueprints → Impo
 blueprint**, then create an automation from it and fill in the fields.
 
 **Offer a free charger when you arrive.** Pick who, which zone (a Work zone
-around the car park, say), the sockets to offer **in order of preference**,
+around the car park, say), the sockets to offer **in order of preference**
+(their *socket* status sensors),
 and your phone. On arrival while not charging, it names the first free socket
 in your order and the notification carries a **Start** action; while you stay
 there without charging it does the same whenever a socket frees up, after it
@@ -192,7 +194,7 @@ accepted but not yet confirmed.
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fdanielmsorensen%2Fha-mer%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmer%2Fcommand_outcome.yaml)
 
 Both work from entity attributes rather than names, so they do not care what
-your chargers or sockets are called. Each socket's **available** sensor
+your chargers or sockets are called. Each socket's **status** sensor
 carries `charger`, `socket` and `start_button` attributes, and the account's
 **Available sockets** sensor lists every free socket the same way under
 `available_sockets`, which is enough for your own automations too, for
@@ -214,9 +216,9 @@ sockets' names from the socket sensors themselves:
 
 ```yaml
 {{ integration_entities('mer')
-   | select('match', 'binary_sensor\..*_available$')
-   | select('is_state', 'on')
-   | map('state_attr', 'socket') | list }}
+   | select('match', 'sensor\..*_status$')
+   | select('is_state', 'available')
+   | map('state_attr', 'socket') | reject('none') | list }}
 ```
 
 The `available_sockets` attribute above is usually simpler, since it is

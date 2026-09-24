@@ -195,16 +195,15 @@
       },
       "station_available_sockets": {
         "name": "Available sockets"
+      },
+      "active_rate": {
+        "name": "Active session charging rate"
+      },
+      "station_session_rate": {
+        "name": "Session charging rate"
       }
     },
     "binary_sensor": {
-      "socket_available": {
-        "name": "{socket} available",
-        "state": {
-          "on": "Available",
-          "off": "Not available"
-        }
-      },
       "account_charging": {
         "name": "Charging"
       },

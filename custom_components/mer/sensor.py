@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfTime
+from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfPower, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -52,23 +52,30 @@ class MerSocketSensorDescription(SensorEntityDescription):
 
     value_fn: Callable[[Socket], StateType]
     unit_fn: Callable[[Socket], str | None] | None = None
-    attributes_fn: Callable[[MerData, Socket], dict[str, Any]] | None = None
+    attributes_fn: Callable[[MerSocketSensor, Socket], dict[str, Any]] | None = None
 
 
-def _socket_status_attributes(data: MerData, socket: Socket) -> dict[str, Any]:
-    """Whether the account's own session is the one running on this socket.
+def _socket_status_attributes(entity: MerSocketSensor, socket: Socket) -> dict[str, Any]:
+    """Name the socket, point at its start button, and say whether it is your session.
 
-    The status alone says "charging" for anyone's car; this tells the charger's
-    own device page that it is yours.
+    The status alone says "charging" for anyone's car; `my_session` says it is yours.
+    `charger`, `socket` and `start_button` let an automation or blueprint work from this
+    sensor alone, without knowing how entities are named.
     """
+    station = entity.station
     return {
-        "my_session": data.session_on_socket(socket.id) is not None,
+        "charger": station.display_name if station else None,
+        "socket": socket_label(socket),
+        "start_button": er.async_get(entity.hass).async_get_entity_id(
+            "button", DOMAIN, f"{entity.entry_id}_socket_{socket.id}_start_charge"
+        ),
+        "my_session": entity.coordinator.data.session_on_socket(socket.id) is not None,
         "max_power_kw": socket.max_power_kw,
         "connector": socket.socket_type,
     }
 
 
-def _socket_price_attributes(_data: MerData, socket: Socket) -> dict[str, Any]:
+def _socket_price_attributes(_entity: MerSocketSensor, socket: Socket) -> dict[str, Any]:
     """The rest of the driver's tariff on this socket, beside the per-kWh price."""
     if not socket.prices:
         return {}
@@ -280,6 +287,10 @@ def _session_started(session: ActiveSession | None) -> datetime | None:
     return session.started_at if session else None
 
 
+def _session_rate(session: ActiveSession | None) -> float | None:
+    return session.rate_kw if session else None
+
+
 def _session_duration(session: ActiveSession | None) -> float | None:
     return session.duration.total_seconds() if session and session.duration is not None else None
 
@@ -333,6 +344,15 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         # No display precision, so the frontend's duration formatting shows h and min.
         suggested_unit_of_measurement=UnitOfTime.HOURS,
         value_fn=lambda _c, data: _session_duration(data.active),
+    ),
+    MerAccountSensorDescription(
+        key="active_rate",
+        requires_session=True,
+        translation_key="active_rate",
+        device_class=SensorDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        suggested_display_precision=2,
+        value_fn=lambda _c, data: _session_rate(data.active),
     ),
     MerAccountSensorDescription(
         key="last_energy",
@@ -435,6 +455,14 @@ STATION_SESSION_SENSORS: tuple[MerStationSessionSensorDescription, ...] = (
         suggested_display_precision=2,
         session_fn=_session_cost,
         unit_fn=_session_currency,
+    ),
+    MerStationSessionSensorDescription(
+        key="session_rate",
+        translation_key="station_session_rate",
+        device_class=SensorDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        suggested_display_precision=2,
+        session_fn=_session_rate,
     ),
     MerStationSessionSensorDescription(
         key="session_started",
@@ -572,7 +600,7 @@ class MerSocketSensor(MerSocketEntity, SensorEntity):
         socket = self.socket
         if self.entity_description.attributes_fn is None or socket is None:
             return None
-        return self.entity_description.attributes_fn(self.coordinator.data, socket)
+        return self.entity_description.attributes_fn(self, socket)
 
 
 class MerAccountSensor(MerAccountEntity, SensorEntity):

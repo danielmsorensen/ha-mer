@@ -34,14 +34,16 @@ blueprint:
     sockets:
       name: Sockets, in order of preference
       description: >-
-        The "available" sensors of the sockets to offer. The first free one, in this
-        order, is the one offered. Drag to reorder.
+        The socket status sensors of the sockets to offer, named like "Explorer 1 Left
+        status" (pick the socket ones, not the charger's own "Status"). The first free
+        one, in this order, is the one offered. Drag to reorder.
       selector:
         entity:
           multiple: true
           filter:
             integration: mer
-            domain: binary_sensor
+            domain: sensor
+            device_class: enum
     charging:
       name: Charging sensor
       description: The Mer account's "Charging" sensor; offers are only made while it is off.
@@ -87,7 +89,7 @@ triggers:
   - trigger: state
     id: freed
     entity_id: !input sockets
-    to: "on"
+    to: "available"
     for: !input freed_for
   - trigger: event
     id: start_tapped
@@ -107,7 +109,7 @@ variables:
   # Offers from this automation share one tag, so a newer offer replaces the older one
   # and it can be cleared once you are charging.
   tag: "mer_free_charger_{{ this.entity_id }}"
-  free: "{{ sockets | select('is_state', 'on') | list }}"
+  free: "{{ sockets | select('is_state', 'available') | list }}"
   best: "{{ free[0] if free else none }}"
   best_name: >-
     {{ (state_attr(best, 'charger') ~ ' ' ~ state_attr(best, 'socket')) if best else '' }}

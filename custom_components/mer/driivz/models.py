@@ -312,6 +312,7 @@ class EstimatePush:
     energy_kwh: float | None
     cost: float | None
     currency: str | None
+    rate_kw: float | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> EstimatePush:
@@ -320,6 +321,7 @@ class EstimatePush:
             energy_kwh=_float(data.get("totalKw")),  # kWh despite the name; see docs/api.md
             cost=_float(data.get("cost")),
             currency=_str(data.get("currency")),
+            rate_kw=_float(data.get("rateEstimation")),
         )
 
 

@@ -93,6 +93,9 @@ class ActiveSession:
     energy_kwh: float | None
     cost: float | None
     currency: str | None
+    # The portal's "estimated rate", kW at the charger. Refreshed with each meter reading
+    # (every few minutes), not live; see docs/api.md.
+    rate_kw: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,6 +294,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             cost=estimate.cost if estimate else None,
             currency=(estimate.currency if estimate else None)
             or (self._wallet.currency if self._wallet else None),
+            rate_kw=estimate.rate_estimation if estimate else None,
         )
 
     async def _refresh_optional(self, what: str, work: Coroutine[Any, Any, None]) -> None:
@@ -797,6 +801,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             energy_kwh=push.energy_kwh if push.energy_kwh is not None else active.energy_kwh,
             cost=push.cost if push.cost is not None else active.cost,
             currency=push.currency or active.currency,
+            rate_kw=push.rate_kw if push.rate_kw is not None else active.rate_kw,
         )
         self._publish(replace(self.data, active=updated))
         self._push_event.set()

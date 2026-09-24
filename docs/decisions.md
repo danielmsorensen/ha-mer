@@ -346,3 +346,17 @@ lookups go through `MerData.sessions` / `session_on_station` / `session_on_socke
 multi-session support later only changes how `sessions` is filled. No "session power"
 sensor: `rateEstimation` is not live power (see docs/api.md) and energy steps too coarsely
 to derive one usefully.
+
+## 2026-09-24 (later): socket status replaces socket "available"; charging rate after all
+
+**Decision.** The socket "available" binary sensor is removed; its `charger`, `socket` and
+`start_button` attributes move to the socket status sensor, and the "offer a free charger"
+blueprint picks socket status sensors and triggers on `available`. Session "charging rate"
+sensors (account and per charger) expose `rateEstimation` in kW.
+
+**Why.** Same reasoning as the account-level count: a state trigger on `available` is no
+more work than on `on`, and the status says why a socket is not free. On the rate, the
+earlier "not live power" conclusion was drawn from differencing energy snapshots that turn
+out to lag the meter unpredictably; against the Mer app's "estimated rate" and the car's
+own battery-side reading (5.9 kW vs 6.55 at the charger) the field is the charger-side
+rate, refreshed with each meter reading.

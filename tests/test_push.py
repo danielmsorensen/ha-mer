@@ -135,7 +135,6 @@ async def test_status_push_updates_socket_without_polling(
     await _settle(hass)
 
     assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status").state == "charging"
-    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_socket_11243_available").state == "off"
     assert state_by_unique_id(hass, "sensor", f"{eid}_station_6042_status").state == "charging"
     # The other socket on the charger is untouched, and no request was spent.
     assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11244_status").state == "available"
@@ -387,3 +386,29 @@ async def test_second_session_estimates_do_not_trigger_polls(
     assert mock_client.find_stations_by_ids.await_count == polls
     # The known session is untouched.
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_energy").state == "1.606"
+
+
+async def test_estimate_push_updates_charging_rate(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+    charging_socket: Socket,
+) -> None:
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await setup_integration(hass, mock_config_entry)
+    await _settle(hass)
+    eid = mock_config_entry.entry_id
+    rate = state_by_unique_id(hass, "sensor", f"{eid}_account_active_rate")
+    assert rate.state == "1.801"  # from the polled estimate fixture
+    assert rate.attributes["unit_of_measurement"] == "kW"
+    push = estimate_push(11242, 3.27, 0.0)
+    push["rateEstimation"] = 6.552
+    fake_ws.push(push)
+    await _settle(hass)
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_rate").state == "6.552"
+    assert state_by_unique_id(hass, "sensor", f"{eid}_station_6041_session_rate").state == "6.552"
+    assert (
+        state_by_unique_id(hass, "sensor", f"{eid}_station_6042_session_rate").state
+        == "unavailable"
+    )

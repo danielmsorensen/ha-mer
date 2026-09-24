@@ -13,18 +13,10 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
 from .coordinator import MerConfigEntry, MerCoordinator, MerData
-from .driivz.models import Socket
-from .entity import MerAccountEntity, MerSocketEntity, MerStationEntity, socket_label
-
-
-@dataclass(frozen=True, kw_only=True)
-class MerSocketBinaryDescription(BinarySensorEntityDescription):
-    is_on_fn: Callable[[Socket], bool]
+from .entity import MerAccountEntity, MerStationEntity, socket_label
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -37,14 +29,6 @@ class MerAccountBinaryDescription(BinarySensorEntityDescription):
 class MerStationBinaryDescription(BinarySensorEntityDescription):
     is_on_fn: Callable[[MerData, int], bool]
 
-
-SOCKET_BINARY_SENSORS: tuple[MerSocketBinaryDescription, ...] = (
-    MerSocketBinaryDescription(
-        key="available",
-        translation_key="socket_available",
-        is_on_fn=lambda socket: socket.is_available,
-    ),
-)
 
 ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
     MerAccountBinaryDescription(
@@ -92,50 +76,8 @@ async def async_setup_entry(
             MerStationBinarySensor(coordinator, station.id, description)
             for description in STATION_BINARY_SENSORS
         )
-        for socket in station.sockets:
-            entities.extend(
-                MerSocketBinarySensor(coordinator, station.id, socket.id, description)
-                for description in SOCKET_BINARY_SENSORS
-            )
         async_add_entities(entities, config_subentry_id=subentry.subentry_id)
     async_add_entities(MerAccountBinarySensor(coordinator, d) for d in ACCOUNT_BINARY_SENSORS)
-
-
-class MerSocketBinarySensor(MerSocketEntity, BinarySensorEntity):
-    entity_description: MerSocketBinaryDescription
-
-    def __init__(
-        self,
-        coordinator: MerCoordinator,
-        station_id: int,
-        socket_id: int,
-        description: MerSocketBinaryDescription,
-    ) -> None:
-        super().__init__(coordinator, station_id, socket_id, description)
-
-    @property
-    def is_on(self) -> bool | None:
-        socket = self.socket
-        return self.entity_description.is_on_fn(socket) if socket else None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Name the charger and socket, and point at this socket's start button.
-
-        Lets an automation or blueprint work from the availability sensor alone: it
-        can say "Explorer 2 Left is free" and press the right button without knowing
-        anything about how entities are named.
-        """
-        station, socket = self.station, self.socket
-        if station is None or socket is None:
-            return None
-        return {
-            "charger": station.display_name,
-            "socket": socket_label(socket),
-            "start_button": er.async_get(self.hass).async_get_entity_id(
-                "button", DOMAIN, f"{self.entry_id}_socket_{self.socket_id}_start_charge"
-            ),
-        }
 
 
 class MerAccountBinarySensor(MerAccountEntity, BinarySensorEntity):

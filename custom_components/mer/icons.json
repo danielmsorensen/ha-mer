@@ -48,14 +48,7 @@
         "default": "mdi:ev-plug-type2"
       }
     },
-    "binary_sensor": {
-      "socket_available": {
-        "default": "mdi:ev-station",
-        "state": {
-          "off": "mdi:ev-plug-type2"
-        }
-      }
-    },
+    "binary_sensor": {},
     "button": {
       "socket_start_charge": {
         "default": "mdi:play-circle"

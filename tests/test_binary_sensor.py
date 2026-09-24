@@ -18,13 +18,8 @@ async def test_socket_available_and_account_counts(
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    assert (
-        state_by_unique_id(hass, "binary_sensor", f"{eid}_socket_11243_available").state == STATE_ON
-    )
-    assert (
-        state_by_unique_id(hass, "binary_sensor", f"{eid}_socket_11241_available").state
-        == STATE_OFF
-    )
+    assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status").state == "available"
+    assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11241_status").state == "charging"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_available_sockets").state == "3"
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == STATE_OFF
 
@@ -44,10 +39,7 @@ async def test_socket_available_and_account_counts(
     await hass.async_block_till_done()
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_available_sockets").state == "0"
     assert state_by_unique_id(hass, "sensor", f"{eid}_station_6042_available_sockets").state == "0"
-    assert (
-        state_by_unique_id(hass, "binary_sensor", f"{eid}_socket_11243_available").state
-        == STATE_OFF
-    )
+    assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status").state == "occupied"
 
 
 async def test_account_charging_on_when_session_active(
@@ -128,18 +120,7 @@ async def test_available_sockets_lists_free_sockets_with_start_buttons(
     assert hass.states.get(free[0]["start_button"]) is not None
 
 
-def test_availability_states_have_descriptive_names() -> None:
-    """On/Off would say nothing; the translations name both states."""
-    import json
-    from pathlib import Path
-
-    strings = json.loads(
-        (Path(__file__).parent.parent / "custom_components/mer/strings.json").read_text()
-    )["entity"]["binary_sensor"]
-    assert set(strings["socket_available"]["state"]) == {"on", "off"}
-
-
-async def test_socket_available_names_its_charger_socket_and_start_button(
+async def test_socket_status_names_its_charger_socket_and_start_button(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
     """Blueprints work from these attributes instead of parsing entity ids."""
@@ -147,7 +128,7 @@ async def test_socket_available_names_its_charger_socket_and_start_button(
     await mock_config_entry.runtime_data.async_refresh()  # buttons registered by now
     await hass.async_block_till_done()
     eid = mock_config_entry.entry_id
-    state = state_by_unique_id(hass, "binary_sensor", f"{eid}_socket_11243_available")
+    state = state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status")
     assert state.attributes["charger"] == "Business Durham - NETPark 3 - Explorer 1"
     assert state.attributes["socket"] == "Left"
     assert (
