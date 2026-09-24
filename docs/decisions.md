@@ -324,3 +324,14 @@ per-second readout for free.
 the coordinator polling after entities unload); it hooks `async_update_listeners`. It is
 cancelled on entry unload and Home Assistant shutdown. README's "What comes from where"
 table records which data is pushed and which is polled.
+
+## 2026-09-24 (later): no local duration ticker after all
+
+**Decision.** The 30-second session-duration ticker added earlier the same day is
+removed. The duration sensors update on polls only; the "Active session started"
+timestamp sensor is the live view.
+
+**Why.** Daniel preferred it: fewer recorder rows, no extra timer and separate code path
+to reason about, and it matches how other integrations present a running total. The
+timestamp sensor already gives a per-second display for free, so the ticker bought
+little. The push-versus-poll table and the no-reschedule publish path stay.

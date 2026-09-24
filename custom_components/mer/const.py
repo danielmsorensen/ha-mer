@@ -57,9 +57,5 @@ PUSH_RECONNECT_MAX_SECONDS = 300
 # network, so a connection that has said nothing for this long is dead even if TCP
 # is still up; it is dropped and re-opened after a fresh login.
 PUSH_SILENCE_TIMEOUT_SECONDS = 180
-# While a session runs, its duration is advanced locally on this cadence between
-# polls. The sensors show hours and minutes, and every change is recorded, so a
-# faster tick would only fill the database.
-SESSION_TICK_SECONDS = 30
 RATE_LIMIT_SKIP_THRESHOLD = 1
 RATE_LIMIT_WARN_INTERVAL = timedelta(hours=1)

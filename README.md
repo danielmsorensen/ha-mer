@@ -234,7 +234,7 @@ below.
 | Your running session's energy and cost | Yes, about every 45 seconds | Every poll as well |
 | Whether a session is running, and where | A socket leaving the charging states ends it at once; a new one is detected from its first estimate, which triggers a poll | Every poll |
 | Session start time | No | Every poll |
-| Session duration | No, see below | Every poll, which is the source of truth |
+| Session duration | No | Every poll; see below |
 | Wallet balance, last completed session | No | Every 15 minutes |
 | Socket names, tariffs, charger model | No | Once an hour per charger |
 | Notify-me subscription state | No | Once an hour per charger |
@@ -244,20 +244,17 @@ when the push channel drops, when a pushed estimate arrives for a session the
 integration does not know about yet, and when you press **Reload** on the
 integration.
 
-### How the session duration keeps moving
+### Session duration
 
-Nothing pushes the duration, and polling it every 5 minutes would make the
-sensors jump in 5-minute steps. So while a session with a known start time is
-in the data, a local ticker advances the duration every 30 seconds from that
-start time. Every poll re-reads the duration from the portal, which corrects
-any drift, and whenever the session is seen to have ended, by a poll, by a
-pushed status change, or by a stop command completing, the ticker stops with
-it, so the duration never runs on after the charge has finished. The tick is
-30 seconds rather than every second because the sensors display hours and
-minutes and every change is written to the recorder database. For a
-per-second live readout, use the **Active session started** timestamp
-sensor: dashboards render a timestamp as a live "2 hours 5 minutes ago"
-without any state changes at all.
+Nothing pushes the duration, so the duration sensors update on each poll:
+every 5 minutes while live updates are connected, otherwise at the configured
+interval, plus the on-demand polls listed above. That is deliberate. Ticking
+it locally would write a state change to the recorder every few seconds for
+a value the portal already provides, and it is how other integrations treat
+a running total. For a live readout, use the **Active session started**
+timestamp sensor instead: dashboards render a timestamp as "2 hours
+5 minutes ago" and keep it ticking in the browser, with no state changes at
+all.
 
 ## Polling and rate limits
 

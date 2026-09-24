@@ -13,9 +13,9 @@ from typing import Any
 
 from aiohttp import WSMsgType
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.event import async_call_later, async_track_time_interval
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -37,7 +37,6 @@ from .const import (
     RATE_LIMIT_SKIP_THRESHOLD,
     RATE_LIMIT_WARN_INTERVAL,
     REFRESH_AFTER_COMMAND_SECONDS,
-    SESSION_TICK_SECONDS,
     SUBENTRY_TYPE_SITE,
     WALLET_REFRESH,
 )
@@ -165,8 +164,6 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self.push_connected = False
         self._push_event = asyncio.Event()
         self.last_push_at: datetime | None = None
-        # Ticks the running session's duration between polls; see _sync_session_ticker.
-        self._cancel_session_ticker: CALLBACK_TYPE | None = None
         # One subentry per charging site, listing its monitored chargers. Any change
         # reloads the entry (see __init__), so these are fixed for the coordinator's life.
         self.site_subentries: list[ConfigSubentry] = [
@@ -779,51 +776,6 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         )
         self._publish(replace(self.data, active=updated))
         self._push_event.set()
-
-    # ----- session duration ticker ----------------------------------------------
-
-    @callback
-    def async_update_listeners(self) -> None:
-        """Every publish (poll, push, command result) also re-evaluates the ticker."""
-        self._sync_session_ticker()
-        super().async_update_listeners()
-
-    @callback
-    def _sync_session_ticker(self) -> None:
-        """Run a ticker while a session with a known start is in the data, else stop it.
-
-        Called from `async_update_listeners`, so after every publish. Registering it as
-        a listener instead would keep the coordinator polling after the entities are
-        gone. The poll is the source of truth: it
-        re-reads the duration from the portal every cycle, which corrects any drift,
-        and when a poll, a push or a stop command shows the session gone the ticker
-        stops with it, so the duration never runs on after the charge has ended.
-        """
-        active = self.data.active if self.data else None
-        wanted = active is not None and active.started_at is not None
-        if wanted and self._cancel_session_ticker is None:
-            self._cancel_session_ticker = async_track_time_interval(
-                self.hass,
-                self._tick_session,
-                timedelta(seconds=SESSION_TICK_SECONDS),
-                cancel_on_shutdown=True,
-            )
-        elif not wanted and self._cancel_session_ticker is not None:
-            self._cancel_session_ticker()
-            self._cancel_session_ticker = None
-
-    @callback
-    def _tick_session(self, now: datetime) -> None:
-        active = self.data.active if self.data else None
-        if active is None or active.started_at is None:
-            return
-        self._publish(replace(self.data, active=replace(active, duration=now - active.started_at)))
-
-    async def async_shutdown(self) -> None:
-        if self._cancel_session_ticker is not None:
-            self._cancel_session_ticker()
-            self._cancel_session_ticker = None
-        await super().async_shutdown()
 
 
 def _socket_of(station: Station | None, socket_id: int) -> Socket | None:
