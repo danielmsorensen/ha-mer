@@ -7,8 +7,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
-from .coordinator import MerConfigEntry, MerCoordinator
+from .const import COMMAND_TIMEOUT_SECONDS, DOMAIN
+from .coordinator import CommandUnconfirmed, MerConfigEntry, MerCoordinator
 from .driivz.exceptions import DriivzError
 from .entity import MerAccountEntity, MerSocketEntity, MerStationEntity
 
@@ -34,21 +34,33 @@ async def async_setup_entry(
     async_add_entities([MerAccountStopChargeButton(coordinator)])
 
 
-def _raise_command_failed(err: DriivzError) -> None:
-    raise HomeAssistantError(
-        translation_domain=DOMAIN,
-        translation_key="command_failed",
-        translation_placeholders={"error": str(err)},
-    ) from err
+async def _run(
+    coordinator: MerCoordinator, command: str, station_id: int | None, socket_id: int
+) -> None:
+    """Send a command and hold the press open until the charger shows the outcome.
 
-
-async def _stop_active_session(coordinator: MerCoordinator, socket_id: int) -> None:
-    """Stop the socket carrying the active session, then schedule a refresh."""
+    The frontend shows a spinner while this runs, then a tick, or a red cross with the
+    message when it raises. A rejection and a timeout both raise; the coordinator has
+    already recorded either on the "Last command" sensor and fired the event.
+    """
     try:
-        await coordinator.client.stop_charge(socket_id)
+        if command == "start":
+            assert station_id is not None
+            await coordinator.async_start_charge(station_id, socket_id)
+        else:
+            await coordinator.async_stop_charge(station_id, socket_id)
     except DriivzError as err:
-        _raise_command_failed(err)
-    coordinator.schedule_refresh()
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="command_failed",
+            translation_placeholders={"error": str(err)},
+        ) from err
+    except CommandUnconfirmed as err:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="command_unconfirmed",
+            translation_placeholders={"seconds": str(COMMAND_TIMEOUT_SECONDS)},
+        ) from err
 
 
 class MerStartChargeButton(MerSocketEntity, ButtonEntity):
@@ -63,19 +75,13 @@ class MerStartChargeButton(MerSocketEntity, ButtonEntity):
 
         Home Assistant has no disabled state for a button; unavailable is the closest.
         The UI greys it out, and the button.press service skips unavailable entities
-        (with a warning in the log), so automations cannot press it either. The checks
-        in the stop buttons' `async_press` remain only as a guard against the state
-        changing between the availability check and the press.
+        (with a warning in the log), so automations cannot press it either.
         """
         socket = self.socket
         return super().available and socket is not None and socket.can_start
 
     async def async_press(self) -> None:
-        try:
-            await self.coordinator.client.start_charge(self.socket_id)
-        except DriivzError as err:
-            _raise_command_failed(err)
-        self.coordinator.schedule_refresh()
+        await _run(self.coordinator, "start", self.station_id, self.socket_id)
 
 
 class MerAccountStopChargeButton(MerAccountEntity, ButtonEntity):
@@ -92,8 +98,9 @@ class MerAccountStopChargeButton(MerAccountEntity, ButtonEntity):
     async def async_press(self) -> None:
         active = self.coordinator.data.active
         if active is None:
+            # Guard against the session ending between the availability check and the press.
             raise HomeAssistantError(translation_domain=DOMAIN, translation_key="no_active_session")
-        await _stop_active_session(self.coordinator, active.socket_id)
+        await _run(self.coordinator, "stop", active.station_id, active.socket_id)
 
 
 class MerStationStopChargeButton(MerStationEntity, ButtonEntity):
@@ -112,4 +119,4 @@ class MerStationStopChargeButton(MerStationEntity, ButtonEntity):
         active = self.coordinator.data.active
         if active is None or active.station_id != self.station_id:
             raise HomeAssistantError(translation_domain=DOMAIN, translation_key="session_not_here")
-        await _stop_active_session(self.coordinator, active.socket_id)
+        await _run(self.coordinator, "stop", self.station_id, active.socket_id)

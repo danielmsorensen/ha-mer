@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import logging
@@ -17,11 +17,15 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    COMMAND_MAX_POLLS,
+    COMMAND_POLL_INTERVAL_SECONDS,
+    COMMAND_RATE_LIMIT_FLOOR,
     CONF_SCAN_INTERVAL,
     CONF_STATION_IDS,
     DEFAULT_SCAN_INTERVAL,
     DETAIL_REFRESH,
     DOMAIN,
+    EVENT_COMMAND_RESULT,
     HISTORY_LOOKBACK,
     RATE_LIMIT_SKIP_THRESHOLD,
     RATE_LIMIT_WARN_INTERVAL,
@@ -30,8 +34,32 @@ from .const import (
     WALLET_REFRESH,
 )
 from .driivz.client import DriivzDriverClient
+from .driivz.const import (
+    STATUS_AVAILABLE,
+    STATUS_CHARGING,
+    STATUS_DISCHARGING,
+    STATUS_PAUSED,
+    STATUS_PREPARING,
+)
 from .driivz.exceptions import AuthError, DriivzError, RateLimitError
 from .driivz.models import Socket, Station, Transaction, Wallet
+
+# Socket statuses that mean a charge is in progress.
+_CHARGING_STATUSES = frozenset({STATUS_CHARGING, STATUS_DISCHARGING, STATUS_PAUSED})
+
+# Outcomes of a start/stop command, also the states of the "Last command" sensor.
+RESULT_CHARGING = "charging"
+RESULT_AWAITING_CABLE = "awaiting_cable"
+RESULT_STOPPED = "stopped"
+RESULT_REJECTED = "rejected"
+RESULT_UNCONFIRMED = "unconfirmed"
+COMMAND_RESULTS: tuple[str, ...] = (
+    RESULT_CHARGING,
+    RESULT_AWAITING_CABLE,
+    RESULT_STOPPED,
+    RESULT_REJECTED,
+    RESULT_UNCONFIRMED,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +80,38 @@ class ActiveSession:
     currency: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class CommandResult:
+    """How the most recent start/stop command ended."""
+
+    command: str  # "start" or "stop"
+    result: str  # one of COMMAND_RESULTS
+    station_id: int | None
+    station_name: str | None
+    socket_id: int
+    socket_name: str | None
+    requested_at: datetime
+    finished_at: datetime
+    message: str | None = None
+
+    def as_event_data(self) -> dict[str, Any]:
+        return {
+            "command": self.command,
+            "result": self.result,
+            "station_id": self.station_id,
+            "station_name": self.station_name,
+            "socket_id": self.socket_id,
+            "socket_name": self.socket_name,
+            "requested_at": self.requested_at.isoformat(),
+            "finished_at": self.finished_at.isoformat(),
+            "message": self.message,
+        }
+
+
+class CommandUnconfirmed(Exception):
+    """The portal accepted the command but the charger did not show the outcome in time."""
+
+
 @dataclass(slots=True)
 class MerData:
     """Everything the entities read."""
@@ -63,6 +123,7 @@ class MerData:
     wallet: Wallet | None = None
     last_transaction: Transaction | None = None
     customer_id: int | None = None
+    last_command: CommandResult | None = None
 
 
 class MerCoordinator(DataUpdateCoordinator[MerData]):
@@ -101,6 +162,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._wallet: Wallet | None = None
         self._last_transaction: Transaction | None = None
         self._customer_id: int | None = None
+        self._last_command: CommandResult | None = None
         # Per station, not one timestamp for the whole set: the hourly detail work is
         # staggered so at most one charger is refreshed per cycle. See `_stations_due`.
         self._station_refreshed: dict[int, datetime] = {}
@@ -163,6 +225,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             wallet=self._wallet,
             last_transaction=self._last_transaction,
             customer_id=self._customer_id,
+            last_command=self._last_command,
         )
 
     @staticmethod
@@ -387,6 +450,142 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             await self.async_request_refresh()
 
         async_call_later(self.hass, REFRESH_AFTER_COMMAND_SECONDS, _refresh)
+
+    # ----- start / stop with confirmation ---------------------------------
+
+    async def async_start_charge(self, station_id: int, socket_id: int) -> CommandResult:
+        """Start a charge and wait until the charger shows the outcome.
+
+        Raises `DriivzError` if the portal rejects the command and `CommandUnconfirmed`
+        if it accepted it but nothing visible happened within the timeout. Either way
+        the outcome is recorded as the last command and fired as an event.
+        """
+        socket_before = self.get_socket(station_id, socket_id)
+        # Plugged in already: expect charging. Free socket: the charger accepts the
+        # command and then waits for the cable, which is the positive outcome here.
+        expect_cable = socket_before is not None and socket_before.status == STATUS_AVAILABLE
+
+        def done(station: Station | None, active_socket_id: int | None) -> str | None:
+            socket = _socket_of(station, socket_id)
+            if active_socket_id == socket_id or (socket and socket.status in _CHARGING_STATUSES):
+                return RESULT_CHARGING
+            if expect_cable and socket and socket.status == STATUS_PREPARING:
+                return RESULT_AWAITING_CABLE
+            return None
+
+        return await self._run_command("start", station_id, socket_id, done)
+
+    async def async_stop_charge(self, station_id: int | None, socket_id: int) -> CommandResult:
+        """Stop the charge on a socket and wait until the session is gone."""
+
+        def done(station: Station | None, active_socket_id: int | None) -> str | None:
+            socket = _socket_of(station, socket_id)
+            still_charging = socket is not None and socket.status in _CHARGING_STATUSES
+            if active_socket_id != socket_id and not still_charging:
+                return RESULT_STOPPED
+            return None
+
+        return await self._run_command("stop", station_id, socket_id, done)
+
+    async def _run_command(
+        self,
+        command: str,
+        station_id: int | None,
+        socket_id: int,
+        done: Callable[[Station | None, int | None], str | None],
+    ) -> CommandResult:
+        requested_at = dt_util.utcnow()
+        try:
+            if command == "start":
+                await self.client.start_charge(socket_id)
+            else:
+                await self.client.stop_charge(socket_id)
+        except DriivzError as err:
+            self._record_command(
+                command, RESULT_REJECTED, station_id, socket_id, requested_at, str(err)
+            )
+            raise
+        result = await self._await_outcome(station_id, socket_id, done)
+        record = self._record_command(command, result, station_id, socket_id, requested_at)
+        if result == RESULT_UNCONFIRMED:
+            raise CommandUnconfirmed
+        return record
+
+    async def _await_outcome(
+        self,
+        station_id: int | None,
+        socket_id: int,
+        done: Callable[[Station | None, int | None], str | None],
+    ) -> str:
+        """Poll the charger and the active session until `done` says so, or time runs out.
+
+        Every poll is published to the entities, so status, availability and the
+        session sensors update live while the button shows its spinner. Polling stops
+        early when the portal's rate-limit headroom gets low; the normal refresh then
+        picks the outcome up.
+        """
+        for _ in range(COMMAND_MAX_POLLS):
+            await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
+            remaining = self.client.rate_limit_remaining
+            if remaining is not None and remaining <= COMMAND_RATE_LIMIT_FLOOR:
+                _LOGGER.debug("Stopping command polling early; rate limit remaining %s", remaining)
+                break
+            try:
+                station = None
+                if station_id is not None:
+                    found = await self.client.find_stations_by_ids([station_id])
+                    station = found[0] if found else None
+                active = await self._fetch_active()
+            except DriivzError as err:
+                _LOGGER.debug("Command polling failed (%s); waiting for the next poll", err)
+                continue
+            self._publish_poll(station, active)
+            merged = self.get_station(station_id) if station_id is not None else None
+            if (result := done(merged, active.socket_id if active else None)) is not None:
+                return result
+        return RESULT_UNCONFIRMED
+
+    def _publish_poll(self, station: Station | None, active: ActiveSession | None) -> None:
+        if self.data is None:
+            return
+        stations = dict(self.data.stations)
+        if station is not None:
+            stations[station.id] = station
+        self.async_set_updated_data(replace(self.data, stations=stations, active=active))
+
+    def _record_command(
+        self,
+        command: str,
+        result: str,
+        station_id: int | None,
+        socket_id: int,
+        requested_at: datetime,
+        message: str | None = None,
+    ) -> CommandResult:
+        station = self.get_station(station_id) if station_id is not None else None
+        socket = _socket_of(station, socket_id)
+        record = CommandResult(
+            command=command,
+            result=result,
+            station_id=station_id,
+            station_name=station.display_name if station else None,
+            socket_id=socket_id,
+            socket_name=socket.name if socket else None,
+            requested_at=requested_at,
+            finished_at=dt_util.utcnow(),
+            message=message,
+        )
+        self._last_command = record
+        if self.data is not None:
+            self.async_set_updated_data(replace(self.data, last_command=record))
+        self.hass.bus.async_fire(EVENT_COMMAND_RESULT, record.as_event_data())
+        return record
+
+
+def _socket_of(station: Station | None, socket_id: int) -> Socket | None:
+    if station is None:
+        return None
+    return next((s for s in station.sockets if s.id == socket_id), None)
 
 
 type MerConfigEntry = ConfigEntry[MerCoordinator]

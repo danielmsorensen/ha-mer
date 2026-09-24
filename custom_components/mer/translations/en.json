@@ -185,6 +185,16 @@
       },
       "station_session_duration": {
         "name": "Session duration"
+      },
+      "last_command": {
+        "name": "Last command",
+        "state": {
+          "charging": "Charging",
+          "awaiting_cable": "Ready, plug in",
+          "stopped": "Stopped",
+          "rejected": "Rejected",
+          "unconfirmed": "Not confirmed"
+        }
       }
     },
     "binary_sensor": {
@@ -235,6 +245,9 @@
     },
     "session_not_here": {
       "message": "This charger is not running your charging session"
+    },
+    "command_unconfirmed": {
+      "message": "Mer accepted the command, but the charger did not confirm it within {seconds} seconds. Check the charger; the entities will update on the next refresh."
     }
   }
 }

@@ -92,7 +92,7 @@ have a "Left" and a "Right" socket):
 | *Socket* available | binary sensor | **Available** or **Not available** |
 | *Socket* price | sensor | Your tariff's price per kWh on this socket; the billing plan, fixed price, per-minute rate and transaction fee are attributes |
 | *Socket* max power | sensor (diagnostic) | The socket's maximum power in kW |
-| *Socket* start charge | button | Starts a charge on this socket; greyed out unless the socket is free, or plugged in and waiting |
+| *Socket* start charge | button | Starts a charge on this socket; greyed out unless the socket is free, or plugged in and waiting. See [Start and stop feedback](#start-and-stop-feedback) |
 
 ### Account device
 
@@ -115,6 +115,7 @@ your active session (wherever it is running) and your charging history.
 | Last session energy | sensor | Energy delivered in your last completed session |
 | Last session cost | sensor | Cost of your last completed session |
 | Last session started | sensor | When your last completed session started |
+| Last command | sensor | Outcome of your last start or stop: Charging, Ready (plug in), Stopped, Rejected or Not confirmed, with the charger, socket, times and any error as attributes |
 | Wallet balance | sensor | Your Mer account's wallet balance |
 
 ## Options
@@ -132,6 +133,38 @@ charger** and each site's **Change chargers** and **Delete**, as described under
 If your Mer password changes and the integration can no longer log in, Home
 Assistant raises a repair/reauthentication prompt on the integration; follow
 it and enter the new password to resume without redoing the whole setup.
+
+## Start and stop feedback
+
+Pressing a start or stop button holds the press open until the charger shows
+the outcome, so the button in the UI spins while it waits and then shows a
+tick, or a red cross with the reason. While it waits, the integration polls
+the charger every 5 seconds and updates its entities live, so the socket
+status, the availability sensors and the session sensors change as it
+happens. It gives up after 60 seconds with "not confirmed", which means the
+portal accepted the command but the charger has not shown the result yet;
+check the charger, and the entities catch up on the next refresh. Polling
+also stops early if the portal's rate limit is nearly used up.
+
+Outcomes for a start are **Charging**, or **Ready, plug in** when you pressed
+start on a free socket and the charger is now waiting for the cable. A stop
+ends with **Stopped**. Every outcome, including **Rejected**, is recorded on
+the account device's **Last command** sensor and fired as a `mer_command_result`
+event with the same details (`command`, `result`, `station_name`,
+`socket_name`, `message`), so a phone notification is one automation away:
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: mer_command_result
+actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      message: >-
+        {{ trigger.event.data.command | capitalize }} on
+        {{ trigger.event.data.station_name }} {{ trigger.event.data.socket_name }}:
+        {{ trigger.event.data.result }}
+```
 
 ## Example automation
 

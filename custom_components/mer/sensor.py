@@ -18,7 +18,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
-from .coordinator import ActiveSession, MerConfigEntry, MerCoordinator, MerData
+from .coordinator import (
+    COMMAND_RESULTS,
+    ActiveSession,
+    MerConfigEntry,
+    MerCoordinator,
+    MerData,
+)
 from .driivz.models import Socket, Station, Transaction, clean_caption
 from .entity import (
     STATUS_OPTIONS,
@@ -303,6 +309,25 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         value_fn=lambda _c, data: _last(data).started_at if _last(data) else None,
         attributes_fn=lambda _c, data: (
             {"station": _last(data).display_name} if _last(data) else {}
+        ),
+    ),
+    MerAccountSensorDescription(
+        key="last_command",
+        translation_key="last_command",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(COMMAND_RESULTS),
+        value_fn=lambda _c, data: data.last_command.result if data.last_command else None,
+        attributes_fn=lambda _c, data: (
+            {
+                "command": data.last_command.command,
+                "charger": data.last_command.station_name,
+                "socket": data.last_command.socket_name,
+                "requested_at": data.last_command.requested_at.isoformat(),
+                "finished_at": data.last_command.finished_at.isoformat(),
+                "message": data.last_command.message,
+            }
+            if data.last_command
+            else {}
         ),
     ),
     MerAccountSensorDescription(

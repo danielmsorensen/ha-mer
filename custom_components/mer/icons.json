@@ -19,32 +19,66 @@
           "unknown": "mdi:help-circle-outline"
         }
       },
-      "socket_price": { "default": "mdi:cash" },
-      "identity_key": { "default": "mdi:identifier" },
-      "account_available_sockets": { "default": "mdi:ev-plug-type2" },
-      "account_sockets_in_use": { "default": "mdi:ev-plug-type2" },
-      "active_station": { "default": "mdi:ev-station" },
-      "active_socket": { "default": "mdi:ev-plug-type2" }
+      "socket_price": {
+        "default": "mdi:cash"
+      },
+      "identity_key": {
+        "default": "mdi:identifier"
+      },
+      "account_available_sockets": {
+        "default": "mdi:ev-plug-type2"
+      },
+      "account_sockets_in_use": {
+        "default": "mdi:ev-plug-type2"
+      },
+      "active_station": {
+        "default": "mdi:ev-station"
+      },
+      "active_socket": {
+        "default": "mdi:ev-plug-type2"
+      },
+      "last_command": {
+        "default": "mdi:console-line",
+        "state": {
+          "charging": "mdi:lightning-bolt",
+          "awaiting_cable": "mdi:power-plug-outline",
+          "stopped": "mdi:stop-circle-outline",
+          "rejected": "mdi:close-circle-outline",
+          "unconfirmed": "mdi:help-circle-outline"
+        }
+      }
     },
     "binary_sensor": {
       "socket_available": {
         "default": "mdi:ev-station",
-        "state": { "off": "mdi:ev-plug-type2" }
+        "state": {
+          "off": "mdi:ev-plug-type2"
+        }
       },
       "account_any_available": {
         "default": "mdi:ev-station",
-        "state": { "off": "mdi:ev-plug-type2" }
+        "state": {
+          "off": "mdi:ev-plug-type2"
+        }
       }
     },
     "button": {
-      "socket_start_charge": { "default": "mdi:play-circle" },
-      "account_stop_charge": { "default": "mdi:stop-circle" },
-      "station_stop_charge": { "default": "mdi:stop-circle" }
+      "socket_start_charge": {
+        "default": "mdi:play-circle"
+      },
+      "account_stop_charge": {
+        "default": "mdi:stop-circle"
+      },
+      "station_stop_charge": {
+        "default": "mdi:stop-circle"
+      }
     },
     "switch": {
       "notify_available": {
         "default": "mdi:bell-ring-outline",
-        "state": { "off": "mdi:bell-off-outline" }
+        "state": {
+          "off": "mdi:bell-off-outline"
+        }
       }
     }
   }

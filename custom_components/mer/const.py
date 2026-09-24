@@ -39,5 +39,14 @@ WALLET_REFRESH = timedelta(minutes=15)
 DETAIL_REFRESH = timedelta(hours=1)
 HISTORY_LOOKBACK = timedelta(days=30)
 REFRESH_AFTER_COMMAND_SECONDS = 5
+# After a start/stop is acknowledged, the press stays open while the charger is
+# polled at this cadence until the outcome is visible, or this long has passed.
+COMMAND_POLL_INTERVAL_SECONDS = 5
+COMMAND_TIMEOUT_SECONDS = 60
+COMMAND_MAX_POLLS = COMMAND_TIMEOUT_SECONDS // COMMAND_POLL_INTERVAL_SECONDS
+# Stop the follow-up polling early rather than exhaust the portal's headroom.
+COMMAND_RATE_LIMIT_FLOOR = 2
+# Fired with the outcome of every start/stop command, for automations to notify on.
+EVENT_COMMAND_RESULT = "mer_command_result"
 RATE_LIMIT_SKIP_THRESHOLD = 1
 RATE_LIMIT_WARN_INTERVAL = timedelta(hours=1)
