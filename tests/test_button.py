@@ -272,3 +272,31 @@ async def test_buttons_unavailable_when_pressing_would_do_nothing(
     await hass.async_block_till_done()
     assert state(f"{eid}_account_stop_charge") == "unavailable"
     assert state(f"{eid}_station_6041_stop_charge") == "unavailable"
+
+
+async def test_refresh_now_polls_immediately(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    polls = mock_client.find_stations_by_ids.await_count
+    await press(hass, entity_id_for(hass, f"{eid}_account_refresh"))
+    await hass.async_block_till_done()
+    assert mock_client.find_stations_by_ids.await_count == polls + 1
+
+
+async def test_command_and_poll_entities_are_diagnostic(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    await setup_integration(hass, mock_config_entry)
+    registry = er.async_get(hass)
+    eid = mock_config_entry.entry_id
+    for domain, key in (
+        ("sensor", "account_last_command"),
+        ("sensor", "account_last_poll"),
+        ("sensor", "account_requests_remaining"),
+        ("binary_sensor", "account_live_updates"),
+        ("button", "account_refresh"),
+    ):
+        entity_id = registry.async_get_entity_id(domain, DOMAIN, f"{eid}_{key}")
+        assert registry.async_get(entity_id).entity_category == "diagnostic", key

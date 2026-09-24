@@ -352,3 +352,17 @@ async def test_frequent_pushes_do_not_starve_the_poll(
         await _settle(hass)
 
     assert mock_client.find_stations_by_ids.await_count >= polls + 1, "poll was starved"
+
+
+async def test_live_status_reports_connected_since(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+) -> None:
+    await setup_integration(hass, mock_config_entry)
+    await _settle(hass)
+    eid = mock_config_entry.entry_id
+    state = state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_updates")
+    assert state.name == "Mer account Live status"
+    assert state.attributes["connected_since"] is not None

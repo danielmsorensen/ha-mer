@@ -164,6 +164,9 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self.push_connected = False
         self._push_event = asyncio.Event()
         self.last_push_at: datetime | None = None
+        self.push_connected_since: datetime | None = None
+        # When the portal was last polled successfully (skipped cycles do not count).
+        self.last_poll_at: datetime | None = None
         # One subentry per charging site, listing its monitored chargers. Any change
         # reloads the entry (see __init__), so these are fixed for the coordinator's life.
         self.site_subentries: list[ConfigSubentry] = [
@@ -238,6 +241,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         except DriivzError as err:
             raise UpdateFailed(str(err)) from err
         self._check_rate_limit(now)
+        self.last_poll_at = now
         return MerData(
             stations=stations,
             details=dict(self._details),
@@ -699,7 +703,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 self._set_push_connected(False)
             if silent:
                 _LOGGER.warning(
-                    "Mer live updates silent for %ss; reconnecting with a fresh login",
+                    "Mer live status silent for %ss; reconnecting with a fresh login",
                     PUSH_SILENCE_TIMEOUT_SECONDS,
                 )
                 fresh_login = True
@@ -710,17 +714,18 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         if connected == self.push_connected:
             return
         self.push_connected = connected
+        self.push_connected_since = dt_util.utcnow() if connected else None
         self.update_interval = (
             timedelta(seconds=PUSH_POLL_INTERVAL_SECONDS) if connected else self._poll_interval
         )
         _LOGGER.info(
-            "Mer live updates %s; polling every %ss",
+            "Mer live status %s; polling every %ss",
             "connected" if connected else "disconnected",
             int(self.update_interval.total_seconds()),
         )
         if self.data is not None:
             # Re-publishing applies the new interval to the next scheduled poll and lets
-            # the "Live updates" sensor follow the connection state.
+            # the "Live status" sensor follow the connection state.
             self.async_set_updated_data(self.data)
         if not connected:
             # Whatever changed while the channel was down is caught up now, not in 5 min.

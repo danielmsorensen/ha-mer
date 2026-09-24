@@ -195,6 +195,12 @@
           "rejected": "Rejected",
           "unconfirmed": "Not confirmed"
         }
+      },
+      "last_poll": {
+        "name": "Last poll"
+      },
+      "requests_remaining": {
+        "name": "Portal requests remaining"
       }
     },
     "binary_sensor": {
@@ -218,8 +224,8 @@
       "station_session_here": {
         "name": "My session here"
       },
-      "account_live_updates": {
-        "name": "Live updates"
+      "account_live_status": {
+        "name": "Live status"
       }
     },
     "button": {
@@ -231,6 +237,9 @@
       },
       "station_stop_charge": {
         "name": "Stop charge"
+      },
+      "account_refresh": {
+        "name": "Refresh now"
       }
     },
     "switch": {

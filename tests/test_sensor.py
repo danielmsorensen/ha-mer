@@ -324,3 +324,32 @@ async def test_every_entity_has_an_icon(
         if not (has_device_class or in_icons):
             missing.append(entry.entity_id)
     assert missing == []
+
+
+async def test_poll_diagnostics(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Last poll and requests remaining, and both stay visible when a poll fails."""
+    from custom_components.mer.driivz.exceptions import DriivzConnectionError
+
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    last_poll = state_by_unique_id(hass, "sensor", f"{eid}_account_last_poll")
+    assert last_poll.state not in ("unknown", "unavailable")
+    assert last_poll.attributes["poll_interval_seconds"] == 60
+    assert last_poll.attributes["last_poll_succeeded"] is True
+    assert last_poll.attributes["last_error"] is None
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_requests_remaining").state == "9"
+
+    good = last_poll.state
+    mock_client.find_stations_by_ids.side_effect = DriivzConnectionError("portal down")
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    last_poll = state_by_unique_id(hass, "sensor", f"{eid}_account_last_poll")
+    assert last_poll.state == good  # still the last successful poll, and still shown
+    assert last_poll.attributes["last_poll_succeeded"] is False
+    assert "portal down" in last_poll.attributes["last_error"]
+    # Other account sensors go unavailable as before.
+    assert (
+        state_by_unique_id(hass, "sensor", f"{eid}_account_wallet_balance").state == "unavailable"
+    )

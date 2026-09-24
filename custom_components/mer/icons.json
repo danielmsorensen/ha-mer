@@ -46,6 +46,9 @@
           "rejected": "mdi:close-circle-outline",
           "unconfirmed": "mdi:help-circle-outline"
         }
+      },
+      "requests_remaining": {
+        "default": "mdi:speedometer"
       }
     },
     "binary_sensor": {
@@ -71,6 +74,9 @@
       },
       "station_stop_charge": {
         "default": "mdi:stop-circle"
+      },
+      "account_refresh": {
+        "default": "mdi:refresh"
       }
     },
     "switch": {

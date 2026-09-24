@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -19,6 +20,9 @@ ACCOUNT_STOP_CHARGE = ButtonEntityDescription(
 STATION_STOP_CHARGE = ButtonEntityDescription(
     key="stop_charge", translation_key="station_stop_charge"
 )
+REFRESH = ButtonEntityDescription(
+    key="refresh", translation_key="account_refresh", entity_category=EntityCategory.DIAGNOSTIC
+)
 
 
 async def async_setup_entry(
@@ -31,7 +35,7 @@ async def async_setup_entry(
         ]
         entities.append(MerStationStopChargeButton(coordinator, station.id))
         async_add_entities(entities, config_subentry_id=subentry.subentry_id)
-    async_add_entities([MerAccountStopChargeButton(coordinator)])
+    async_add_entities([MerAccountStopChargeButton(coordinator), MerRefreshButton(coordinator)])
 
 
 async def _run(
@@ -120,3 +124,18 @@ class MerStationStopChargeButton(MerStationEntity, ButtonEntity):
         if active is None or active.station_id != self.station_id:
             raise HomeAssistantError(translation_domain=DOMAIN, translation_key="session_not_here")
         await _run(self.coordinator, "stop", self.station_id, active.socket_id)
+
+
+class MerRefreshButton(MerAccountEntity, ButtonEntity):
+    """Poll the portal now instead of waiting for the next scheduled poll."""
+
+    def __init__(self, coordinator: MerCoordinator) -> None:
+        super().__init__(coordinator, REFRESH)
+
+    @property
+    def available(self) -> bool:
+        # Pressable after a failed poll too: that is when you are most likely to want it.
+        return self.coordinator.data is not None
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_refresh()

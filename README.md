@@ -105,7 +105,10 @@ your active session (wherever it is running) and your charging history.
 | Available sockets | sensor | Count of sockets on your added chargers currently `AVAILABLE` |
 | Sockets in use | sensor | Count of sockets on your added chargers in any "in use" state |
 | Charging | binary sensor | On while you have an active session, on any charger |
-| Live updates | binary sensor (diagnostic) | On while the portal's push channel is connected, so status changes arrive the moment they happen |
+| Live status | binary sensor (diagnostic) | On while the portal's push channel is connected, so charger and socket status and session estimates arrive the moment they change; `connected_since` attribute |
+| Last poll | sensor (diagnostic) | When the portal was last polled successfully; attributes give the current poll interval, whether the last poll succeeded, and its error if not. Stays visible while polls fail |
+| Portal requests remaining | sensor (diagnostic) | The portal's rate-limit headroom after the last request; see [Polling and rate limits](#polling-and-rate-limits) |
+| Refresh now | button (diagnostic) | Polls the portal immediately instead of waiting for the next scheduled poll |
 | Active session charger | sensor | Name of the charger your active session is running on. This and the other active session sensors are unavailable while you are not charging |
 | Active session socket | sensor | Name of the socket your active session is running on |
 | Active session started | sensor | When the active session started |
@@ -116,7 +119,7 @@ your active session (wherever it is running) and your charging history.
 | Last session energy | sensor | Energy delivered in your last completed session |
 | Last session cost | sensor | Cost of your last completed session |
 | Last session started | sensor | When your last completed session started |
-| Last command | sensor | Outcome of your last start or stop: Charging, Ready (plug in), Stopped, Rejected or Not confirmed, with the charger, socket, times and any error as attributes |
+| Last command | sensor (diagnostic) | Outcome of your last start or stop: Charging, Ready (plug in), Stopped, Rejected or Not confirmed, with the charger, socket, times and any error as attributes |
 | Wallet balance | sensor | Your Mer account's wallet balance |
 
 ## Options
@@ -212,11 +215,11 @@ does not say for how long, so tap Start when you are at the charger, or plug
 in first: the button stays available while the socket is plugged in and
 waiting, and the outcome is then "Charging" rather than "Ready, plug in".
 
-## Live updates and polling
+## Live status and polling
 
 Besides polling, the integration keeps a websocket open to the portal, the
 same channel the web app uses. Pushes for chargers you have not added are
-ignored. While the channel is connected the **Live updates** sensor on the
+ignored. While the channel is connected the **Live status** sensor on the
 account device is on and polling drops to every 5 minutes; if it drops, the
 sensor goes off, one poll runs straight away to catch up, polling returns to
 the configured interval, and the integration reconnects with increasing
@@ -241,13 +244,13 @@ below.
 
 A poll also runs on demand: straight after a start or stop command resolves,
 when the push channel drops, when a pushed estimate arrives for a session the
-integration does not know about yet, and when you press **Reload** on the
-integration.
+integration does not know about yet, when you press **Refresh now** on the
+account device, and when you press **Reload** on the integration.
 
 ### Session duration
 
 Nothing pushes the duration, so the duration sensors update on each poll:
-every 5 minutes while live updates are connected, otherwise at the configured
+every 5 minutes while live status is connected, otherwise at the configured
 interval, plus the on-demand polls listed above. That is deliberate. Ticking
 it locally would write a state change to the recorder every few seconds for
 a value the portal already provides, and it is how other integrations treat

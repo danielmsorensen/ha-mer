@@ -91,14 +91,23 @@ ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
         device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
         is_on_fn=lambda _c, data: data.active is not None,
     ),
-    # Whether the portal's push channel is connected. Off means status arrives by the
-    # normal poll only, every scan interval, rather than the moment it changes.
+    # Whether the portal's push channel is connected. It carries charger and socket
+    # status and session estimates the moment they change; everything else is polled.
+    # Off means status also arrives by the normal poll only. The key stays
+    # "live_updates" from when it was named that, so existing history carries over.
     MerAccountBinaryDescription(
         key="live_updates",
-        translation_key="account_live_updates",
+        translation_key="account_live_status",
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
         is_on_fn=lambda coordinator, _d: coordinator.push_connected,
+        attributes_fn=lambda coordinator, _d: {
+            "connected_since": (
+                coordinator.push_connected_since.isoformat()
+                if coordinator.push_connected_since
+                else None
+            ),
+        },
     ),
 )
 

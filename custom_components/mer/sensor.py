@@ -133,6 +133,8 @@ class MerAccountSensorDescription(SensorEntityDescription):
     attributes_fn: Callable[[MerCoordinator, MerData], dict[str, str]] | None = None
     # Describes the active session: unavailable, not unknown, while there is none.
     requires_session: bool = False
+    # Stays available when polls fail: it is how you find out that they are failing.
+    always_available: bool = False
 
 
 def _count_sockets(coordinator: MerCoordinator, predicate: Callable[[Socket], bool]) -> int:
@@ -315,6 +317,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         key="last_command",
         translation_key="last_command",
         device_class=SensorDeviceClass.ENUM,
+        entity_category=EntityCategory.DIAGNOSTIC,
         options=list(COMMAND_RESULTS),
         value_fn=lambda _c, data: data.last_command.result if data.last_command else None,
         attributes_fn=lambda _c, data: (
@@ -329,6 +332,35 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
             if data.last_command
             else {}
         ),
+    ),
+    MerAccountSensorDescription(
+        key="last_poll",
+        translation_key="last_poll",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        always_available=True,
+        value_fn=lambda coordinator, _d: coordinator.last_poll_at,
+        attributes_fn=lambda coordinator, _d: {
+            "poll_interval_seconds": (
+                int(coordinator.update_interval.total_seconds())
+                if coordinator.update_interval
+                else None
+            ),
+            "last_poll_succeeded": coordinator.last_update_success,
+            "last_error": (
+                None
+                if coordinator.last_update_success or coordinator.last_exception is None
+                else str(coordinator.last_exception)
+            ),
+        },
+    ),
+    MerAccountSensorDescription(
+        key="requests_remaining",
+        translation_key="requests_remaining",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        always_available=True,
+        value_fn=lambda coordinator, _d: coordinator.client.rate_limit_remaining,
     ),
     MerAccountSensorDescription(
         key="wallet_balance",
@@ -497,6 +529,8 @@ class MerAccountSensor(MerAccountEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
+        if self.entity_description.always_available:
+            return self.coordinator.data is not None
         if not super().available:
             return False
         return (
