@@ -169,6 +169,12 @@ actions:
 
 ## Example automation
 
+For a complete, ready-to-paste set (arrival at work offers the best free
+socket with a Start action, a socket freeing up while you are there does the
+same, the tap is handled, and every start/stop outcome is reported), see
+[`docs/examples/work-charger-automations.yaml`](docs/examples/work-charger-automations.yaml).
+The short version:
+
 Say you have added the two chargers at the retail park where you work. Get a
 phone notification on weekday mornings when a socket there frees up, naming
 the free sockets, so you know before you set off whether you'll get a spot:
