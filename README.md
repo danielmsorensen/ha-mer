@@ -367,6 +367,12 @@ From then on:
   the paths the WSL process sees, so breakpoints in `custom_components/mer/`
   bind. If your WSL username or config directory differ from the defaults,
   adjust the first `remoteRoot` in `launch.json`.
+- **Releasing.** `scripts/release <version> "<notes>"` sets the version in the
+  manifest (what Home Assistant shows), commits, tags `v<version>` (what HACS
+  shows), pushes and publishes the GitHub release. CI fails a tag whose
+  manifest version differs. HACS on a user's instance notices a new release on
+  its own schedule, roughly every few hours for custom repositories; "Update
+  information" on the repository's HACS page forces it.
 - **Brand images.** Home Assistant serves a custom integration's icon and
   logo from `custom_components/mer/brand/` (`icon.png` at 256 px, `icon@2x.png`
   at 512 px, `logo.png`, `logo@2x.png`, transparent PNGs), so no upload to the

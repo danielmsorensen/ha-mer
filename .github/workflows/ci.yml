@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 jobs:
@@ -30,3 +31,15 @@ jobs:
       - run: python -m pip install -r requirements_test.txt
       - run: ruff check . && ruff format --check .
       - run: python -m pytest -q
+
+  version-matches-tag:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: manifest version must equal the tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(python -c 'import json; print(json.load(open("custom_components/mer/manifest.json"))["version"])')"
+          echo "tag=$tag manifest=$manifest"
+          test "$tag" = "$manifest"

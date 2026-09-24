@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Cut a release: set the version in the manifest, commit, tag, push, publish on GitHub.
+#
+#   scripts/release 0.1.6 "One-paragraph release note"
+#
+# The version shown inside Home Assistant comes from custom_components/mer/manifest.json;
+# HACS shows the release tag. This keeps the two the same, which is easy to forget when
+# tagging by hand (releases 0.1.1 to 0.1.5 all shipped a manifest still saying 0.1.0).
+# Needs a clean working tree on main and the GitHub CLI logged in.
+set -euo pipefail
+
+version="${1:?usage: scripts/release <version> <notes>}"
+notes="${2:?usage: scripts/release <version> <notes>}"
+case "$version" in
+  v*) echo "give the version without a leading v" >&2; exit 2 ;;
+esac
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+cd "$repo_root"
+
+[ "$(git branch --show-current)" = "main" ] || { echo "release from main" >&2; exit 2; }
+[ -z "$(git status --porcelain)" ] || { echo "working tree not clean" >&2; exit 2; }
+git rev-parse -q --verify "refs/tags/v$version" >/dev/null && { echo "tag v$version exists" >&2; exit 2; }
+
+manifest="custom_components/mer/manifest.json"
+python - "$manifest" "$version" <<'PY'
+import json, sys
+path, version = sys.argv[1], sys.argv[2]
+data = json.load(open(path, encoding="utf-8"))
+data["version"] = version
+with open(path, "w", encoding="utf-8", newline="\n") as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+PY
+
+git add "$manifest"
+git -c core.safecrlf=false commit -q -m "chore: release v$version"
+git tag -a "v$version" -m "v$version"
+git push -q origin main
+git push -q origin "v$version"
+gh release create "v$version" --title "v$version" --notes "$notes"
