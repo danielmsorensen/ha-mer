@@ -70,6 +70,9 @@ async def async_get_config_entry_diagnostics(
         "rate_limit_remaining": coordinator.client.rate_limit_remaining,
         "last_update_success": coordinator.last_update_success,
         "push_connected": coordinator.push_connected,
+        "last_push_at": (
+            coordinator.last_push_at.isoformat() if coordinator.last_push_at else None
+        ),
         "update_interval_seconds": (
             coordinator.update_interval.total_seconds() if coordinator.update_interval else None
         ),

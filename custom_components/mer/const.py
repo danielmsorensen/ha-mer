@@ -53,5 +53,9 @@ EVENT_COMMAND_RESULT = "mer_command_result"
 PUSH_POLL_INTERVAL_SECONDS = 300
 PUSH_RECONNECT_MIN_SECONDS = 5
 PUSH_RECONNECT_MAX_SECONDS = 300
+# The portal broadcasts roughly one status change a second across its whole
+# network, so a connection that has said nothing for this long is dead even if TCP
+# is still up; it is dropped and re-opened after a fresh login.
+PUSH_SILENCE_TIMEOUT_SECONDS = 180
 RATE_LIMIT_SKIP_THRESHOLD = 1
 RATE_LIMIT_WARN_INTERVAL = timedelta(hours=1)

@@ -223,7 +223,10 @@ on the account device is on, and polling drops to every 5 minutes, since it
 then only has to cover the wallet, history and charger details. If the
 channel drops, the sensor goes off, one poll runs straight away to catch up,
 polling returns to the configured interval, and the integration reconnects
-with increasing delays up to 5 minutes. Pushes cost nothing against the rate
+with increasing delays up to 5 minutes. A channel that stays open but goes
+quiet for 3 minutes is treated as dead too, since the portal normally pushes
+something every second or so; it is closed and reopened after a fresh login,
+with a warning in the log. Pushes cost nothing against the rate
 limit described below, and start and stop presses resolve on the pushed
 change instead of polling for it.
 

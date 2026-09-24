@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from datetime import timedelta
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiohttp import WSMsgType
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
-from custom_components.mer.const import PUSH_POLL_INTERVAL_SECONDS
+from custom_components.mer.const import PUSH_POLL_INTERVAL_SECONDS, PUSH_SILENCE_TIMEOUT_SECONDS
 from custom_components.mer.driivz.exceptions import DriivzConnectionError
 from custom_components.mer.driivz.models import Socket
 from tests.helpers import setup_integration
@@ -41,17 +44,18 @@ class FakeWebSocket:
     def disconnect(self) -> None:
         self.queue.put_nowait(None)
 
-    def __aiter__(self) -> AsyncIterator[FakeMessage]:
-        return self
-
-    async def __anext__(self) -> FakeMessage:
+    async def receive(self) -> FakeMessage:
         item = await self.queue.get()
         if item is None:
-            raise StopAsyncIteration
+            closed = FakeMessage("")
+            closed.type = WSMsgType.CLOSED
+            return closed
         return item
 
     async def close(self) -> None:
+        # Like aiohttp: a pending receive() returns CLOSED once the socket is closed.
         self.closed = True
+        self.queue.put_nowait(None)
 
 
 def status_push(station_id: int, socket_id: int, status: str, **flags: bool) -> dict[str, Any]:
@@ -269,3 +273,51 @@ async def test_channel_recovers_after_failed_reconnect(
     second_ws.push(status_push(6042, 11244, "OCCUPIED"))
     await _settle(hass)
     assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11244_status").state == "occupied"
+
+
+async def test_silent_channel_is_dropped_and_reopened_with_fresh_login(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """TCP up but nothing arriving: treat as dead, log in again, reconnect.
+
+    This is the "Live updates on, but nothing has changed for an hour" failure.
+    """
+    second_ws = FakeWebSocket()
+    mock_client.connect_push.side_effect = [fake_ws, second_ws]
+    with patch("custom_components.mer.coordinator.PUSH_RECONNECT_MIN_SECONDS", 0):
+        await setup_integration(hass, mock_config_entry)
+        await _settle(hass)
+        logins_before = mock_client.login.await_count
+        coordinator = mock_config_entry.runtime_data
+        assert coordinator.push_connected is True
+
+        # A push just inside the timeout keeps the channel: the watchdog is re-armed.
+        freezer.tick(timedelta(seconds=PUSH_SILENCE_TIMEOUT_SECONDS - 5))
+        async_fire_time_changed(hass)
+        fake_ws.push(status_push(6042, 11243, "OCCUPIED"))
+        await _settle(hass)
+        freezer.tick(timedelta(seconds=PUSH_SILENCE_TIMEOUT_SECONDS - 5))
+        async_fire_time_changed(hass)
+        await _settle(hass)
+        assert mock_client.connect_push.await_count == 1
+        assert fake_ws.closed is False
+
+        # Then nothing for the full timeout: dropped, fresh login, second connection.
+        freezer.tick(timedelta(seconds=PUSH_SILENCE_TIMEOUT_SECONDS + 1))
+        async_fire_time_changed(hass)
+        await _settle(hass)
+        await _settle(hass)
+        assert fake_ws.closed is True
+        assert mock_client.login.await_count == logins_before + 1
+        assert mock_client.connect_push.await_count == 2
+        assert coordinator.push_connected is True
+
+        second_ws.push(status_push(6042, 11244, "OCCUPIED"))
+        await _settle(hass)
+        eid = mock_config_entry.entry_id
+        assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11244_status").state == "occupied"
+        assert coordinator.last_push_at is not None

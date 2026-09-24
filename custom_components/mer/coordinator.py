@@ -13,7 +13,7 @@ from typing import Any
 
 from aiohttp import WSMsgType
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -33,6 +33,7 @@ from .const import (
     PUSH_POLL_INTERVAL_SECONDS,
     PUSH_RECONNECT_MAX_SECONDS,
     PUSH_RECONNECT_MIN_SECONDS,
+    PUSH_SILENCE_TIMEOUT_SECONDS,
     RATE_LIMIT_SKIP_THRESHOLD,
     RATE_LIMIT_WARN_INTERVAL,
     REFRESH_AFTER_COMMAND_SECONDS,
@@ -162,6 +163,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         # change for one of our chargers.
         self.push_connected = False
         self._push_event = asyncio.Event()
+        self.last_push_at: datetime | None = None
         # One subentry per charging site, listing its monitored chargers. Any change
         # reloads the entry (see __init__), so these are fixed for the coordinator's life.
         self.site_subentries: list[ConfigSubentry] = [
@@ -629,8 +631,14 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         backoff; while disconnected the poll runs at its configured interval again.
         """
         backoff = PUSH_RECONNECT_MIN_SECONDS
+        fresh_login = False
         while True:
             try:
+                if fresh_login:
+                    # The last connection went silent: its server-side session is the
+                    # likely casualty, so do not reuse the cookie that produced it.
+                    await self.client.login()
+                    fresh_login = False
                 ws = await self.client.connect_push()
             except Exception as err:
                 _LOGGER.debug("Mer push channel unavailable (%s); retry in %ss", err, backoff)
@@ -639,17 +647,50 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 continue
             backoff = PUSH_RECONNECT_MIN_SECONDS
             self._set_push_connected(True)
+            # Silence watchdog. A live channel is never quiet for long: the whole
+            # network's status changes come through it. If nothing arrives for the
+            # timeout, TCP is up but nothing is behind it; close the socket so the
+            # receive below returns, and reconnect after a fresh login.
+            silent = False
+
+            @callback
+            def _on_silence(_now: datetime, _ws: Any = ws) -> None:
+                nonlocal silent
+                silent = True
+                self.hass.async_create_task(_ws.close())
+
+            cancel_watchdog = async_call_later(self.hass, PUSH_SILENCE_TIMEOUT_SECONDS, _on_silence)
             try:
-                async for message in ws:
+                while True:
+                    message = await ws.receive()
+                    if silent or message.type in (
+                        WSMsgType.CLOSE,
+                        WSMsgType.CLOSING,
+                        WSMsgType.CLOSED,
+                        WSMsgType.ERROR,
+                    ):
+                        break
                     if message.type != WSMsgType.TEXT:
                         continue
+                    cancel_watchdog()
+                    cancel_watchdog = async_call_later(
+                        self.hass, PUSH_SILENCE_TIMEOUT_SECONDS, _on_silence
+                    )
+                    self.last_push_at = dt_util.utcnow()
                     self._handle_push_text(message.data)
             except Exception as err:
                 _LOGGER.debug("Mer push channel error: %s", err)
             finally:
+                cancel_watchdog()
                 with contextlib.suppress(Exception):
                     await ws.close()
                 self._set_push_connected(False)
+            if silent:
+                _LOGGER.warning(
+                    "Mer live updates silent for %ss; reconnecting with a fresh login",
+                    PUSH_SILENCE_TIMEOUT_SECONDS,
+                )
+                fresh_login = True
             _LOGGER.debug("Mer push channel closed; reconnecting in %ss", backoff)
             await asyncio.sleep(backoff)
 
