@@ -1,12 +1,14 @@
 {
   "domain": "mer",
   "name": "Mer",
-  "codeowners": ["@danielmsorensen"],
+  "codeowners": [
+    "@danielmsorensen"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/danielmsorensen/ha-mer",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/danielmsorensen/ha-mer/issues",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.1.6"
 }
