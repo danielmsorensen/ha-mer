@@ -212,21 +212,48 @@ async def test_estimate_without_data_is_none(
     assert await client.find_current_transaction_estimate(1) is None
 
 
-async def test_start_charge_pending_ok(
+async def test_start_charge_uses_the_accounts_card(
     client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
 ) -> None:
-    path = "stationFacade/startChargeNow"
-    aioclient_mock.post(url(path), json=load_json_fixture("start_charge_pending.json"))
+    """Like the web app: look up the charging card, then approveStartCharge with it."""
+    cards = "stationFacade/findCustomerCardsBySocketId"
+    start = "stationFacade/approveStartCharge"
+    aioclient_mock.get(url(cards), json=load_json_fixture("customer_cards.json"))
+    aioclient_mock.post(url(start), json=load_json_fixture("start_charge_pending.json"))
     await client.start_charge(11243)
-    calls = _calls(aioclient_mock, "POST", path)
-    assert calls[0][2] == {"stationSocketId": "11243"}
+    lookups = [
+        c for c in aioclient_mock.mock_calls if c[0] == "GET" and str(c[1]).startswith(url(cards))
+    ]
+    assert lookups and "stationSocketId=11243" in str(lookups[0][1])
+    calls = _calls(aioclient_mock, "POST", start)
+    assert calls[0][2] == {"stationSocketId": "11243", "cardNumber": "TESTCARD0000C0"}
+    assert not _calls(aioclient_mock, "POST", "stationFacade/startChargeNow")
+
+
+async def test_start_charge_without_cards_sends_no_card(
+    client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    aioclient_mock.get(
+        url("stationFacade/findCustomerCardsBySocketId"),
+        json={"errors": [], "success": True, "data": {"cards": []}},
+    )
+    start = "stationFacade/approveStartCharge"
+    aioclient_mock.post(url(start), json=load_json_fixture("start_charge_pending.json"))
+    await client.start_charge(11243)
+    assert _calls(aioclient_mock, "POST", start)[0][2] == {"stationSocketId": "11243"}
 
 
 async def test_start_charge_rejected_raises(
     client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
 ) -> None:
-    path = "stationFacade/startChargeNow"
-    aioclient_mock.post(url(path), json=load_json_fixture("start_charge_rejected.json"))
+    aioclient_mock.get(
+        url("stationFacade/findCustomerCardsBySocketId"),
+        json=load_json_fixture("customer_cards.json"),
+    )
+    aioclient_mock.post(
+        url("stationFacade/approveStartCharge"),
+        json=load_json_fixture("start_charge_rejected.json"),
+    )
     with pytest.raises(ApiError) as excinfo:
         await client.start_charge(11243)
     assert excinfo.value.error_type == "REJECTED"
@@ -235,8 +262,14 @@ async def test_start_charge_rejected_raises(
 async def test_start_charge_envelope_error_raises(
     client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
 ) -> None:
-    path = "stationFacade/startChargeNow"
-    aioclient_mock.post(url(path), json=load_json_fixture("error_insufficient_permissions.json"))
+    aioclient_mock.get(
+        url("stationFacade/findCustomerCardsBySocketId"),
+        json=load_json_fixture("customer_cards.json"),
+    )
+    aioclient_mock.post(
+        url("stationFacade/approveStartCharge"),
+        json=load_json_fixture("error_insufficient_permissions.json"),
+    )
     with pytest.raises(ApiError) as excinfo:
         await client.start_charge(11243)
     assert excinfo.value.error_type == "INSUFFICIENT_PERMISSIONS"

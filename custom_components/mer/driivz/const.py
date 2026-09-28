@@ -20,7 +20,12 @@ PATH_FIND_STATION_BY_ID = "stationFacade/findStationById"
 PATH_LAST_ACTIVE_SOCKET = "stationFacade/findLastActiveChargeSocket"
 PATH_TRANSACTION_START_TIME = "stationFacade/findCurrentTransactionStartTime"
 PATH_TRANSACTION_ESTIMATE = "stationFacade/findCurrentTransactionBillingChargingEstimation"
-PATH_START_CHARGE = "stationFacade/startChargeNow"
+# The web app's normal start ("connect and swipe"): look up the account's charging
+# cards for the socket, then approve the start with one. `startChargeNow` is a
+# different thing, the "Charge now" button the charger only sometimes offers, and
+# is refused as unauthorised for a normal start.
+PATH_CUSTOMER_CARDS = "stationFacade/findCustomerCardsBySocketId"
+PATH_START_CHARGE = "stationFacade/approveStartCharge"
 # Push channel: the portal broadcasts status changes for every charger on the
 # network once the client has sent the greeting below.
 PATH_WEBSOCKET = "websocket"

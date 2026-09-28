@@ -85,6 +85,7 @@ async def async_get_config_entry_diagnostics(
                 "active": _plain(data.active),
                 "wallet": wallet,
                 "last_transaction": last_transaction,
+                "last_command": _plain(data.last_command),
             },
             TO_REDACT,
         ),

@@ -22,6 +22,7 @@ from .const import (
     HEADER_JSON_TYPES,
     HEADER_RATE_LIMIT_REMAINING,
     OPERATION_PENDING,
+    PATH_CUSTOMER_CARDS,
     PATH_FIND_SITES_IN_BOUNDS,
     PATH_FIND_STATION_BY_ID,
     PATH_FIND_STATIONS_BY_IDS,
@@ -347,9 +348,30 @@ class DriivzDriverClient:
             return SessionEstimate.from_dict(data)
         return None
 
+    async def find_charging_cards(self, socket_id: int) -> list[str]:
+        """Numbers of the account's charging cards usable on this socket, in portal order."""
+        data = await self._request(
+            "GET", PATH_CUSTOMER_CARDS, params={"stationSocketId": str(socket_id)}
+        )
+        cards = data.get("cards") if isinstance(data, Mapping) else None
+        return [
+            str(card["number"])
+            for card in cards or []
+            if isinstance(card, Mapping) and card.get("number")
+        ]
+
     async def start_charge(self, socket_id: int) -> None:
-        """Ask the portal to start charging; the charger then waits for the cable."""
-        data = await self._request("POST", PATH_START_CHARGE, data={"stationSocketId": socket_id})
+        """Ask the portal to start charging; the charger then waits for the cable.
+
+        Mirrors the web app: the start is approved against one of the account's charging
+        cards (usually a single virtual card). With several, the web app asks which; this
+        uses the first. With none, the start is sent without a card, as the web app does.
+        """
+        cards = await self.find_charging_cards(socket_id)
+        form: dict[str, Any] = {"stationSocketId": socket_id}
+        if cards:
+            form["cardNumber"] = cards[0]
+        data = await self._request("POST", PATH_START_CHARGE, data=form)
         status = data.get("operationStatus") if isinstance(data, Mapping) else None
         if status != OPERATION_PENDING:
             raise ApiError(str(status) if status else "START_CHARGE_REJECTED")

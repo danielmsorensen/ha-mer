@@ -360,3 +360,18 @@ earlier "not live power" conclusion was drawn from differencing energy snapshots
 out to lag the meter unpredictably; against the Mer app's "estimated rate" and the car's
 own battery-side reading (5.9 kW vs 6.55 at the charger) the field is the charger-side
 rate, refreshed with each meter reading.
+
+## 2026-09-28: start via approveStartCharge with the account's card
+
+**Decision.** Starting a charge looks up the account's charging cards for the socket
+(`findCustomerCardsBySocketId`) and sends `approveStartCharge` with the first card's
+number, as the portal's own web app does on "connect and swipe". `startChargeNow` is no
+longer used.
+
+**Why.** The first real start from Home Assistant was refused as not authorised. Reading
+the web app's code showed `startChargeNow` is the separate "Charge now" button, offered
+only when the socket's allowed operations include `START_CHARGE_NOW`; the normal start is
+`approveStartCharge` with a card. The start endpoint had been taken from the API surface
+during development without a live start, by design, so this was untested until now.
+Accounts with several cards get the first; the web app asks, which could become an
+option later.
