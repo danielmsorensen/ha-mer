@@ -33,6 +33,13 @@ PUSH_GREETING = "0"
 PUSH_STATION_STATUS = "StationStatusSummaryDtoImp"
 PUSH_CHARGING_ESTIMATE = "BillingChargingEstimationMessageImp"
 PATH_STOP_CHARGE = "stationFacade/stopCharge"
+# The "Charge now" start, for cards the portal accepts it with (not the app's virtual
+# card). Only used when the socket's capabilities allow it and not the normal start.
+PATH_START_CHARGE_NOW = "stationFacade/startChargeNow"
+# What the web app asks before showing Start / Charge now / Stop. Read-only.
+PATH_CAPABILITIES = "stationFacade/getStationCapabilitiesAndValidate"
+OP_START_CHARGE = "START_CHARGE_FROM_SERVER"
+OP_START_CHARGE_NOW = "START_CHARGE_NOW"
 PATH_WALLET = "billingFacade/findCustomerDetailWalletByCustomerId"
 PATH_TRANSACTIONS = "customerFacade/findDriverChargeTransactionLogByView"
 PATH_IS_SUBSCRIBED_AVAILABLE = "customerFacade/isDriverSubscribedToNotifyMeWhenStationIsAvailable"

@@ -22,6 +22,7 @@ from .const import (
     HEADER_JSON_TYPES,
     HEADER_RATE_LIMIT_REMAINING,
     OPERATION_PENDING,
+    PATH_CAPABILITIES,
     PATH_CUSTOMER_CARDS,
     PATH_FIND_SITES_IN_BOUNDS,
     PATH_FIND_STATION_BY_ID,
@@ -33,6 +34,7 @@ from .const import (
     PATH_MAP,
     PATH_NOTIFY_WHEN_AVAILABLE,
     PATH_START_CHARGE,
+    PATH_START_CHARGE_NOW,
     PATH_STOP_CHARGE,
     PATH_TRANSACTION_ESTIMATE,
     PATH_TRANSACTION_START_TIME,
@@ -49,6 +51,7 @@ from .models import (
     SessionEstimate,
     Site,
     Socket,
+    SocketCapabilities,
     Station,
     Transaction,
     Wallet,
@@ -375,6 +378,35 @@ class DriivzDriverClient:
         status = data.get("operationStatus") if isinstance(data, Mapping) else None
         if status != OPERATION_PENDING:
             raise ApiError(str(status) if status else "START_CHARGE_REJECTED")
+
+    async def start_charge_now(self, socket_id: int) -> None:
+        """The web app's "Charge now" start, offered only for some cards.
+
+        The portal lists it as `START_CHARGE_NOW` in a socket's allowed operations when it
+        applies. The app's own virtual card is refused for it (`INVALID_CARD`), so this path
+        follows the web app's code and could not be exercised live.
+        """
+        data = await self._request(
+            "POST", PATH_START_CHARGE_NOW, data={"stationSocketId": socket_id}
+        )
+        status = data.get("operationStatus") if isinstance(data, Mapping) else None
+        if status != OPERATION_PENDING:
+            raise ApiError(str(status) if status else "START_CHARGE_REJECTED")
+
+    async def find_socket_capabilities(
+        self, station_id: int, socket_id: int, socket_status: str
+    ) -> dict[int, SocketCapabilities]:
+        """What this account may do on each of the charger's sockets right now."""
+        data = await self._request(
+            "POST",
+            PATH_CAPABILITIES,
+            data={
+                "stationId": station_id,
+                "stationSocketId": socket_id,
+                "socketStatus": socket_status,
+            },
+        )
+        return SocketCapabilities.parse(data)
 
     async def stop_charge(self, socket_id: int) -> None:
         data = await self._request("POST", PATH_STOP_CHARGE, data={"stationSocketId": socket_id})

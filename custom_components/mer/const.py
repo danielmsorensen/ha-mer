@@ -48,6 +48,9 @@ COMMAND_MAX_POLLS = COMMAND_TIMEOUT_SECONDS // COMMAND_POLL_INTERVAL_SECONDS
 COMMAND_RATE_LIMIT_FLOOR = 2
 # Fired with the outcome of every start/stop command, for automations to notify on.
 EVENT_COMMAND_RESULT = "mer_command_result"
+# A charger's socket capabilities are re-read this long after one of its sockets
+# changes status, so a burst of changes costs one request.
+CAPABILITY_REFRESH_DELAY_SECONDS = 5
 # While the push channel is connected, socket status arrives instantly, so the poll
 # only has to cover wallet, history and details; it drops to this interval.
 PUSH_POLL_INTERVAL_SECONDS = 300

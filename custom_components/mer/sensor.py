@@ -420,6 +420,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         attributes_fn=lambda _c, data: (
             {
                 "command": data.last_command.command,
+                "method": data.last_command.method,
                 "charger": data.last_command.station_name,
                 "socket": data.last_command.socket_name,
                 "requested_at": data.last_command.requested_at.isoformat(),

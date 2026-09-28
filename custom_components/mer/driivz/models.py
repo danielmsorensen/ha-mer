@@ -337,6 +337,36 @@ def _tariff_text(data: Mapping[str, Any]) -> str | None:
     return None
 
 
+@dataclass(frozen=True, slots=True)
+class SocketCapabilities:
+    """The operations the portal allows this account on one socket, and why others are denied."""
+
+    allowed: frozenset[str]
+    denied: Mapping[str, str]
+
+    @staticmethod
+    def parse(data: Any) -> dict[int, SocketCapabilities]:
+        """Per socket id, from a getStationCapabilitiesAndValidate response (covers the charger)."""
+        if not isinstance(data, Mapping):
+            return {}
+        allowed = data.get("allowedSocketOperations") or {}
+        denied = data.get("denySocketOperations") or {}
+        result: dict[int, SocketCapabilities] = {}
+        for key in set(allowed) | set(denied):
+            socket_id = _int(key)
+            if socket_id is None:
+                continue
+            ops = allowed.get(key) or []
+            reasons = denied.get(key) or {}
+            result[socket_id] = SocketCapabilities(
+                allowed=frozenset(str(op) for op in ops),
+                denied={str(op): str(reason) for op, reason in reasons.items()}
+                if isinstance(reasons, Mapping)
+                else {},
+            )
+        return result
+
+
 def parse_push(data: Any) -> StatusPush | EstimatePush | None:
     """Turn one websocket JSON message into a typed push, or None for anything else."""
     if not isinstance(data, Mapping):

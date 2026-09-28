@@ -139,6 +139,18 @@ it and enter the new password to resume without redoing the whole setup.
 
 ## Start and stop feedback
 
+Each socket has one **start charge** button, whichever way the portal wants the
+charge started. When you press it, the integration asks the portal what your
+account may do on that socket, as the Mer web app does, and then sends the
+normal start (approved against your account's charging card), or the portal's
+"Charge now" start if that is the only one allowed, or fails straight away with
+the portal's reason if neither is. The button is greyed out when neither start
+is allowed; the integration re-reads what is allowed a few seconds after any
+socket on the charger changes status. The "Charge now" path follows the web
+app's code but could not be tried for real: the Mer app's own virtual card is
+refused for it.
+
+
 Pressing a start or stop button holds the press open until the charger shows
 the outcome, so the button in the UI spins while it waits and then shows a
 tick, or a red cross with the reason. While it waits, the integration polls

@@ -375,3 +375,19 @@ only when the socket's allowed operations include `START_CHARGE_NOW`; the normal
 during development without a live start, by design, so this was untested until now.
 Accounts with several cards get the first; the web app asks, which could become an
 option later.
+
+## 2026-09-28: one start button; the method comes from socket capabilities
+
+**Decision.** Each socket keeps a single start button. On press, the coordinator reads the
+socket's capabilities (`getStationCapabilitiesAndValidate`, which covers the whole
+charger) and sends `approveStartCharge` if `START_CHARGE_FROM_SERVER` is allowed, else
+`startChargeNow` if `START_CHARGE_NOW` is, else fails with the denial reason without
+sending anything. The button's availability uses the same capabilities, re-read 5 s after
+a charger's socket statuses change (poll or push) and falling back to the status rule
+when unknown. The start method is recorded on Last command and the event.
+
+**Why.** This is the web app's own logic. A live read showed `START_CHARGE_NOW` denied
+with `INVALID_CARD` for the app's virtual card on every socket, so "Charge now" is for
+other card types, which a distributed integration should still support. Reading
+capabilities only on status changes keeps the cost to a few requests an hour at a busy
+site, against a rate limit whose refill is unknown. The "Charge now" path is untested live.

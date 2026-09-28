@@ -20,6 +20,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CAPABILITY_REFRESH_DELAY_SECONDS,
     COMMAND_MAX_POLLS,
     COMMAND_POLL_INTERVAL_SECONDS,
     COMMAND_RATE_LIMIT_FLOOR,
@@ -42,16 +43,19 @@ from .const import (
 )
 from .driivz.client import DriivzDriverClient
 from .driivz.const import (
+    OP_START_CHARGE,
+    OP_START_CHARGE_NOW,
     STATUS_AVAILABLE,
     STATUS_CHARGING,
     STATUS_DISCHARGING,
     STATUS_PAUSED,
     STATUS_PREPARING,
 )
-from .driivz.exceptions import AuthError, DriivzError, RateLimitError
+from .driivz.exceptions import ApiError, AuthError, DriivzError, RateLimitError
 from .driivz.models import (
     EstimatePush,
     Socket,
+    SocketCapabilities,
     SocketPrice,
     Station,
     StatusPush,
@@ -118,6 +122,8 @@ class CommandResult:
     requested_at: datetime
     finished_at: datetime
     message: str | None = None
+    # For a start: "start" (the normal one) or "charge_now".
+    method: str | None = None
 
     def as_event_data(self) -> dict[str, Any]:
         return {
@@ -130,6 +136,7 @@ class CommandResult:
             "requested_at": self.requested_at.isoformat(),
             "finished_at": self.finished_at.isoformat(),
             "message": self.message,
+            "method": self.method,
         }
 
 
@@ -211,6 +218,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._last_transaction: Transaction | None = None
         self._customer_id: int | None = None
         self._last_command: CommandResult | None = None
+        # What this account may do on each socket, per socket id; re-read shortly after
+        # a charger's sockets change status. Empty until first read, or if reading fails.
+        self.capabilities: dict[int, SocketCapabilities] = {}
+        self._capabilities_pending: set[int] = set()
         # Detail of chargers you have not added but have a session on (public chargers),
         # fetched once so the session's price is known. Keyed by station id.
         self._session_station_details: dict[int, Station] = {}
@@ -269,6 +280,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             raise UpdateFailed(str(err)) from err
         self._check_rate_limit(now)
         self.last_poll_at = now
+        for station_id, station in stations.items():
+            previous = self.data.stations.get(station_id) if self.data else None
+            if previous is None or _socket_statuses(previous) != _socket_statuses(station):
+                self._schedule_capabilities(station_id)
         return MerData(
             stations=stations,
             details=dict(self._details),
@@ -551,7 +566,88 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 return RESULT_AWAITING_CABLE
             return None
 
-        return await self._run_command("start", station_id, socket_id, done)
+        method: str | None = None
+
+        async def send() -> None:
+            nonlocal method
+            method = await self._choose_start_method(station_id, socket_id)
+            if method == "charge_now":
+                await self.client.start_charge_now(socket_id)
+            else:
+                await self.client.start_charge(socket_id)
+
+        return await self._run_command(
+            "start", station_id, socket_id, done, send, method_of=lambda: method
+        )
+
+    async def _choose_start_method(self, station_id: int, socket_id: int) -> str:
+        """Which start the portal will accept on this socket, as the web app decides it.
+
+        The normal start if the socket's capabilities allow `START_CHARGE_FROM_SERVER`,
+        else "Charge now" if they allow `START_CHARGE_NOW`, else fail with the portal's
+        reason instead of sending a command it will refuse. If the capabilities cannot be
+        read, the normal start is sent and the portal has the last word.
+        """
+        socket = self.get_socket(station_id, socket_id)
+        try:
+            caps = await self.client.find_socket_capabilities(
+                station_id, socket_id, socket.status if socket else "UNKNOWN"
+            )
+        except (AuthError, RateLimitError):
+            raise
+        except DriivzError as err:
+            _LOGGER.debug("Could not read socket capabilities (%s); sending the normal start", err)
+            return "start"
+        self.capabilities = {**self.capabilities, **caps}
+        socket_caps = caps.get(socket_id)
+        if socket_caps is None:
+            return "start"
+        if OP_START_CHARGE in socket_caps.allowed:
+            return "start"
+        if OP_START_CHARGE_NOW in socket_caps.allowed:
+            return "charge_now"
+        reason = socket_caps.denied.get(OP_START_CHARGE) or socket_caps.denied.get(
+            OP_START_CHARGE_NOW
+        )
+        raise ApiError("START_NOT_ALLOWED", reason)
+
+    def start_allowed(self, socket_id: int) -> bool | None:
+        """Whether a start of either kind is allowed on the socket; None if not known."""
+        caps = self.capabilities.get(socket_id)
+        if caps is None:
+            return None
+        return OP_START_CHARGE in caps.allowed or OP_START_CHARGE_NOW in caps.allowed
+
+    def _schedule_capabilities(self, station_id: int) -> None:
+        if station_id in self._capabilities_pending:
+            return
+        self._capabilities_pending.add(station_id)
+        self.hass.async_create_task(
+            self._refresh_capabilities_later(station_id), f"mer capabilities {station_id}"
+        )
+
+    async def _refresh_capabilities_later(self, station_id: int) -> None:
+        try:
+            await asyncio.sleep(CAPABILITY_REFRESH_DELAY_SECONDS)
+            remaining = self.client.rate_limit_remaining
+            if remaining is not None and remaining <= COMMAND_RATE_LIMIT_FLOOR:
+                return
+            station = self.get_station(station_id)
+            if station is None or not station.sockets:
+                return
+            first = station.sockets[0]
+            try:
+                caps = await self.client.find_socket_capabilities(
+                    station_id, first.id, first.status
+                )
+            except DriivzError as err:
+                _LOGGER.debug("Could not read capabilities for charger %s: %s", station_id, err)
+                return
+            self.capabilities = {**self.capabilities, **caps}
+            if self.data is not None:
+                self._publish(self.data)
+        finally:
+            self._capabilities_pending.discard(station_id)
 
     async def async_stop_charge(self, station_id: int | None, socket_id: int) -> CommandResult:
         """Stop the charge on a socket and wait until the session is gone."""
@@ -563,7 +659,9 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 return RESULT_STOPPED
             return None
 
-        return await self._run_command("stop", station_id, socket_id, done)
+        return await self._run_command(
+            "stop", station_id, socket_id, done, lambda: self.client.stop_charge(socket_id)
+        )
 
     async def _run_command(
         self,
@@ -571,20 +669,27 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         station_id: int | None,
         socket_id: int,
         done: Callable[[Station | None, int | None], str | None],
+        send: Callable[[], Coroutine[Any, Any, None]],
+        method_of: Callable[[], str | None] = lambda: None,
     ) -> CommandResult:
         requested_at = dt_util.utcnow()
         try:
-            if command == "start":
-                await self.client.start_charge(socket_id)
-            else:
-                await self.client.stop_charge(socket_id)
+            await send()
         except DriivzError as err:
             self._record_command(
-                command, RESULT_REJECTED, station_id, socket_id, requested_at, str(err)
+                command,
+                RESULT_REJECTED,
+                station_id,
+                socket_id,
+                requested_at,
+                str(err),
+                method=method_of(),
             )
             raise
         result = await self._await_outcome(station_id, socket_id, done)
-        record = self._record_command(command, result, station_id, socket_id, requested_at)
+        record = self._record_command(
+            command, result, station_id, socket_id, requested_at, method=method_of()
+        )
         if result == RESULT_UNCONFIRMED:
             raise CommandUnconfirmed
         return record
@@ -669,6 +774,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         socket_id: int,
         requested_at: datetime,
         message: str | None = None,
+        method: str | None = None,
     ) -> CommandResult:
         station = self.get_station(station_id) if station_id is not None else None
         socket = _socket_of(station, socket_id)
@@ -682,6 +788,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             requested_at=requested_at,
             finished_at=dt_util.utcnow(),
             message=message,
+            method=method,
         )
         self._last_command = record
         if self.data is not None:
@@ -804,7 +911,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             return  # the broadcast covers every charger on the network
         stations = dict(self.data.stations)
         if push.station_id in stations:
-            stations[push.station_id] = stations[push.station_id].with_push(push)
+            before = stations[push.station_id]
+            stations[push.station_id] = before.with_push(push)
+            if _socket_statuses(before) != _socket_statuses(stations[push.station_id]):
+                self._schedule_capabilities(push.station_id)
         # A session whose socket left the charging states is over; the next poll fills
         # in the history, but the entities should not claim you are charging meanwhile.
         if (
@@ -842,6 +952,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         )
         self._publish(replace(self.data, active=updated))
         self._push_event.set()
+
+
+def _socket_statuses(station: Station) -> tuple[tuple[int, str], ...]:
+    return tuple((s.id, s.status) for s in station.sockets)
 
 
 def _socket_of(station: Station | None, socket_id: int) -> Socket | None:

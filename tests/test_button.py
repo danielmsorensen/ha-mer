@@ -300,3 +300,97 @@ async def test_command_and_poll_entities_are_diagnostic(
     ):
         entity_id = registry.async_get_entity_id(domain, DOMAIN, f"{eid}_{key}")
         assert registry.async_get(entity_id).entity_category == "diagnostic", key
+
+
+def caps(allowed: set[str], denied: dict[str, str] | None = None):
+    from custom_components.mer.driivz.models import SocketCapabilities
+
+    return SocketCapabilities(allowed=frozenset(allowed), denied=denied or {})
+
+
+async def test_start_uses_normal_start_when_allowed(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    mock_client.find_socket_capabilities.return_value = {
+        11243: caps({"START_CHARGE_FROM_SERVER"}, {"START_CHARGE_NOW": "INVALID_CARD"})
+    }
+    mock_client.find_stations_by_ids.return_value = with_socket_status(
+        stations_from_fixture("stations_by_ids.json"), 11243, "CHARGING"
+    )
+    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
+    await hass.async_block_till_done()
+    mock_client.start_charge.assert_awaited_once_with(11243)
+    mock_client.start_charge_now.assert_not_awaited()
+    last = state_by_unique_id(hass, "sensor", f"{eid}_account_last_command")
+    assert last.attributes["method"] == "start"
+
+
+async def test_start_uses_charge_now_when_only_that_is_allowed(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    mock_client.find_socket_capabilities.return_value = {11243: caps({"START_CHARGE_NOW"})}
+    mock_client.find_stations_by_ids.return_value = with_socket_status(
+        stations_from_fixture("stations_by_ids.json"), 11243, "CHARGING"
+    )
+    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
+    await hass.async_block_till_done()
+    mock_client.start_charge_now.assert_awaited_once_with(11243)
+    mock_client.start_charge.assert_not_awaited()
+    assert (
+        state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").attributes["method"]
+        == "charge_now"
+    )
+
+
+async def test_start_refused_up_front_with_the_portals_reason(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Neither start allowed at press time: fail with the reason, send nothing."""
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    mock_client.find_socket_capabilities.return_value = {
+        11243: caps(set(), {"START_CHARGE_NOW": "INVALID_CARD"})
+    }
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
+    assert "START_NOT_ALLOWED" in str(excinfo.value) and "INVALID_CARD" in str(excinfo.value)
+    mock_client.start_charge.assert_not_awaited()
+    mock_client.start_charge_now.assert_not_awaited()
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").state == "rejected"
+
+
+async def test_start_falls_back_to_normal_start_when_capabilities_unreadable(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    from custom_components.mer.driivz.exceptions import DriivzConnectionError
+
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    mock_client.find_socket_capabilities.side_effect = DriivzConnectionError("down")
+    mock_client.find_stations_by_ids.return_value = with_socket_status(
+        stations_from_fixture("stations_by_ids.json"), 11243, "CHARGING"
+    )
+    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
+    await hass.async_block_till_done()
+    mock_client.start_charge.assert_awaited_once_with(11243)
+
+
+async def test_start_button_availability_follows_capabilities(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Read at setup and after a status change; a free socket with no start allowed greys out."""
+    mock_client.find_socket_capabilities.return_value = {
+        11243: caps(set(), {"START_CHARGE_NOW": "INVALID_CARD"}),
+        11244: caps({"START_CHARGE_FROM_SERVER"}),
+    }
+    await setup_integration(hass, mock_config_entry)
+    await hass.async_block_till_done()
+    eid = mock_config_entry.entry_id
+    state = lambda uid: hass.states.get(entity_id_for(hass, uid)).state  # noqa: E731
+    assert mock_client.find_socket_capabilities.await_count >= 1
+    assert state(f"{eid}_socket_11243_start_charge") == "unavailable"  # free, but not for you
+    assert state(f"{eid}_socket_11244_start_charge") != "unavailable"

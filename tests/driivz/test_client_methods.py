@@ -351,3 +351,44 @@ async def test_find_transactions_sorted_newest_first(
         "filterByStartedOnTo": int(end.timestamp() * 1000),
         "filterByMemberId": 123456,
     }
+
+
+async def test_find_socket_capabilities_parses_both_sockets(
+    client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    path = "stationFacade/getStationCapabilitiesAndValidate"
+    aioclient_mock.post(
+        url(path),
+        json={
+            "errors": [],
+            "success": True,
+            "data": {
+                "allowedSocketOperations": {
+                    "11243": ["GET_CURRENT_STATE", "START_CHARGE_FROM_SERVER"],
+                    "11244": ["STOP_CHARGE_FROM_SERVER"],
+                },
+                "denySocketOperations": {
+                    "11243": {"START_CHARGE_NOW": "INVALID_CARD"},
+                    "11244": {"START_CHARGE_NOW": "INVALID_CARD"},
+                },
+            },
+        },
+    )
+    caps = await client.find_socket_capabilities(6042, 11243, "AVAILABLE")
+    assert "START_CHARGE_FROM_SERVER" in caps[11243].allowed
+    assert caps[11243].denied == {"START_CHARGE_NOW": "INVALID_CARD"}
+    assert caps[11244].allowed == frozenset({"STOP_CHARGE_FROM_SERVER"})
+    assert _calls(aioclient_mock, "POST", path)[0][2] == {
+        "stationId": "6042",
+        "stationSocketId": "11243",
+        "socketStatus": "AVAILABLE",
+    }
+
+
+async def test_start_charge_now_posts_socket(
+    client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    path = "stationFacade/startChargeNow"
+    aioclient_mock.post(url(path), json=load_json_fixture("start_charge_pending.json"))
+    await client.start_charge_now(11243)
+    assert _calls(aioclient_mock, "POST", path)[0][2] == {"stationSocketId": "11243"}

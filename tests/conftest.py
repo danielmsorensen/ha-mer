@@ -45,6 +45,13 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     return
 
 
+@pytest.fixture(autouse=True)
+def instant_capability_refresh() -> Generator[None]:
+    """Capability re-reads normally wait a few seconds to batch status changes."""
+    with patch("custom_components.mer.coordinator.CAPABILITY_REFRESH_DELAY_SECONDS", 0):
+        yield
+
+
 def site_subentry(station_ids: list[int]) -> ConfigSubentryData:
     """The NETPark site subentry monitoring the given chargers, as the flow stores it."""
     return ConfigSubentryData(
@@ -121,6 +128,9 @@ def mock_client() -> Generator[MagicMock]:
             )
         )
         client.start_charge = AsyncMock()
+        client.start_charge_now = AsyncMock()
+        # Unknown by default, so availability falls back to the socket status.
+        client.find_socket_capabilities = AsyncMock(return_value={})
         # No push channel unless a test provides one; the loop then backs off quietly.
         client.connect_push = AsyncMock(side_effect=DriivzConnectionError("no push in tests"))
         client.stop_charge = AsyncMock()
