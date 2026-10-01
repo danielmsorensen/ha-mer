@@ -101,7 +101,7 @@ async def test_find_stations_in_bounds(
 ) -> None:
     path = "stationFacade/findStationsInBounds"
     aioclient_mock.post(url(path), json=load_json_fixture("stations_in_bounds.json"))
-    stations = await client.find_stations_in_bounds(Bounds.around(54.67, -1.45))
+    stations = await client.find_stations_in_bounds(Bounds.around(51.50, -0.12))
     assert [s.id for s in stations] == [6042, 6041, 17886]
     assert stations[1].status == "CHARGING"
 

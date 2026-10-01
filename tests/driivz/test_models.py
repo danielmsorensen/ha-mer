@@ -21,11 +21,11 @@ from tests.helpers import load_json_fixture
 
 def test_clean_caption_strips_prefix_and_code() -> None:
     assert (
-        clean_caption("[RESTRICTED ACCESS] (MER-FS-AD00457) Business Durham - NETPark 1 - Plexus")
-        == "Business Durham - NETPark 1 - Plexus"
+        clean_caption("[RESTRICTED ACCESS] (MER-FS-EX00004) Riverside - Bay 1 - Charger C")
+        == "Riverside - Bay 1 - Charger C"
     )
     assert (
-        clean_caption("Kings College London - Great Dover Street Apartments (MER-FS-AC00264)")
+        clean_caption("Kings College London - Great Dover Street Apartments (MER-FS-EX00005)")
         == "Kings College London - Great Dover Street Apartments"
     )
     assert clean_caption("GB*B3V*EMERUKAD00057*1") == "GB*B3V*EMERUKAD00057*1"
@@ -80,12 +80,12 @@ def test_active_transaction_prefers_an_absolute_start_when_one_is_sent() -> None
 
 
 def test_bounds() -> None:
-    b = Bounds.around(54.67043, -1.45045)
+    b = Bounds.around(51.5000, -0.1200)
     assert b.to_dict() == {
-        "northEastLat": 54.67343,
-        "northEastLng": -1.44745,
-        "southWestLat": 54.66743,
-        "southWestLng": -1.45345,
+        "northEastLat": 51.503,
+        "northEastLng": -0.117,
+        "southWestLat": 51.497,
+        "southWestLng": -0.123,
     }
     assert Bounds.UK.to_dict()["northEastLat"] == 61.0
 
@@ -94,11 +94,11 @@ def test_site_from_dict() -> None:
     raw = load_json_fixture("sites_in_bounds.json")["data"][0]
     site = Site.from_dict(raw)
     assert site.id == 2877
-    assert site.name == "Durham County Council - Business Durham NETPark"
+    assert site.name == "Example Council - Riverside Business Park"
     assert site.status == "AVAILABLE"
     assert site.socket_count == 8
     assert site.access_level == "PUBLIC"
-    assert site.latitude == 54.67043
+    assert site.latitude == 51.5000
     assert site.charging_speed == "SEMI_FAST"
 
 
@@ -106,12 +106,12 @@ def test_station_detail_from_dict() -> None:
     raw = load_json_fixture("station_6042.json")["data"]
     station = Station.from_dict(raw)
     assert station.id == 6042
-    assert station.display_name == "Business Durham - NETPark 3 - Explorer 1"
+    assert station.display_name == "Riverside - Bay 3 - Charger A"
     assert station.is_restricted is False
     assert station.site_id == 2877
-    assert station.identity_key == "MER-FS-AD00137"
+    assert station.identity_key == "MER-FS-EX00001"
     assert station.model_name == "Eve Double Pro-line"
-    assert station.owner_name == "Durham County Council"
+    assert station.owner_name == "Example Council"
     assert station.status == "AVAILABLE"
     assert [s.name for s in station.sockets] == ["Left", "Right"]
     left = station.sockets[0]
@@ -176,14 +176,14 @@ def test_transaction_from_dict() -> None:
     tx = Transaction.from_dict(load_json_fixture("transactions.json")["data"][0])
     assert tx.id == 9084600
     assert tx.station_id == 6041
-    assert tx.display_name == "Business Durham - NETPark 4 - Explorer 2"
+    assert tx.display_name == "Riverside - Bay 4 - Charger B"
     assert tx.started_at == datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
     assert tx.stopped_at == datetime(2026, 9, 16, 15, 27, 47, tzinfo=UTC)
     assert tx.duration_s == 17601
     assert tx.energy_kwh == 32.408
     assert tx.cost == 0
     assert tx.currency == "GBP"
-    assert tx.billing_plan_name == "Durham County Council - Netpark IP"
+    assert tx.billing_plan_name == "Example Council - Staff Plan"
 
 
 def test_session_estimate_reads_the_real_payload() -> None:

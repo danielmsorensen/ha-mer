@@ -37,14 +37,14 @@ async def test_station_and_socket_sensors(
     assert status.state == "available"
     assert status.attributes["device_class"] == "enum"
     assert "charging" in status.attributes["options"]
-    assert status.name == "Business Durham - NETPark 3 - Explorer 1 Status"
+    assert status.name == "Riverside - Bay 3 - Charger A Status"
 
     charging = state_by_unique_id(hass, "sensor", f"{eid}_station_6041_status")
     assert charging.state == "charging"
 
     left = state_by_unique_id(hass, "sensor", f"{eid}_socket_11241_status")
     assert left.state == "charging"
-    assert left.name == "Business Durham - NETPark 4 - Explorer 2 Left status"
+    assert left.name == "Riverside - Bay 4 - Charger B Left status"
     right = state_by_unique_id(hass, "sensor", f"{eid}_socket_11242_status")
     assert right.state == "available"
 
@@ -140,7 +140,7 @@ async def test_aggregate_count_sensors(
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    # Explorer 1: 2 available; Explorer 2: 1 charging + 1 available
+    # Charger A: 2 available; Charger B: 1 charging + 1 available
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_available_sockets").state == "3"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_sockets_in_use").state == "1"
     aggregate = state_by_unique_id(hass, "sensor", f"{eid}_account_available_sockets")
@@ -174,7 +174,7 @@ async def test_account_sensors_idle(
     last_started = state_by_unique_id(hass, "sensor", f"{eid}_account_last_started")
     assert last_started.state == "2026-09-16T10:34:26+00:00"
     assert last_started.attributes["device_class"] == "timestamp"
-    assert last_started.attributes["station"] == "Business Durham - NETPark 4 - Explorer 2"
+    assert last_started.attributes["station"] == "Riverside - Bay 4 - Charger B"
 
     # No session anywhere: session sensors are unavailable, not unknown, since there is
     # nothing to report rather than a missing value.
@@ -200,8 +200,8 @@ async def test_account_sensors_charging(
     expected_started = (now - timedelta(milliseconds=953622)).isoformat(timespec="seconds")
 
     session = state_by_unique_id(hass, "sensor", f"{eid}_account_active_session")
-    assert session.state == "Business Durham - NETPark 4 - Explorer 2 Right"
-    assert session.attributes["charger"] == "Business Durham - NETPark 4 - Explorer 2"
+    assert session.state == "Riverside - Bay 4 - Charger B Right"
+    assert session.attributes["charger"] == "Riverside - Bay 4 - Charger B"
     assert session.attributes["socket"] == "Right"
     assert session.attributes["socket_id"] == 11242
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_energy").state == "1.606"
@@ -264,7 +264,7 @@ async def test_price_from_tariff_without_kwh_component(
     """
     live_price = {
         "billingPlanId": 3465,
-        "billingPlanCode": "DCC IP",
+        "billingPlanCode": "EC STAFF",
         "currency": "GBP",
         "fixPrice": 0.0,
         "futureReservationFee": 0.0,
@@ -284,7 +284,7 @@ async def test_price_from_tariff_without_kwh_component(
     price = state_by_unique_id(hass, "sensor", f"{mock_config_entry.entry_id}_socket_11243_price")
     assert price.state == "0.0"
     assert price.attributes["unit_of_measurement"] == "GBP/kWh"
-    assert price.attributes["billing_plan"] == "DCC IP"
+    assert price.attributes["billing_plan"] == "EC STAFF"
     assert price.attributes["fixed_price"] == 0.0
 
 
@@ -357,7 +357,7 @@ async def test_active_session_price_on_own_charger(
     price = state_by_unique_id(hass, "sensor", f"{eid}_account_active_price")
     assert price.state == "0.0"
     assert price.attributes["unit_of_measurement"] == "GBP/kWh"
-    assert price.attributes["billing_plan"] == "Durham County Council - Netpark IP"
+    assert price.attributes["billing_plan"] == "Example Council - Staff Plan"
 
 
 async def test_session_on_charger_not_added(
@@ -370,14 +370,14 @@ async def test_session_on_charger_not_added(
             "stationId": 17886,
             "name": "CCS",
             "socketStatusId": "CHARGING",
-            "stationCaption": "(MER-FS-ABT0105) Business Durham NETPark - Expansion Space Car Park",
+            "stationCaption": "(MER-FS-EX00003) Riverside Business Park - Overflow Car Park",
         }
     )
     mock_client.find_last_active_charge_socket.return_value = public
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     session = state_by_unique_id(hass, "sensor", f"{eid}_account_active_session")
-    assert session.state.startswith("Business Durham NETPark - Expansion Space Car Park")
+    assert session.state.startswith("Riverside Business Park - Overflow Car Park")
     assert session.attributes["socket"] == "CCS"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_energy").state == "1.606"
     # The price came from that charger's detail, fetched once for the session.

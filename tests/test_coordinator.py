@@ -198,7 +198,7 @@ async def test_charging_cycle_fetches_session(
     assert active.socket_id == 11242
     assert active.station_id == 6041
     assert active.socket_name == "Right"
-    assert active.station_caption is not None and "Explorer 2" in active.station_caption
+    assert active.station_caption is not None and "Charger B" in active.station_caption
     assert active.transaction_id == 9088676
     assert active.energy_kwh == 1.606
     assert active.cost == 0.0

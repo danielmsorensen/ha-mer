@@ -63,7 +63,7 @@ belongs to the whole integration rather than to any one site.
 ## Entities
 
 The charger's model and identity key are on its device page (model and serial number). Names below are the entity's own name; the full entity name Home Assistant
-shows is "*device name* *entity name*", e.g. "Explorer 1 status" or "Mer
+shows is "*device name* *entity name*", e.g. "Charger A status" or "Mer
 account wallet balance".
 
 ### Charger (station) device

@@ -82,7 +82,7 @@ async def test_devices_hang_off_the_account(
     account = registry.async_get_device_by_identifier((DOMAIN, f"account_{entry_id}"), entry_id)
     assert account is not None
     assert station is not None
-    assert station.name == "Business Durham - NETPark 3 - Explorer 1"
+    assert station.name == "Riverside - Bay 3 - Charger A"
     assert station.model == "Eve Double Pro-line"
     assert station.via_device_id == account.id
     # No site device any more: account plus one device per charger.
@@ -147,7 +147,7 @@ async def test_migrates_per_charger_subentries_to_one_per_site(
             title=f"{name} ({SITE_NAME})",
             unique_id=f"station_{station_id}",
         )
-        for station_id, name in ((6042, "Explorer 1"), (6041, "Explorer 2"))
+        for station_id, name in ((6042, "Charger A"), (6041, "Charger B"))
     ]
     entry = MockConfigEntry(
         domain=DOMAIN,

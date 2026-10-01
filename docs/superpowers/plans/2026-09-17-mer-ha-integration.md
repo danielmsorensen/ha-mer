@@ -514,8 +514,8 @@ class ApiError(DriivzError):
 
 ```json
 {"errors":[],"success":true,"data":[
-{"id":2877,"deleted":false,"dirty":false,"managed":true,"fast":false,"siteId":2877,"dn":"Durham County Council - Business Durham NETPark","latitude":54.67043,"longitude":-1.45045,"ss":"AVAILABLE","im":true,"ns":8,"sal":"PUBLIC","hg":true,"imn":false,"mfr":false,"isn":false,"isf":false,"scs":"SEMI_FAST","cs":false},
-{"id":3796,"deleted":false,"dirty":false,"managed":true,"fast":true,"siteId":3796,"dn":"Business Durham NETPark - Expansion Space Car Park","latitude":54.6724801,"longitude":-1.4539477,"ss":"AVAILABLE","im":true,"ns":14,"sal":"PUBLIC","hg":true,"imn":false,"mfr":false,"isn":false,"isf":true,"scs":"FAST","cs":false},
+{"id":2877,"deleted":false,"dirty":false,"managed":true,"fast":false,"siteId":2877,"dn":"Example Council - Riverside Business Park","latitude":51.5000,"longitude":-0.1200,"ss":"AVAILABLE","im":true,"ns":8,"sal":"PUBLIC","hg":true,"imn":false,"mfr":false,"isn":false,"isf":false,"scs":"SEMI_FAST","cs":false},
+{"id":3796,"deleted":false,"dirty":false,"managed":true,"fast":true,"siteId":3796,"dn":"Riverside Business Park - Overflow Car Park","latitude":51.5021,"longitude":-0.1235,"ss":"AVAILABLE","im":true,"ns":14,"sal":"PUBLIC","hg":true,"imn":false,"mfr":false,"isn":false,"isf":true,"scs":"FAST","cs":false},
 {"id":1359,"deleted":false,"dirty":false,"managed":true,"fast":false,"siteId":1359,"dn":"Norton Hall","latitude":54.592408,"longitude":-1.310479,"ss":"AVAILABLE","im":true,"ns":2,"sal":"PUBLIC","hg":true,"imn":false,"mfr":false,"isn":false,"isf":false,"scs":"SEMI_FAST","cs":false}
 ]}
 ```
@@ -524,9 +524,9 @@ class ApiError(DriivzError):
 
 ```json
 {"errors":[],"success":true,"data":[
-{"id":6042,"caption":"(MER-FS-AD00137) Business Durham - NETPark 3 - Explorer 1","latitude":54.67043,"longitude":-1.45045,"stationStatusId":"AVAILABLE","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"canRegisterForNotifyWhenAvailable":false,"chargingSpeedId":"SLOW","overrideNextMaintenanceRecurrence":false,"stationSockets":[{"id":11243,"blocked":false,"deleted":false,"dirty":false,"rfidCardEnrollmentPending":false,"socketTariffsAreDirty":false},{"id":11244,"blocked":false,"deleted":false,"dirty":false,"rfidCardEnrollmentPending":false,"socketTariffsAreDirty":false}]},
-{"id":6041,"caption":"(MER-FS-AD01372) Business Durham - NETPark 4 - Explorer 2","latitude":54.67043,"longitude":-1.45045,"stationStatusId":"CHARGING","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"canRegisterForNotifyWhenAvailable":false,"chargingSpeedId":"SLOW","overrideNextMaintenanceRecurrence":false,"stationSockets":[{"id":11241,"blocked":false,"deleted":false,"dirty":false,"rfidCardEnrollmentPending":false,"socketTariffsAreDirty":false},{"id":11242,"blocked":false,"deleted":false,"dirty":false,"rfidCardEnrollmentPending":false,"socketTariffsAreDirty":false}]},
-{"id":17886,"caption":"(MER-FS-ABT0105) Business Durham NETPark - Expansion Space Car Park","latitude":54.6724801,"longitude":-1.4539477,"stationStatusId":"AVAILABLE","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"canRegisterForNotifyWhenAvailable":false,"chargingSpeedId":"FAST","overrideNextMaintenanceRecurrence":false,"stationSockets":[{"id":15028,"blocked":false,"deleted":false,"dirty":false,"rfidCardEnrollmentPending":false,"socketTariffsAreDirty":false}]}
+{"id":6042,"caption":"(MER-FS-EX00001) Riverside - Bay 3 - Charger A","latitude":51.5000,"longitude":-0.1200,"stationStatusId":"AVAILABLE","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"canRegisterForNotifyWhenAvailable":false,"chargingSpeedId":"SLOW","overrideNextMaintenanceRecurrence":false,"stationSockets":[{"id":11243,"blocked":false,"deleted":false,"dirty":false,"rfidCardEnrollmentPending":false,"socketTariffsAreDirty":false},{"id":11244,"blocked":false,"deleted":false,"dirty":false,"rfidCardEnrollmentPending":false,"socketTariffsAreDirty":false}]},
+{"id":6041,"caption":"(MER-FS-EX00002) Riverside - Bay 4 - Charger B","latitude":51.5000,"longitude":-0.1200,"stationStatusId":"CHARGING","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"canRegisterForNotifyWhenAvailable":false,"chargingSpeedId":"SLOW","overrideNextMaintenanceRecurrence":false,"stationSockets":[{"id":11241,"blocked":false,"deleted":false,"dirty":false,"rfidCardEnrollmentPending":false,"socketTariffsAreDirty":false},{"id":11242,"blocked":false,"deleted":false,"dirty":false,"rfidCardEnrollmentPending":false,"socketTariffsAreDirty":false}]},
+{"id":17886,"caption":"(MER-FS-EX00003) Riverside Business Park - Overflow Car Park","latitude":51.5021,"longitude":-0.1235,"stationStatusId":"AVAILABLE","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"canRegisterForNotifyWhenAvailable":false,"chargingSpeedId":"FAST","overrideNextMaintenanceRecurrence":false,"stationSockets":[{"id":15028,"blocked":false,"deleted":false,"dirty":false,"rfidCardEnrollmentPending":false,"socketTariffsAreDirty":false}]}
 ]}
 ```
 
@@ -534,8 +534,8 @@ class ApiError(DriivzError):
 
 ```json
 {"errors":[],"success":true,"data":[
-{"id":6042,"caption":"(MER-FS-AD00137) Business Durham - NETPark 3 - Explorer 1","latitude":54.67043,"longitude":-1.45045,"stationStatusId":"AVAILABLE","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"stationSockets":[{"id":11243,"socketStatusId":"AVAILABLE","maximumPower":7,"blocked":false,"deleted":false,"dirty":false},{"id":11244,"socketStatusId":"AVAILABLE","maximumPower":7,"blocked":false,"deleted":false,"dirty":false}]},
-{"id":6041,"caption":"(MER-FS-AD01372) Business Durham - NETPark 4 - Explorer 2","latitude":54.67043,"longitude":-1.45045,"stationStatusId":"CHARGING","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"stationSockets":[{"id":11241,"socketStatusId":"CHARGING","maximumPower":7,"blocked":false,"deleted":false,"dirty":false},{"id":11242,"socketStatusId":"AVAILABLE","maximumPower":7,"blocked":false,"deleted":false,"dirty":false}]}
+{"id":6042,"caption":"(MER-FS-EX00001) Riverside - Bay 3 - Charger A","latitude":51.5000,"longitude":-0.1200,"stationStatusId":"AVAILABLE","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"stationSockets":[{"id":11243,"socketStatusId":"AVAILABLE","maximumPower":7,"blocked":false,"deleted":false,"dirty":false},{"id":11244,"socketStatusId":"AVAILABLE","maximumPower":7,"blocked":false,"deleted":false,"dirty":false}]},
+{"id":6041,"caption":"(MER-FS-EX00002) Riverside - Bay 4 - Charger B","latitude":51.5000,"longitude":-0.1200,"stationStatusId":"CHARGING","comingSoon":false,"isManaged":true,"deleted":false,"dirty":false,"stationSockets":[{"id":11241,"socketStatusId":"CHARGING","maximumPower":7,"blocked":false,"deleted":false,"dirty":false},{"id":11242,"socketStatusId":"AVAILABLE","maximumPower":7,"blocked":false,"deleted":false,"dirty":false}]}
 ]}
 ```
 
@@ -543,18 +543,18 @@ class ApiError(DriivzError):
 
 ```json
 {"errors":[],"success":true,"data":{
-"addressAddress1":"Discovery Centre NETPark,","addressCity":"Sedgefield, Stockton-on-Tees","addressCountryId":234,"addressCountryIso2Code":"GB","addressCountryIso3Code":"GBR","addressCountryName":"United Kingdom","addressZipCode":"TS21 3FD",
-"canRegisterForNotifyWhenAvailable":false,"caption":"(MER-FS-AD00137) Business Durham - NETPark 3 - Explorer 1","chargingSpeedId":"SLOW","comingSoon":false,"deleted":false,"dirty":false,"id":6042,"identityKey":"MER-FS-AD00137","inMaintenance":false,"isManaged":true,"latitude":54.67043,"longitude":-1.45045,"markForReplacement":false,"offline":false,"openingTimes":[],"overrideNextMaintenanceRecurrence":false,"propertyId":2488,"showExternalCoupons":false,
-"siteDisplayName":"Durham County Council - Business Durham NETPark","siteHasGate":false,"siteId":2877,"siteName":"Durham County Council - Business Durham NETPark","siteStationAccessLevel":"PUBLIC","stationAccessLevelId":"PUBLIC","stationModelInstructionsVideoUrl":"gwDTMkE7Uq4","stationModelName":"Eve Double Pro-line","stationOwnerId":141,"stationOwnerName":"Durham County Council",
+"addressAddress1":"1 Example Way,","addressCity":"Anytown, Exampleshire","addressCountryId":234,"addressCountryIso2Code":"GB","addressCountryIso3Code":"GBR","addressCountryName":"United Kingdom","addressZipCode":"AB1 2CD",
+"canRegisterForNotifyWhenAvailable":false,"caption":"(MER-FS-EX00001) Riverside - Bay 3 - Charger A","chargingSpeedId":"SLOW","comingSoon":false,"deleted":false,"dirty":false,"id":6042,"identityKey":"MER-FS-EX00001","inMaintenance":false,"isManaged":true,"latitude":51.5000,"longitude":-0.1200,"markForReplacement":false,"offline":false,"openingTimes":[],"overrideNextMaintenanceRecurrence":false,"propertyId":2488,"showExternalCoupons":false,
+"siteDisplayName":"Example Council - Riverside Business Park","siteHasGate":false,"siteId":2877,"siteName":"Example Council - Riverside Business Park","siteStationAccessLevel":"PUBLIC","stationAccessLevelId":"PUBLIC","stationModelInstructionsVideoUrl":"gwDTMkE7Uq4","stationModelName":"Eve Double Pro-line","stationOwnerId":141,"stationOwnerName":"Example Council",
 "stationSockets":[
-{"blocked":false,"deleted":false,"dirty":false,"hasTeslaAdapter":false,"id":11243,"identityKey":"1","inMaintenance":false,"maximumPower":7,"name":"Left","reserved":false,"rfidCardEnrollmentPending":false,"showExternalCoupons":false,"siteDisplayName":"Durham County Council - Business Durham NETPark","socketPrices":[{"billingPlanCode":"DCC IP","billingPlanId":3465,"billingSpCurrencyCurrency":"GBP","billingSpCurrencyId":2,"currency":"GBP","deleted":false,"dirty":false,"futureReservationFee":0,"kwhPrice":0,"plugInMinuteRate":0,"socketType":"TYPE_2_MENNEKES","stationId":6042,"stationSocketId":11243,"transactionFee":0}],"socketStatusId":"AVAILABLE","socketTariffsAreDirty":false,"stationId":6042,"stationInMaintenance":false,"stationIsManaged":true,"stationModelSocketChargingInstructions":"--lang=en\n1.| Swipe to Start Charge;2.| Connect Cable","stationModelSocketChargingMode":"MODE3","stationModelSocketMaximumPower":22,"stationModelSocketSocketTypeId":"TYPE_2_MENNEKES","stationModelSocketVoltageType":"AC","teslaInMaintenance":false},
-{"blocked":false,"deleted":false,"dirty":false,"hasTeslaAdapter":false,"id":11244,"identityKey":"2","inMaintenance":false,"maximumPower":7,"name":"Right","reserved":false,"rfidCardEnrollmentPending":false,"showExternalCoupons":false,"siteDisplayName":"Durham County Council - Business Durham NETPark","socketPrices":[{"billingPlanCode":"DCC IP","billingPlanId":3465,"billingSpCurrencyCurrency":"GBP","billingSpCurrencyId":2,"currency":"GBP","deleted":false,"dirty":false,"futureReservationFee":0,"kwhPrice":0,"plugInMinuteRate":0,"socketType":"TYPE_2_MENNEKES","stationId":6042,"stationSocketId":11244,"transactionFee":0}],"socketStatusId":"AVAILABLE","socketTariffsAreDirty":false,"stationId":6042,"stationInMaintenance":false,"stationIsManaged":true,"stationModelSocketChargingInstructions":"--lang=en\n1.| Swipe to Start Charge;2.| Connect Cable","stationModelSocketChargingMode":"MODE3","stationModelSocketMaximumPower":22,"stationModelSocketSocketTypeId":"TYPE_2_MENNEKES","stationModelSocketVoltageType":"AC","teslaInMaintenance":false}
+{"blocked":false,"deleted":false,"dirty":false,"hasTeslaAdapter":false,"id":11243,"identityKey":"1","inMaintenance":false,"maximumPower":7,"name":"Left","reserved":false,"rfidCardEnrollmentPending":false,"showExternalCoupons":false,"siteDisplayName":"Example Council - Riverside Business Park","socketPrices":[{"billingPlanCode":"EC STAFF","billingPlanId":3465,"billingSpCurrencyCurrency":"GBP","billingSpCurrencyId":2,"currency":"GBP","deleted":false,"dirty":false,"futureReservationFee":0,"kwhPrice":0,"plugInMinuteRate":0,"socketType":"TYPE_2_MENNEKES","stationId":6042,"stationSocketId":11243,"transactionFee":0}],"socketStatusId":"AVAILABLE","socketTariffsAreDirty":false,"stationId":6042,"stationInMaintenance":false,"stationIsManaged":true,"stationModelSocketChargingInstructions":"--lang=en\n1.| Swipe to Start Charge;2.| Connect Cable","stationModelSocketChargingMode":"MODE3","stationModelSocketMaximumPower":22,"stationModelSocketSocketTypeId":"TYPE_2_MENNEKES","stationModelSocketVoltageType":"AC","teslaInMaintenance":false},
+{"blocked":false,"deleted":false,"dirty":false,"hasTeslaAdapter":false,"id":11244,"identityKey":"2","inMaintenance":false,"maximumPower":7,"name":"Right","reserved":false,"rfidCardEnrollmentPending":false,"showExternalCoupons":false,"siteDisplayName":"Example Council - Riverside Business Park","socketPrices":[{"billingPlanCode":"EC STAFF","billingPlanId":3465,"billingSpCurrencyCurrency":"GBP","billingSpCurrencyId":2,"currency":"GBP","deleted":false,"dirty":false,"futureReservationFee":0,"kwhPrice":0,"plugInMinuteRate":0,"socketType":"TYPE_2_MENNEKES","stationId":6042,"stationSocketId":11244,"transactionFee":0}],"socketStatusId":"AVAILABLE","socketTariffsAreDirty":false,"stationId":6042,"stationInMaintenance":false,"stationIsManaged":true,"stationModelSocketChargingInstructions":"--lang=en\n1.| Swipe to Start Charge;2.| Connect Cable","stationModelSocketChargingMode":"MODE3","stationModelSocketMaximumPower":22,"stationModelSocketSocketTypeId":"TYPE_2_MENNEKES","stationModelSocketVoltageType":"AC","teslaInMaintenance":false}
 ],"stationStatusId":"AVAILABLE"}}
 ```
 
-`tests/fixtures/station_6041.json`: copy of `station_6042.json` with `id` 6041, `identityKey` `MER-FS-AD01372`, caption `(MER-FS-AD01372) Business Durham - NETPark 4 - Explorer 2`, sockets `11241` ("Left", `socketStatusId` `CHARGING`) and `11242` ("Right", `AVAILABLE`), `stationId` 6041 everywhere, `stationStatusId` `CHARGING`.
+`tests/fixtures/station_6041.json`: copy of `station_6042.json` with `id` 6041, `identityKey` `MER-FS-EX00002`, caption `(MER-FS-EX00002) Riverside - Bay 4 - Charger B`, sockets `11241` ("Left", `socketStatusId` `CHARGING`) and `11242` ("Right", `AVAILABLE`), `stationId` 6041 everywhere, `stationStatusId` `CHARGING`.
 
-`tests/fixtures/station_17886.json`: copy of `station_6042.json` with `id` 17886, `identityKey` `MER-FS-ABT0105`, caption `(MER-FS-ABT0105) Business Durham NETPark - Expansion Space Car Park`, `siteId` 3796, `siteName`/`siteDisplayName` `Business Durham NETPark - Expansion Space Car Park`, `stationModelName` `Alpitronic HYC50`, one socket `15028` ("CCS", `AVAILABLE`, `maximumPower` 50, `stationModelSocketSocketTypeId` `TYPE_COMBO_GERMANY`, `stationModelSocketVoltageType` `DC`, `kwhPrice` 0.76).
+`tests/fixtures/station_17886.json`: copy of `station_6042.json` with `id` 17886, `identityKey` `MER-FS-EX00003`, caption `(MER-FS-EX00003) Riverside Business Park - Overflow Car Park`, `siteId` 3796, `siteName`/`siteDisplayName` `Riverside Business Park - Overflow Car Park`, `stationModelName` `Alpitronic HYC50`, one socket `15028` ("CCS", `AVAILABLE`, `maximumPower` 50, `stationModelSocketSocketTypeId` `TYPE_COMBO_GERMANY`, `stationModelSocketVoltageType` `DC`, `kwhPrice` 0.76).
 
 `tests/fixtures/last_active_idle.json`:
 
@@ -584,8 +584,8 @@ class ApiError(DriivzError):
 
 ```json
 {"errors":[],"success":true,"data":[
-{"billCorrupted":false,"billingPlanDisplayCode":"Durham County Council - Netpark IP","billingPlanName":"Durham County Council - Netpark IP","caption":"(MER-FS-AD01372) Business Durham - NETPark 4 - Explorer 2","chargeTransactionBillingStatus":"FINAL_COST","cost":0,"currency":"GBP","deleted":false,"dirty":false,"duration":"04:53:21","durationTime":17601,"id":9084600,"siteName":"Durham County Council - Business Durham NETPark","socketType":"TYPE_2_MENNEKES","startAccountNumber":1123456,"startCardCardType":"VIRTUAL","startInitiator":"MOBILE","startOn":1789554866000,"stationId":6041,"stoppedOn":1789572467000,"totalEnergy":32408},
-{"billCorrupted":false,"billingPlanDisplayCode":"Durham County Council - Netpark IP","billingPlanName":"Durham County Council - Netpark IP","caption":"(MER-FS-AD01372) Business Durham - NETPark 4 - Explorer 2","chargeTransactionBillingStatus":"FINAL_COST","cost":0,"currency":"GBP","deleted":false,"dirty":false,"duration":"04:48:30","durationTime":17310,"id":9075809,"siteName":"Durham County Council - Business Durham NETPark","socketType":"TYPE_2_MENNEKES","startAccountNumber":1123456,"startCardCardType":"VIRTUAL","startInitiator":"STATION","startOn":1789370485000,"stationId":6041,"stoppedOn":1789387795000,"totalEnergy":21808}
+{"billCorrupted":false,"billingPlanDisplayCode":"Example Council - Staff Plan","billingPlanName":"Example Council - Staff Plan","caption":"(MER-FS-EX00002) Riverside - Bay 4 - Charger B","chargeTransactionBillingStatus":"FINAL_COST","cost":0,"currency":"GBP","deleted":false,"dirty":false,"duration":"04:53:21","durationTime":17601,"id":9084600,"siteName":"Example Council - Riverside Business Park","socketType":"TYPE_2_MENNEKES","startAccountNumber":1123456,"startCardCardType":"VIRTUAL","startInitiator":"MOBILE","startOn":1789554866000,"stationId":6041,"stoppedOn":1789572467000,"totalEnergy":32408},
+{"billCorrupted":false,"billingPlanDisplayCode":"Example Council - Staff Plan","billingPlanName":"Example Council - Staff Plan","caption":"(MER-FS-EX00002) Riverside - Bay 4 - Charger B","chargeTransactionBillingStatus":"FINAL_COST","cost":0,"currency":"GBP","deleted":false,"dirty":false,"duration":"04:48:30","durationTime":17310,"id":9075809,"siteName":"Example Council - Riverside Business Park","socketType":"TYPE_2_MENNEKES","startAccountNumber":1123456,"startCardCardType":"VIRTUAL","startInitiator":"STATION","startOn":1789370485000,"stationId":6041,"stoppedOn":1789387795000,"totalEnergy":21808}
 ]}
 ```
 
@@ -637,11 +637,11 @@ from tests.helpers import load_json_fixture
 
 def test_clean_caption_strips_prefix_and_code() -> None:
     assert (
-        clean_caption("[RESTRICTED ACCESS] (MER-FS-AD00457) Business Durham - NETPark 1 - Plexus")
-        == "Business Durham - NETPark 1 - Plexus"
+        clean_caption("[RESTRICTED ACCESS] (MER-FS-EX00004) Riverside - Bay 1 - Charger C")
+        == "Riverside - Bay 1 - Charger C"
     )
     assert (
-        clean_caption("Kings College London - Great Dover Street Apartments (MER-FS-AC00264)")
+        clean_caption("Kings College London - Great Dover Street Apartments (MER-FS-EX00005)")
         == "Kings College London - Great Dover Street Apartments"
     )
     assert clean_caption("GB*B3V*EMERUKAD00057*1") == "GB*B3V*EMERUKAD00057*1"
@@ -663,12 +663,12 @@ def test_parse_start_time_accepts_int_or_dict() -> None:
 
 
 def test_bounds() -> None:
-    b = Bounds.around(54.67043, -1.45045)
+    b = Bounds.around(51.5000, -0.1200)
     assert b.to_dict() == {
-        "northEastLat": 54.67343,
-        "northEastLng": -1.44745,
-        "southWestLat": 54.66743,
-        "southWestLng": -1.45345,
+        "northEastLat": 51.503,
+        "northEastLng": -0.117,
+        "southWestLat": 51.497,
+        "southWestLng": -0.123,
     }
     assert Bounds.UK.to_dict()["northEastLat"] == 61.0
 
@@ -677,11 +677,11 @@ def test_site_from_dict() -> None:
     raw = load_json_fixture("sites_in_bounds.json")["data"][0]
     site = Site.from_dict(raw)
     assert site.id == 2877
-    assert site.name == "Durham County Council - Business Durham NETPark"
+    assert site.name == "Example Council - Riverside Business Park"
     assert site.status == "AVAILABLE"
     assert site.socket_count == 8
     assert site.access_level == "PUBLIC"
-    assert site.latitude == 54.67043
+    assert site.latitude == 51.5000
     assert site.charging_speed == "SEMI_FAST"
 
 
@@ -689,12 +689,12 @@ def test_station_detail_from_dict() -> None:
     raw = load_json_fixture("station_6042.json")["data"]
     station = Station.from_dict(raw)
     assert station.id == 6042
-    assert station.display_name == "Business Durham - NETPark 3 - Explorer 1"
+    assert station.display_name == "Riverside - Bay 3 - Charger A"
     assert station.is_restricted is False
     assert station.site_id == 2877
-    assert station.identity_key == "MER-FS-AD00137"
+    assert station.identity_key == "MER-FS-EX00001"
     assert station.model_name == "Eve Double Pro-line"
-    assert station.owner_name == "Durham County Council"
+    assert station.owner_name == "Example Council"
     assert station.status == "AVAILABLE"
     assert [s.name for s in station.sockets] == ["Left", "Right"]
     left = station.sockets[0]
@@ -759,14 +759,14 @@ def test_transaction_from_dict() -> None:
     tx = Transaction.from_dict(load_json_fixture("transactions.json")["data"][0])
     assert tx.id == 9084600
     assert tx.station_id == 6041
-    assert tx.display_name == "Business Durham - NETPark 4 - Explorer 2"
+    assert tx.display_name == "Riverside - Bay 4 - Charger B"
     assert tx.started_at == datetime(2026, 9, 16, 10, 34, 26, tzinfo=UTC)
     assert tx.stopped_at == datetime(2026, 9, 16, 15, 27, 47, tzinfo=UTC)
     assert tx.duration_s == 17601
     assert tx.energy_kwh == 32.408
     assert tx.cost == 0
     assert tx.currency == "GBP"
-    assert tx.billing_plan_name == "Durham County Council - Netpark IP"
+    assert tx.billing_plan_name == "Example Council - Staff Plan"
 
 
 def test_session_estimate_variants() -> None:
@@ -1706,7 +1706,7 @@ async def test_find_stations_in_bounds(client: DriivzDriverClient) -> None:
     path = "stationFacade/findStationsInBounds"
     with aioresponses() as m:
         m.post(url(path), payload=load_json_fixture("stations_in_bounds.json"))
-        stations = await client.find_stations_in_bounds(Bounds.around(54.67, -1.45))
+        stations = await client.find_stations_in_bounds(Bounds.around(51.50, -0.12))
     assert [s.id for s in stations] == [6042, 6041, 17886]
     assert stations[1].status == "CHARGING"
 
@@ -2113,7 +2113,7 @@ from custom_components.mer.driivz.models import (
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from tests.helpers import load_json_fixture, station_from_fixture, stations_from_fixture
 
-SITE_NAME = "Durham County Council - Business Durham NETPark"
+SITE_NAME = "Example Council - Riverside Business Park"
 
 
 @pytest.fixture(autouse=True)
@@ -2124,7 +2124,7 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
 
 @pytest.fixture
 def mock_config_entry() -> MockConfigEntry:
-    """A configured entry monitoring Explorer 1 and 2."""
+    """A configured entry monitoring Charger A and 2."""
     return MockConfigEntry(
         domain=DOMAIN,
         title=f"Mer - {SITE_NAME}",
@@ -2265,9 +2265,9 @@ async def test_devices_created_and_stale_station_removable(
     account = registry.async_get_device(
         identifiers={(DOMAIN, f"account_{mock_config_entry.entry_id}")}
     )
-    assert site is not None and site.name == "Durham County Council - Business Durham NETPark"
+    assert site is not None and site.name == "Example Council - Riverside Business Park"
     assert station is not None
-    assert station.name == "Business Durham - NETPark 3 - Explorer 1"
+    assert station.name == "Riverside - Bay 3 - Charger A"
     assert station.model == "Eve Double Pro-line"
     assert station.via_device_id == site.id
     assert account is not None
@@ -2845,7 +2845,7 @@ async def test_full_flow_creates_entry(hass: HomeAssistant, mock_client: MagicMo
     mock_client.login.assert_awaited_once()
 
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_SEARCH: "netpark"}
+        result["flow_id"], {CONF_SEARCH: "riverside"}
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "site_select"
@@ -2862,19 +2862,19 @@ async def test_full_flow_creates_entry(hass: HomeAssistant, mock_client: MagicMo
     # 17886 belongs to site 3796 and must be filtered out
     assert sorted(o["value"] for o in station_options) == ["6041", "6042"]
     assert {o["label"] for o in station_options} == {
-        "Business Durham - NETPark 3 - Explorer 1",
-        "Business Durham - NETPark 4 - Explorer 2",
+        "Riverside - Bay 3 - Charger A",
+        "Riverside - Bay 4 - Charger B",
     }
 
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_STATION_IDS: ["6042", "6041"]}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Mer - Durham County Council - Business Durham NETPark"
+    assert result["title"] == "Mer - Example Council - Riverside Business Park"
     assert result["data"] == {**CREDS, CONF_BASE_URL: DEFAULT_BASE_URL}
     assert result["options"] == {
         CONF_SITE_ID: 2877,
-        CONF_SITE_NAME: "Durham County Council - Business Durham NETPark",
+        CONF_SITE_NAME: "Example Council - Riverside Business Park",
         CONF_STATION_IDS: [6042, 6041],
         CONF_SCAN_INTERVAL: 60,
     }
@@ -2967,9 +2967,9 @@ async def test_options_change_stations(
         result["flow_id"], {"next_step_id": "site"}
     )
     assert result["step_id"] == "site"
-    assert result["data_schema"]({})[CONF_SEARCH] == "Durham County Council - Business Durham NETPark"
+    assert result["data_schema"]({})[CONF_SEARCH] == "Example Council - Riverside Business Park"
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_SEARCH: "Business Durham NETPark"}
+        result["flow_id"], {CONF_SEARCH: "Riverside Business Park"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_SITE_ID: "2877"}
@@ -3351,7 +3351,7 @@ class MerOptionsFlow(_SiteStationsMixin, OptionsFlow):
       },
       "site": {
         "title": "Find your charging site",
-        "description": "Type part of the site name as shown in the Mer app, e.g. NETPark.",
+        "description": "Type part of the site name as shown in the Mer app, e.g. Riverside.",
         "data": {
           "search": "Site name"
         }
@@ -3531,19 +3531,19 @@ async def test_station_and_socket_sensors(
     assert status.state == "available"
     assert status.attributes["device_class"] == "enum"
     assert "charging" in status.attributes["options"]
-    assert status.name == "Business Durham - NETPark 3 - Explorer 1 Status"
+    assert status.name == "Riverside - Bay 3 - Charger A Status"
 
     charging = state_by_unique_id(hass, "sensor", f"{eid}_station_6041_status")
     assert charging.state == "charging"
 
     identity = state_by_unique_id(hass, "sensor", f"{eid}_station_6042_identity_key")
-    assert identity.state == "MER-FS-AD00137"
+    assert identity.state == "MER-FS-EX00001"
     registry_entry = er.async_get(hass).async_get(identity.entity_id)
     assert registry_entry is not None and registry_entry.entity_category == er.EntityCategory.DIAGNOSTIC
 
     left = state_by_unique_id(hass, "sensor", f"{eid}_socket_11241_status")
     assert left.state == "charging"
-    assert left.name == "Business Durham - NETPark 4 - Explorer 2 Left status"
+    assert left.name == "Riverside - Bay 4 - Charger B Left status"
     right = state_by_unique_id(hass, "sensor", f"{eid}_socket_11242_status")
     assert right.state == "available"
 
@@ -3984,7 +3984,7 @@ apart: 953622 then 993382, a delta of 39760 ms. So the start time is `now - txDu
 `POST stationFacade/findCurrentTransactionBillingChargingEstimation` with form `socketId`:
 
 ```json
-{"errors":[],"success":true,"data":{"billingPlanDisplayCode":"Durham County Council - Netpark IP","cost":0,"currency":"GBP","customerDetailId":123456,"duration":953825,"rateEstimation":1.801,"receiveMemberNotification":false,"serviceProviderId":7,"totalKw":1.606}}
+{"errors":[],"success":true,"data":{"billingPlanDisplayCode":"Example Council - Staff Plan","cost":0,"currency":"GBP","customerDetailId":123456,"duration":953825,"rateEstimation":1.801,"receiveMemberNotification":false,"serviceProviderId":7,"totalKw":1.606}}
 ```
 
 Energy is `totalKw`, and despite the name it is **kWh delivered**, not instantaneous power:
@@ -3998,7 +3998,7 @@ already parses, and usefully includes the station's caption and the site name, s
 charger can be named without a second lookup:
 
 ```json
-{"errors":[],"success":true,"data":{"blocked":false,"deleted":false,"dirty":false,"hasTeslaAdapter":false,"id":11242,"identityKey":"2","ignoreStatusNotification":false,"inMaintenance":false,"maximumPower":7.4,"name":"Right","rfidCardEnrollmentPending":false,"siteAddressAddress1":"Discovery Centre NETPark,","siteAddressCity":"Sedgefield, Stockton-on-Tees","siteAddressCountryName":"United Kingdom","siteAddressZipCode":"TS21 3FD","siteDisplayName":"Durham County Council - Business Durham NETPark","socketStatusId":"CHARGING","socketTariffsAreDirty":false,"stationAddressAddress1":"Discovery Centre NETPark,","stationAddressCity":"Sedgefield, Stockton-on-Tees","stationCaption":"(MER-FS-AD01372) Business Durham - NETPark 4 - Explorer 2","stationId":6041,"stationIdentityKey":"MER-FS-AD01372","stationInMaintenance":false,"stationIsManaged":true,"stationModelSocketChargingInstructions":"--lang=en\n1.| Swipe to Start Charge;2.| Connect Cable\n##Swipe this Bar;Then Connect","stationModelSocketChargingMode":"MODE3","stationModelSocketMaximumPower":22,"stationModelSocketSocketTypeId":"TYPE_2_MENNEKES","stationModelSocketVoltageType":"AC","teslaInMaintenance":false}}
+{"errors":[],"success":true,"data":{"blocked":false,"deleted":false,"dirty":false,"hasTeslaAdapter":false,"id":11242,"identityKey":"2","ignoreStatusNotification":false,"inMaintenance":false,"maximumPower":7.4,"name":"Right","rfidCardEnrollmentPending":false,"siteAddressAddress1":"1 Example Way,","siteAddressCity":"Anytown, Exampleshire","siteAddressCountryName":"United Kingdom","siteAddressZipCode":"AB1 2CD","siteDisplayName":"Example Council - Riverside Business Park","socketStatusId":"CHARGING","socketTariffsAreDirty":false,"stationAddressAddress1":"1 Example Way,","stationAddressCity":"Anytown, Exampleshire","stationCaption":"(MER-FS-EX00002) Riverside - Bay 4 - Charger B","stationId":6041,"stationIdentityKey":"MER-FS-EX00002","stationInMaintenance":false,"stationIsManaged":true,"stationModelSocketChargingInstructions":"--lang=en\n1.| Swipe to Start Charge;2.| Connect Cable\n##Swipe this Bar;Then Connect","stationModelSocketChargingMode":"MODE3","stationModelSocketMaximumPower":22,"stationModelSocketSocketTypeId":"TYPE_2_MENNEKES","stationModelSocketVoltageType":"AC","teslaInMaintenance":false}}
 ```
 
 - [ ] **Step 1: Replace the three fixtures**
@@ -4233,7 +4233,7 @@ speaks the real shapes. Keep the `charging_socket` fixture, which now parses the
 
 In `tests/test_coordinator.py`, `test_charging_cycle_fetches_session` asserts on the session. Update
 it to the real values: socket 11242, station 6041, socket name `Right`, station caption containing
-`Explorer 2`, `transaction_id == 9088676`, `energy_kwh == 1.606`, `cost == 0`, a `started_at` that
+`Charger B`, `transaction_id == 9088676`, `energy_kwh == 1.606`, `cost == 0`, a `started_at` that
 is not None and is before `dt_util.utcnow()`, and `duration == timedelta(milliseconds=953825)`.
 Change the awaited-call assertions from `find_current_transaction_start_time` to
 `find_current_transaction`.
@@ -4350,11 +4350,11 @@ async def test_site_count_sensors(
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    # Explorer 1: 2 available; Explorer 2: 1 charging + 1 available
+    # Charger A: 2 available; Charger B: 1 charging + 1 available
     assert state_by_unique_id(hass, "sensor", f"{eid}_site_available_sockets").state == "3"
     assert state_by_unique_id(hass, "sensor", f"{eid}_site_sockets_in_use").state == "1"
     site_state = state_by_unique_id(hass, "sensor", f"{eid}_site_available_sockets")
-    assert site_state.name == "Durham County Council - Business Durham NETPark Available sockets"
+    assert site_state.name == "Example Council - Riverside Business Park Available sockets"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -4978,7 +4978,7 @@ be told a charger has freed up is an automation on the socket availability binar
 >    `"station_session_duration": { "name": "Session duration" }`.
 >
 > Test both halves against the captured session: the account sensors report socket `Right`,
-> charger `Business Durham - NETPark 4 - Explorer 2`, energy 1.606, cost 0 and a duration of
+> charger `Riverside - Bay 4 - Charger B`, energy 1.606, cost 0 and a duration of
 > 953.825 s; the charger-device sensors on 6041 report the same values while the ones on 6042 are
 > `unknown`.
 
@@ -5014,7 +5014,7 @@ async def test_account_sensors_idle(
     last_started = state_by_unique_id(hass, "sensor", f"{eid}_account_last_started")
     assert last_started.state == "2026-09-16T10:34:26+00:00"
     assert last_started.attributes["device_class"] == "timestamp"
-    assert last_started.attributes["station"] == "Business Durham - NETPark 4 - Explorer 2"
+    assert last_started.attributes["station"] == "Riverside - Bay 4 - Charger B"
 
 
 async def test_account_sensors_charging(
@@ -5027,7 +5027,7 @@ async def test_account_sensors_charging(
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     station = state_by_unique_id(hass, "sensor", f"{eid}_account_active_station")
-    assert station.state == "Business Durham - NETPark 4 - Explorer 2"
+    assert station.state == "Riverside - Bay 4 - Charger B"
     assert station.attributes["socket"] == "Left"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_energy").state == "12.345"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_active_cost").state == "0.0"
@@ -5378,7 +5378,7 @@ Sections, each 3–8 lines:
 1. What it is: unofficial HACS integration for Mer UK chargers via the Driivz driver portal; monitors chosen chargers' sockets, starts/stops charges, shows sessions and wallet.
 2. Disclaimer: unofficial, personal use, may break when Mer/Driivz change the portal; not affiliated.
 3. Install via HACS: *HACS → Integrations → ⋮ → Custom repositories → `https://github.com/<owner>/ha-mer`, category Integration → Install → restart HA*.
-4. Setup: *Settings → Devices & services → Add integration → Mer EV Charging*, then the three steps (credentials, site search e.g. "NETPark", tick chargers).
+4. Setup: *Settings → Devices & services → Add integration → Mer EV Charging*, then the three steps (credentials, site search e.g. "Riverside", tick chargers).
 5. Entities table copied from spec §3.4 (devices → entities → meaning).
 6. Options: poll interval 30–600 s, change chargers; reauth.
 7. Example automation: notify when `binary_sensor.<site>_any_socket_available` turns on between 07:00 and 09:30 on weekdays.
@@ -5395,7 +5395,7 @@ POST billingFacade/findAvailableBillingPlans                 json {}            
 POST customerFacade/findCustomerCars                         form {}            → vehicles
 POST customerFacade/findNotifications                        form {}            → notification preferences (stationEventType, isSms, isCellApp)
 POST stationFacade/findStationsByStationLandmarkOfCustomer   form {billingPlanId?} → favourites
-POST stationFacade/findCustomerReservations                  form {}            → reservations (empty; RESERVATION_IS_NOT_ALLOWED on NETPark)
+POST stationFacade/findCustomerReservations                  form {}            → reservations (empty; RESERVATION_IS_NOT_ALLOWED on Riverside)
 POST customerFacade/notifyMeWhenStationIsAvailable           form {stationId}
 POST customerFacade/isDriverSubscribedToNotifyMeWhenStationIsAvailable form {stationId}
 POST stationFacade/getStationCapabilitiesAndValidate         form {stationId, stationSocketId, socketStatus} → allowed/denied operations
@@ -5418,10 +5418,10 @@ Replace `danielmsorensen` placeholders in `manifest.json` and `README.md` with t
 
 - [ ] **Step 5: Live verification checklist (with the user)**
 
-1. Install via HACS custom repository on the live HA, restart, add the integration with the Mer UK account, search "NETPark", select Explorer 1 and 2.
+1. Install via HACS custom repository on the live HA, restart, add the integration with the Mer UK account, search "Riverside", select Charger A and 2.
 2. Confirm socket sensors match the portal map for both chargers; confirm `Any socket available`.
 3. Confirm `Wallet balance` and `Last session` values match the portal history.
-4. Ask the user for explicit go-ahead, then press **one** `start charge` on a free NETPark socket while they are at the charger, and verify: the button succeeds, the socket goes to `preparing`/`charging` within two polls, `Charging` turns on, `Active session energy` rises, `Stop charge` works.
+4. Ask the user for explicit go-ahead, then press **one** `start charge` on a free Riverside socket while they are at the charger, and verify: the button succeeds, the socket goes to `preparing`/`charging` within two polls, `Charging` turns on, `Active session energy` rises, `Stop charge` works.
 5. The three live-session shapes were captured from a real charge on 2026-09-17 and are already
    the fixtures (see Task 7a), so nothing needs recording here. Verify instead that the derived
    values look right in the running integration: the session duration should advance in step with

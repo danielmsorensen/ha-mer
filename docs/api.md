@@ -138,7 +138,7 @@ POST billingFacade/findAvailableBillingPlans                 json {}            
 POST customerFacade/findCustomerCars                         form {}            → vehicles
 POST customerFacade/findNotifications                        form {}            → notification preferences (stationEventType, isSms, isCellApp)
 POST stationFacade/findStationsByStationLandmarkOfCustomer   form {billingPlanId?} → favourites
-POST stationFacade/findCustomerReservations                  form {}            → reservations (empty; RESERVATION_IS_NOT_ALLOWED on NETPark)
+POST stationFacade/findCustomerReservations                  form {}            → reservations (empty; RESERVATION_IS_NOT_ALLOWED on Riverside)
 POST stationFacade/getStationCapabilitiesAndValidate         form {stationId, stationSocketId, socketStatus} → allowed/denied operations
 POST stationFacade/findPlacesByQuery / findPlaceDetails      (Google Places proxy)
 GET  configurationFacade/getServerConfiguration              → feature flags (authenticated)

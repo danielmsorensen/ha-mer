@@ -34,7 +34,7 @@ blueprint:
     sockets:
       name: Sockets, in order of preference
       description: >-
-        The socket status sensors of the sockets to offer, named like "Explorer 1 Left
+        The socket status sensors of the sockets to offer, named like "Charger A Left
         status" (pick the socket ones, not the charger's own "Status"). The first free
         one, in this order, is the one offered. Drag to reorder.
       selector:

@@ -11,8 +11,8 @@ not run by an agent: several steps need a real charger in front of you.
 1. Install the integration through HACS as a custom repository (see the
    [README](../README.md#installation)) and restart Home Assistant.
 2. Add the integration, sign in with your Mer account, search for your site
-   by name (e.g. "NETPark"), and select the chargers you want — for this
-   project, Explorer 1 and Explorer 2.
+   by name (e.g. "Riverside"), and select the chargers you want — for this
+   project, Charger A and Charger B.
 
 ## 2. Check monitoring against the portal
 

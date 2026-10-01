@@ -98,7 +98,7 @@ async def test_start_on_free_socket_waits_for_charging(
     last = state_by_unique_id(hass, "sensor", f"{eid}_account_last_command")
     assert last.state == "charging"
     assert last.attributes["command"] == "start"
-    assert last.attributes["charger"] == "Business Durham - NETPark 3 - Explorer 1"
+    assert last.attributes["charger"] == "Riverside - Bay 3 - Charger A"
     assert last.attributes["socket"] == "Left"
     assert [e["result"] for e in events] == ["charging"]
 

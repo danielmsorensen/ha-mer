@@ -12,8 +12,8 @@ so the client is written against Driivz conventions with a configurable base URL
 
 Primary user goals (v1):
 
-1. See whether specific chargers (e.g. "Business Durham - NETPark 3 - Explorer 1" and
-   "NETPark 4 - Explorer 2" at site "Durham County Council - Business Durham NETPark")
+1. See whether specific chargers (e.g. "Riverside - Bay 3 - Charger A" and
+   "Riverside 4 - Charger B" at site "Example Council - Riverside Business Park")
    are free right now, per socket, and whether any socket at the site is free.
 2. Start a charge on a chosen socket and stop the active charge.
 3. See the live session (energy, cost, start time) and the last completed session.
@@ -254,7 +254,7 @@ Unique ids: `<entry_id>_<device>_<key>`; socket entities use the socket id.
 | Device | Entity | Platform | Value |
 |---|---|---|---|
 | Station | `status` | sensor (enum) | `stationStatusId` lower-cased |
-| Station | `identity_key` | sensor (diagnostic) | e.g. `MER-FS-AD00137` |
+| Station | `identity_key` | sensor (diagnostic) | e.g. `MER-FS-EX00001` |
 | Socket | `<socket name> status` | sensor (enum) | `socketStatusId` |
 | Socket | `<socket name> available` | binary_sensor (no device class, icon `mdi:ev-station`) | `True` iff status == `AVAILABLE` |
 | Socket | `<socket name> price` | sensor | `kwhPrice` for the user's plan (first `socketPrices` entry), unit `GBP/kWh` |
@@ -295,7 +295,7 @@ unavailable when their station is missing from the latest response.
   registries.
 - Fixtures under `tests/fixtures/` are the sanitised captures from 2026-09-17:
   login page HTML (csrf meta), login success/failure JSON, `findSitesInBounds`,
-  `findStationsByIds`, `findStationById` (restricted NETPark station with prices),
+  `findStationsByIds`, `findStationById` (restricted Riverside station with prices),
   `findLastActiveChargeSocket` idle and (synthetic until confirmed) active,
   `findDriverChargeTransactionLogByView`, wallet, and `getStationCapabilitiesAndValidate`.
 - Client tests: csrf extraction, login form fields/headers, re-login-once on 403, envelope
@@ -307,8 +307,8 @@ unavailable when their station is missing from the latest response.
   `ConfigEntryAuthFailed` propagation, periodic wallet/history/detail refresh timing.
 - Entity tests: state mapping for every status, site aggregates, button success and
   failure, unavailability when a station disappears.
-- Manual verification with the real account: monitor Explorer 1 & 2, then one supervised
-  start/stop on a free NETPark socket (explicit user confirmation required before any
+- Manual verification with the real account: monitor Charger A & 2, then one supervised
+  start/stop on a free Riverside socket (explicit user confirmation required before any
   real start or stop).
 
 ## 5. Implementation phases

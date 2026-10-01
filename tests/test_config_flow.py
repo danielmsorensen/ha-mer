@@ -67,10 +67,10 @@ async def _start_change_chargers(hass: HomeAssistant, entry: MockConfigEntry):
     )
 
 
-async def _pick_netpark(hass: HomeAssistant, entry: MockConfigEntry):
+async def _pick_riverside(hass: HomeAssistant, entry: MockConfigEntry):
     result = await _start_add_charger(hass, entry)
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {CONF_SEARCH: "netpark"}
+        result["flow_id"], {CONF_SEARCH: "riverside"}
     )
     return await hass.config_entries.subentries.async_configure(
         result["flow_id"], {CONF_SITE_ID: "2877"}
@@ -177,7 +177,7 @@ async def test_add_chargers_creates_one_site_subentry(
     assert result["step_id"] == "user"
 
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {CONF_SEARCH: "netpark"}
+        result["flow_id"], {CONF_SEARCH: "riverside"}
     )
     assert result["step_id"] == "site_select"
     options = result["data_schema"].schema[CONF_SITE_ID].config["options"]
@@ -223,7 +223,7 @@ async def test_add_charger_at_existing_site_joins_its_subentry(
 ) -> None:
     entry = make_config_entry([6042])
     await setup_integration(hass, entry)
-    result = await _pick_netpark(hass, entry)
+    result = await _pick_riverside(hass, entry)
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {CONF_STATION_IDS: ["6041"]}
     )
@@ -273,7 +273,7 @@ async def test_add_charger_hides_already_added(hass: HomeAssistant, mock_client:
     await setup_integration(hass, entry)
     result = await _start_add_charger(hass, entry)
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {CONF_SEARCH: "netpark"}
+        result["flow_id"], {CONF_SEARCH: "riverside"}
     )
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {CONF_SITE_ID: "2877"}
@@ -295,7 +295,7 @@ async def test_add_charger_aborts_when_all_added(
     await setup_integration(hass, mock_config_entry)
     result = await _start_add_charger(hass, mock_config_entry)
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {CONF_SEARCH: "netpark"}
+        result["flow_id"], {CONF_SEARCH: "riverside"}
     )
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {CONF_SITE_ID: "2877"}
@@ -355,11 +355,11 @@ async def test_add_charger_can_go_back_a_step(hass: HomeAssistant, mock_client: 
     assert result["last_step"] is False  # frontend shows "Next"
 
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {CONF_SEARCH: "netpark"}
+        result["flow_id"], {CONF_SEARCH: "riverside"}
     )
     assert result["step_id"] == "site_select"
     assert result["last_step"] is False
-    assert result["description_placeholders"] == {"search": "netpark"}
+    assert result["description_placeholders"] == {"search": "riverside"}
     site_options = result["data_schema"].schema[CONF_SITE_ID].config["options"]
     assert site_options[-1]["value"] == SEARCH_AGAIN
 
@@ -368,10 +368,10 @@ async def test_add_charger_can_go_back_a_step(hass: HomeAssistant, mock_client: 
         result["flow_id"], {CONF_SITE_ID: SEARCH_AGAIN}
     )
     assert result["step_id"] == "user"
-    assert result["data_schema"]({})[CONF_SEARCH] == "netpark"
+    assert result["data_schema"]({})[CONF_SEARCH] == "riverside"
 
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {CONF_SEARCH: "netpark"}
+        result["flow_id"], {CONF_SEARCH: "riverside"}
     )
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {CONF_SITE_ID: "3796"}

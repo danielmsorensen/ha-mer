@@ -106,17 +106,15 @@ async def test_available_sockets_lists_free_sockets_with_start_buttons(
     assert state.attributes["total_sockets"] == 4
     assert state.attributes["chargers"] == 2
     free = state.attributes["available_sockets"]
-    # Explorer 1: both free; Explorer 2: Left charging, Right free.
+    # Charger A: both free; Charger B: Left charging, Right free.
     assert [(f["charger"], f["socket"]) for f in free] == [
-        ("Business Durham - NETPark 3 - Explorer 1", "Left"),
-        ("Business Durham - NETPark 3 - Explorer 1", "Right"),
-        ("Business Durham - NETPark 4 - Explorer 2", "Right"),
+        ("Riverside - Bay 3 - Charger A", "Left"),
+        ("Riverside - Bay 3 - Charger A", "Right"),
+        ("Riverside - Bay 4 - Charger B", "Right"),
     ]
     assert free[0]["station_id"] == 6042
     assert free[0]["socket_id"] == 11243
-    assert (
-        free[0]["start_button"] == "button.business_durham_netpark_3_explorer_1_left_start_charge"
-    )
+    assert free[0]["start_button"] == "button.riverside_bay_3_charger_a_left_start_charge"
     assert hass.states.get(free[0]["start_button"]) is not None
 
 
@@ -129,12 +127,9 @@ async def test_socket_status_names_its_charger_socket_and_start_button(
     await hass.async_block_till_done()
     eid = mock_config_entry.entry_id
     state = state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status")
-    assert state.attributes["charger"] == "Business Durham - NETPark 3 - Explorer 1"
+    assert state.attributes["charger"] == "Riverside - Bay 3 - Charger A"
     assert state.attributes["socket"] == "Left"
-    assert (
-        state.attributes["start_button"]
-        == "button.business_durham_netpark_3_explorer_1_left_start_charge"
-    )
+    assert state.attributes["start_button"] == "button.riverside_bay_3_charger_a_left_start_charge"
 
 
 async def test_session_here_names_the_socket(
@@ -158,8 +153,8 @@ async def test_charger_available_sockets_count(
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    # Explorer 1: both free; Explorer 2: Left charging, Right free.
-    explorer_1 = state_by_unique_id(hass, "sensor", f"{eid}_station_6042_available_sockets")
-    assert explorer_1.state == "2"
-    assert explorer_1.attributes["total_sockets"] == 2
+    # Charger A: both free; Charger B: Left charging, Right free.
+    charger_a = state_by_unique_id(hass, "sensor", f"{eid}_station_6042_available_sockets")
+    assert charger_a.state == "2"
+    assert charger_a.attributes["total_sockets"] == 2
     assert state_by_unique_id(hass, "sensor", f"{eid}_station_6041_available_sockets").state == "1"

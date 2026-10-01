@@ -31,11 +31,11 @@ from custom_components.mer.driivz.models import (
 )
 from tests.helpers import load_json_fixture, station_from_fixture, stations_from_fixture
 
-SITE_NAME = "Durham County Council - Business Durham NETPark"
+SITE_NAME = "Example Council - Riverside Business Park"
 SITE_ID = 2877
 STATION_NAMES = {
-    6042: "Business Durham - NETPark 3 - Explorer 1",
-    6041: "Business Durham - NETPark 4 - Explorer 2",
+    6042: "Riverside - Bay 3 - Charger A",
+    6041: "Riverside - Bay 4 - Charger B",
 }
 
 
@@ -53,7 +53,7 @@ def instant_capability_refresh() -> Generator[None]:
 
 
 def site_subentry(station_ids: list[int]) -> ConfigSubentryData:
-    """The NETPark site subentry monitoring the given chargers, as the flow stores it."""
+    """The Riverside site subentry monitoring the given chargers, as the flow stores it."""
     return ConfigSubentryData(
         data={CONF_SITE_ID: SITE_ID, CONF_SITE_NAME: SITE_NAME, CONF_STATION_IDS: station_ids},
         subentry_type=SUBENTRY_TYPE_SITE,
@@ -63,7 +63,7 @@ def site_subentry(station_ids: list[int]) -> ConfigSubentryData:
 
 
 def make_config_entry(station_ids: list[int]) -> MockConfigEntry:
-    """An account entry; the NETPark site subentry is present when station ids are given."""
+    """An account entry; the Riverside site subentry is present when station ids are given."""
     return MockConfigEntry(
         domain=DOMAIN,
         version=3,
@@ -81,7 +81,7 @@ def make_config_entry(station_ids: list[int]) -> MockConfigEntry:
 
 @pytest.fixture
 def mock_config_entry() -> MockConfigEntry:
-    """A configured account monitoring Explorer 1 and 2."""
+    """A configured account monitoring Charger A and 2."""
     return make_config_entry([6042, 6041])
 
 
