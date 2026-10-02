@@ -44,7 +44,10 @@ def socket_status_entity(hass: HomeAssistant, entry_id: str, socket_id: int) -> 
 
 
 async def setup_blueprint(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, socket_order: list[int]
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    socket_order: list[int],
+    tracker: str = "person.driver",
 ) -> list[dict[str, Any]]:
     """Integration, a Work zone, a person, a phone, and an automation from the blueprint."""
     await setup_integration(hass, mock_config_entry)
@@ -83,7 +86,7 @@ async def setup_blueprint(
                 "use_blueprint": {
                     "path": "mer/offer_free_charger.yaml",
                     "input": {
-                        "person": "person.driver",
+                        "tracker": tracker,
                         "zone": "zone.work",
                         "sockets": [socket_status_entity(hass, eid, s) for s in socket_order],
                         "notify_device": phone.id,
@@ -123,9 +126,8 @@ async def test_preview_sends_the_offer_for_the_first_free_socket_in_order(
     sent = await setup_blueprint(hass, mock_config_entry, [11241, 11242, 11243, 11244])
     await run_by_hand(hass)
     (offer,) = sent
-    assert offer["title"] == "Charger free: Riverside - Bay 4 - Charger B"
-    assert offer["message"].startswith("Right is free")
-    assert "3 of your sockets are free" in offer["message"]
+    assert offer["title"] == "Mer charger free"
+    assert offer["message"] == "Riverside - Bay 4 - Charger B"
     (action,) = offer["data"]["actions"]
     assert action == {"action": "MER_START_CHARGE", "title": "Start Right"}
     assert offer["data"]["action_data"]["start_button"].endswith("_right_start_charge")
@@ -141,7 +143,7 @@ async def test_preview_says_nothing_free_when_all_taken(
     sent = await setup_blueprint(hass, mock_config_entry, [11242, 11243])
     await run_by_hand(hass)
     (notice,) = sent
-    assert notice["title"] == "No charger free"
+    assert notice["title"] == "No Mer charger free"
 
 
 async def test_socket_freeing_up_only_notifies_in_the_zone(
@@ -163,12 +165,13 @@ async def test_socket_freeing_up_only_notifies_in_the_zone(
     await hass.async_block_till_done()
     hass.states.async_set("person.driver", "Work", WORK)
     # Walking back into the zone is itself an arrival, with the socket taken.
-    assert [n["title"] for n in sent] == ["No charger free"]
+    assert [n["title"] for n in sent] == ["No Mer charger free"]
     mock_client.find_stations_by_ids.return_value = busy(live, 11244, 11242)
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     arrival, offer = sent
-    assert offer["title"] == "Charger free: Riverside - Bay 3 - Charger A"
+    assert offer["title"] == "Mer charger free"
+    assert offer["message"] == "Riverside - Bay 3 - Charger A"
     assert offer["data"]["actions"][0]["title"] == "Start Left"
     assert offer["data"]["tag"] == arrival["data"]["tag"]  # replaces the earlier notice
 
@@ -186,3 +189,17 @@ async def test_tapping_start_presses_the_socket_button(
     await hass.async_block_till_done()
     mock_client.start_charge.assert_awaited_once_with(11243)
     assert sent[-1]["message"] == "Starting Riverside - Bay 3 - Charger A Left..."
+
+
+async def test_device_tracker_works_as_the_tracker(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """A car's tracker instead of a person: arriving in the zone sends the offer."""
+    sent = await setup_blueprint(hass, mock_config_entry, [11243], tracker="device_tracker.car")
+    hass.states.async_set("device_tracker.car", "not_home", AWAY)
+    await hass.async_block_till_done()
+    hass.states.async_set("device_tracker.car", "Work", WORK)
+    await hass.async_block_till_done()
+    (offer,) = sent
+    assert offer["title"] == "Mer charger free"
+    assert offer["data"]["actions"][0]["title"] == "Start Left"

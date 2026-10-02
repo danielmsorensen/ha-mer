@@ -1,30 +1,22 @@
 blueprint:
-  name: "Mer: offer a free charger when you arrive"
+  name: "Mer: Free charger notification"
   description: >-
-    When you arrive at a place (work, say) and are not charging, this tells you which of
-    your chosen sockets is free and offers a **Start** action on the notification. While
-    you stay there without charging, it does the same whenever a socket frees up. Tapping
-    Start presses that socket's start button; the account's "Last command" sensor and the
-    mer_command_result event carry the outcome.
-
-    Pick the sockets in order of preference: the first free one in your order is the one
-    offered. Run the automation by hand to preview what arriving would send right now;
-    its Start action is real. A start on a free socket makes the charger wait for the
-    cable, so tap Start when you are at the charger, or plug in first: the button stays
-    available while the socket is plugged in and waiting.
+    Notifies you of the first free socket, in your order of preference, when you arrive
+    and while you stay, with a button to start charging. Run it by hand to preview.
   domain: automation
   source_url: https://github.com/danielmsorensen/ha-mer/blob/main/blueprints/automation/mer/offer_free_charger.yaml
   author: danielmsorensen
   homeassistant:
     min_version: 2026.9.0
   input:
-    person:
-      name: Who
-      description: The person whose arrival triggers the offer.
+    tracker:
+      name: Who or what
+      description: A person, or a device tracker such as a car's, whose arrival triggers it.
       selector:
         entity:
           filter:
-            domain: person
+            - domain: person
+            - domain: device_tracker
     zone:
       name: Where
       description: The zone to watch for, for example a Work zone around the car park.
@@ -34,10 +26,7 @@ blueprint:
             domain: zone
     sockets:
       name: Sockets, in order of preference
-      description: >-
-        The socket status sensors of the sockets to offer, named like "Charger A Left
-        status" (pick the socket ones, not the charger's own "Status"). The first free
-        one, in this order, is the one offered. Drag to reorder.
+      description: The sockets' status sensors (not a charger's own "Status"). Drag to reorder.
       selector:
         entity:
           multiple: true
@@ -84,7 +73,7 @@ max_exceeded: silent
 triggers:
   - trigger: zone
     id: arrive
-    entity_id: !input person
+    entity_id: !input tracker
     zone: !input zone
     event: enter
   - trigger: state
@@ -119,10 +108,8 @@ variables:
   best_socket: "{{ state_attr(best, 'socket') if best else '' }}"
   # The two notifications, defined once and sent from one place below.
   offer:
-    title: "Charger free: {{ best_charger }}"
-    message: >-
-      {{ best_socket }} is free{% if free | count > 1 %}
-      ({{ free | count }} of your sockets are free){% endif %}. Start charging?
+    title: Mer charger free
+    message: "{{ best_charger }}"
     data:
       tag: "{{ tag }}"
       actions:
@@ -133,8 +120,8 @@ variables:
         start_button: "{{ state_attr(best, 'start_button') if best else '' }}"
         name: "{{ best_charger }} {{ best_socket }}"
   none_free:
-    title: No charger free
-    message: Every socket is taken. You will be told when one frees up.
+    title: No Mer charger free
+    message: You will be told when one frees up.
     data:
       tag: "{{ tag }}"
 
@@ -194,7 +181,7 @@ actions:
                     entity_id: !input charging
                     state: "off"
                   - condition: zone
-                    entity_id: !input person
+                    entity_id: !input tracker
                     zone: !input zone
         sequence:
           - if:

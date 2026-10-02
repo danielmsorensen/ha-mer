@@ -187,18 +187,16 @@ An automation blueprint ships with the repository. Import it with the
 button, or paste its URL into **Settings → Automations → Blueprints → Import
 blueprint**, then create an automation from it and fill in the fields.
 
-**Offer a free charger when you arrive.** Pick who, which zone (a Work zone
-around the car park, say), the sockets to offer **in order of preference**
-(their *socket* status sensors),
-and your phone. On arrival while not charging, it names the first free socket
-in your order and the notification carries a **Start** action; while you stay
-there without charging it does the same whenever a socket frees up, after it
-has been free for 30 seconds so a car swapping over does not trigger it. Tap
-Start and it presses that socket's start button, or tells you the socket has
-been taken. Once you are charging the offer is cleared. To see what it looks
-like, run the automation by hand: it sends whatever arriving would send right
-now, "Charger free" with a Start action, or "No charger free". That Start
-action is real.
+**Mer: Free charger notification.** Pick a person or device tracker (a car's,
+say), a zone such as a Work zone around the car park, the sockets to watch in
+order of preference (their *socket* status sensors), and your phone. When you
+arrive, and whenever a socket frees up while you are there and not charging, it
+sends **Mer charger free** with the charger's name and a **Start** button for
+the socket, for example "Start Right". Arriving with everything taken sends
+**No Mer charger free** instead. Tapping Start presses that socket's start
+button, or says it has been taken; once you are charging the notification is
+cleared. Run the automation by hand to preview what arriving would send right
+now; its Start button is real.
 
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fdanielmsorensen%2Fha-mer%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmer%2Foffer_free_charger.yaml)
 
