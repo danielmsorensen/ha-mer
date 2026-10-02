@@ -4,8 +4,8 @@ blueprint:
     When you arrive at a place (work, say) and are not charging, this tells you which of
     your chosen sockets is free and offers a **Start** action on the notification. While
     you stay there without charging, it does the same whenever a socket frees up. Tapping
-    Start presses that socket's start button; the outcome comes back through the "Mer:
-    report the outcome of a start or stop" blueprint.
+    Start presses that socket's start button; the account's "Last command" sensor and the
+    mer_command_result event carry the outcome.
 
     Pick the sockets in order of preference: the first free one in your order is the one
     offered. A start on a free socket makes the charger wait for the cable, so tap Start
@@ -142,8 +142,8 @@ actions:
                   message: "Starting {{ name }}..."
                   data:
                     tag: "{{ tag }}"
-              # Holds until the charger confirms; the outcome is reported by the
-              # companion blueprint.
+              # Holds until the charger confirms; the outcome lands on the account's
+              # "Last command" sensor and the mer_command_result event.
               - action: button.press
                 target:
                   entity_id: "{{ start_button }}"

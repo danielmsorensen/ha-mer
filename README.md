@@ -183,7 +183,7 @@ actions:
 
 ## Blueprints
 
-Two automation blueprints ship with the repository. Import each with the
+An automation blueprint ships with the repository. Import it with the
 button, or paste its URL into **Settings → Automations → Blueprints → Import
 blueprint**, then create an automation from it and fill in the fields.
 
@@ -199,14 +199,7 @@ been taken. Once you are charging the offer is cleared.
 
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fdanielmsorensen%2Fha-mer%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmer%2Foffer_free_charger.yaml)
 
-**Report the outcome of a start or stop.** Notifies the result of every start
-or stop made through the integration, from a notification tap, a dashboard or
-an automation: charging, ready to plug the cable in, stopped, rejected, or
-accepted but not yet confirmed.
-
-[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fdanielmsorensen%2Fha-mer%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmer%2Fcommand_outcome.yaml)
-
-Both work from entity attributes rather than names, so they do not care what
+It works from entity attributes rather than names, so they do not care what
 your chargers or sockets are called. Each socket's **status** sensor
 carries `charger`, `socket` and `start_button` attributes, and the account's
 **Available sockets** sensor lists every free socket the same way under
