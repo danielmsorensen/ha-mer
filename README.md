@@ -144,7 +144,9 @@ sends **Mer charger free** with the charger's name and a button such as **Start 
 - Tapping Start presses that socket's start button, or tells you the socket has been
   taken.
 - The notification clears once you are charging.
-- Running the automation by hand previews what arriving would send now. Its Start button
+- **Preview:** choose **Run actions** from the automation's ⋮ menu. It sends what
+  arriving would send right now, skipping the zone and charging checks. If nothing is
+  free it sends **No Mer charger free** even when that option is off. Its Start button
   is real.
 
 ### Your own automations

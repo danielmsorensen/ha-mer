@@ -2,7 +2,12 @@ blueprint:
   name: "Mer: Free charger notification"
   description: >-
     Notifies you of the first free socket, in your order of preference, when you arrive
-    and while you stay, with a button to start charging. Run it by hand to preview.
+    and while you stay, with a button to start charging.
+
+
+    **Preview:** once saved, choose **Run actions** from the automation's ⋮ menu to get
+    the notification arriving would send right now, wherever you are. Its Start button
+    is real.
   domain: automation
   source_url: https://github.com/danielmsorensen/ha-mer/blob/main/blueprints/automation/mer/offer_free_charger.yaml
   author: danielmsorensen
