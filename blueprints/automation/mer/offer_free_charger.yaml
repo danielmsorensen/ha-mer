@@ -8,9 +8,10 @@ blueprint:
     mer_command_result event carry the outcome.
 
     Pick the sockets in order of preference: the first free one in your order is the one
-    offered. A start on a free socket makes the charger wait for the cable, so tap Start
-    when you are at the charger, or plug in first: the button stays available while the
-    socket is plugged in and waiting.
+    offered. Run the automation by hand to preview what arriving would send right now;
+    its Start action is real. A start on a free socket makes the charger wait for the
+    cable, so tap Start when you are at the charger, or plug in first: the button stays
+    available while the socket is plugged in and waiting.
   domain: automation
   source_url: https://github.com/danielmsorensen/ha-mer/blob/main/blueprints/automation/mer/offer_free_charger.yaml
   author: danielmsorensen
@@ -106,20 +107,42 @@ variables:
   notify_device: !input notify_device
   notify_service: "notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}"
   notify_none_free: !input notify_none_free
+  # Why this run happened: a trigger id, or "preview" when run by hand (Home Assistant
+  # gives a manual run no trigger id).
+  run: "{{ trigger.id if trigger.id is defined else 'preview' }}"
   # Offers from this automation share one tag, so a newer offer replaces the older one
   # and it can be cleared once you are charging.
   tag: "mer_free_charger_{{ this.entity_id }}"
   free: "{{ sockets | select('is_state', 'available') | list }}"
   best: "{{ free[0] if free else none }}"
-  best_name: >-
-    {{ (state_attr(best, 'charger') ~ ' ' ~ state_attr(best, 'socket')) if best else '' }}
+  best_charger: "{{ state_attr(best, 'charger') if best else '' }}"
+  best_socket: "{{ state_attr(best, 'socket') if best else '' }}"
+  # The two notifications, defined once and sent from one place below.
+  offer:
+    title: "Charger free: {{ best_charger }}"
+    message: >-
+      {{ best_socket }} is free{% if free | count > 1 %}
+      ({{ free | count }} of your sockets are free){% endif %}. Start charging?
+    data:
+      tag: "{{ tag }}"
+      actions:
+        - action: MER_START_CHARGE
+          title: "Start {{ best_socket }}"
+      action_data:
+        automation: "{{ this.entity_id }}"
+        start_button: "{{ state_attr(best, 'start_button') if best else '' }}"
+        name: "{{ best_charger }} {{ best_socket }}"
+  none_free:
+    title: No charger free
+    message: Every socket is taken. You will be told when one frees up.
+    data:
+      tag: "{{ tag }}"
 
 actions:
   - choose:
       # ---- Start tapped on one of this automation's notifications ------------------
       - conditions:
-          - condition: trigger
-            id: start_tapped
+          - "{{ run == 'start_tapped' }}"
           - "{{ trigger.event.data.action_data.automation == this.entity_id }}"
         sequence:
           - variables:
@@ -151,8 +174,7 @@ actions:
 
       # ---- Charging has started: the offer is moot ----------------------------------
       - conditions:
-          - condition: trigger
-            id: charging_started
+          - "{{ run == 'charging_started' }}"
         sequence:
           - action: "{{ notify_service }}"
             data:
@@ -160,48 +182,31 @@ actions:
               data:
                 tag: "{{ tag }}"
 
-      # ---- Arrived, or a socket freed up while here: offer the best free socket -----
+      # ---- Arrived, a socket freed up while here, or a manual preview ---------------
+      # Real triggers only offer while you are in the zone and not charging; a preview
+      # always shows what arriving would send right now.
       - conditions:
-          - condition: trigger
-            id:
-              - arrive
-              - freed
-          - condition: state
-            entity_id: !input charging
-            state: "off"
-          - condition: zone
-            entity_id: !input person
-            zone: !input zone
-          - "{{ best is not none }}"
+          - "{{ run in ['arrive', 'freed', 'preview'] }}"
+          - or:
+              - "{{ run == 'preview' }}"
+              - and:
+                  - condition: state
+                    entity_id: !input charging
+                    state: "off"
+                  - condition: zone
+                    entity_id: !input person
+                    zone: !input zone
         sequence:
-          - action: "{{ notify_service }}"
-            data:
-              title: Charger free
-              message: >-
-                {{ best_name }} is free{% if free | count > 1 %}
-                ({{ free | count }} sockets free){% endif %}. Start charging?
-              data:
-                tag: "{{ tag }}"
-                actions:
-                  - action: MER_START_CHARGE
-                    title: "Start {{ best_name }}"
-                action_data:
-                  automation: "{{ this.entity_id }}"
-                  start_button: "{{ state_attr(best, 'start_button') }}"
-                  name: "{{ best_name }}"
-
-      # ---- Arrived and nothing is free ----------------------------------------------
-      - conditions:
-          - condition: trigger
-            id: arrive
-          - "{{ notify_none_free }}"
-          - condition: state
-            entity_id: !input charging
-            state: "off"
-        sequence:
-          - action: "{{ notify_service }}"
-            data:
-              title: No charger free
-              message: Every socket is taken. You will be told when one frees up.
-              data:
-                tag: "{{ tag }}"
+          - if:
+              - "{{ best is not none }}"
+            then:
+              - action: "{{ notify_service }}"
+                data: "{{ offer }}"
+            else:
+              # Nothing free: said on arrival (if enabled) and in a preview, never when
+              # a socket frees up, which by definition means one is free.
+              - if:
+                  - "{{ run == 'preview' or (run == 'arrive' and notify_none_free) }}"
+                then:
+                  - action: "{{ notify_service }}"
+                    data: "{{ none_free }}"

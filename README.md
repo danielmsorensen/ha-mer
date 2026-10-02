@@ -195,7 +195,10 @@ in your order and the notification carries a **Start** action; while you stay
 there without charging it does the same whenever a socket frees up, after it
 has been free for 30 seconds so a car swapping over does not trigger it. Tap
 Start and it presses that socket's start button, or tells you the socket has
-been taken. Once you are charging the offer is cleared.
+been taken. Once you are charging the offer is cleared. To see what it looks
+like, run the automation by hand: it sends whatever arriving would send right
+now, "Charger free" with a Start action, or "No charger free". That Start
+action is real.
 
 [![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fdanielmsorensen%2Fha-mer%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmer%2Foffer_free_charger.yaml)
 
