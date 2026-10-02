@@ -5,7 +5,9 @@ transcript — it is the reasoning behind choices that a future maintainer,
 including the author months from now, could not reconstruct from the code
 alone. Each item also records what it costs if it turns out to have been the
 wrong call, so re-opening a decision starts from a known price rather than a
-guess.
+guess. The undated sections come from the first build; the dated entries after them are
+appended in order, and a later entry supersedes an earlier one. The README describes
+current behaviour.
 
 ## Development environment
 
@@ -175,72 +177,26 @@ names, model, or serial yet, so its entity unique-ids would freeze wrong
 without this (verified empirically: omitting it broke entity-id assertions
 in six tests). Steady-state worst case is a constant 6+2N calls regardless
 of charger count; the one-time priming burst can exceed that, but only on
-user-initiated, infrequent events (setup/reload/options change), not on the
-recurring poll.
+user-initiated, infrequent events (setup, reload, adding or changing chargers), not on
+the recurring poll.
 
 ## Deferred and parked trade-offs
 
-Two decisions were explicitly parked rather than fixed, because both are
-refinements rather than defects:
+**Optional-endpoint failures degrade silently.** `_refresh_optional` swallows portal
+errors from the wallet, history and detail refreshes, so one broken endpoint cannot make
+every availability sensor unavailable. The cost is that a real permissions change on one
+of them shows only as a debug log and a stale sensor. Raising the log level after repeated
+failures would be a reasonable refinement.
 
-- **Optional-endpoint failures degrade silently.** `_refresh_optional`
-  swallows `ApiError` (a subclass of the client's general `DriivzError`)
-  along with other portal errors, so a genuine permissions change on an
-  optional endpoint (e.g. the wallet) shows up only as a debug log and a
-  stale sensor, not a visible error. This is the direct consequence of an
-  earlier fix that isolated optional refreshes so one broken endpoint can't
-  make every availability sensor unavailable — the alternative is the
-  failure that fix removed. A reasonable refinement would be to raise the
-  log level after repeated consecutive failures. Cost if wrong: a real
-  permissions or plan change at Mer looks like stale data rather than an
-  error.
-
-- **README doesn't mention the priming burst.** The polling section
-  describes steady-state one-charger-per-cycle behaviour but not that
-  setup/reload/options-change re-primes every charger in one cycle (the
-  code's own docstring does say this). Left as a known gap because it is a
-  one-sentence documentation clarification, not a load-bearing defect. Cost
-  if wrong: mild confusion for a user watching logs immediately after a
-  restart.
-
-**Deferred minor findings.** The final whole-branch review triaged
-twenty-one deferred minor findings accumulated across development and
-judged none of them blocking for merge. They cluster into a few themes,
-none of which affect correctness of shipped behaviour:
-
-- **Duplicated helper code** that could be consolidated later without
-  behaviour change — a shared `side_effect` test helper repeated across two
-  test files, a repeated reject-bool-then-coerce coercion pattern in
-  `driivz/models.py`, a repeated re-login guard condition in
-  `driivz/client.py` (this one *was* promoted to a real fix during the final
-  review, not left deferred).
-- **Missing test coverage for already-safe failure paths** — e.g. a charger
-  dropping out of the polled set mid-cycle (traced and confirmed to
-  under-count rather than over-claim availability), coordinator failure
-  propagating to entity unavailability (traced through
-  `CoordinatorEntity.available` and confirmed working), a `DriivzError` from
-  `stop_charge` itself (shares its wrapper with the already-tested start
-  path).
-- **Cosmetic/organizational** — `sensor.py` having grown to five sensor
-  families in one file with an obvious future split point, an inconsistent
-  callable name (`session_fn` vs. `value_fn`) on one sensor description, a
-  device-registry lookup repeated per entity that could be hoisted into
-  `async_setup_entry`.
-- **Narrow forward risks** with no live failure today — a fixture
-  (`station_17886.json`) that inherited AC-template fields on what is
-  otherwise a DC station, unread by any current test; `_plain`'s
-  diagnostics fallback passing an untested type (Enum/set/bytes) through to
-  `json.dumps` if one is ever introduced; a bootstrap script glob
-  (`scripts/bootstrap-dev`) that doesn't check whether it actually matched a
-  downloaded wheel before using the result, so a failed download surfaces as
-  a confusing error rather than a clear one.
-
-If a maintainer wants the exact list rather than the theme summary, it no
-longer exists anywhere durable — it lived only in the now-deleted scratch
-planning ledger. Treat the absence of detail here as a signal that the
-review judged each item genuinely minor, not as a gap to go looking for.
+**Deferred minor findings.** The first build's final review judged about twenty minor
+findings non-blocking. They are duplicated helpers, untested but traced-safe failure
+paths, cosmetic organisation such as `sensor.py`'s size, and narrow forward risks such as
+an unread DC fixture and an unchecked wheel glob in `scripts/bootstrap-dev`. The
+item-by-item list was not kept.
 
 ## 2026-09-23: chargers are config subentries; setup asks only for credentials
+
+*Per-charger subentries were replaced by per-site ones in the next entry.*
 
 **Decision.** Initial setup takes the e-mail and password and nothing else. Each
 monitored charger is a Home Assistant config *subentry* of type `charger` on the
@@ -299,9 +255,13 @@ rate limit, and carries exactly the socket status and pending-command flags need
 **Consequences.** Command polling costs up to 12 requests per press when the push
 channel is down; it stops early at rate-limit headroom 2. Wallet, history and details
 still come from the poll. Connection behaviour over many hours is untested; the loop
-assumes drops and reconnects, and the "Live updates" diagnostic sensor shows the state.
+assumes drops and reconnects, and the "Live status" diagnostic sensor (first called "Live
+updates") shows the state. A 3-minute silence watchdog was added later for connections that
+stay open but stop delivering.
 
 ## 2026-09-24: pushes must not reschedule the poll; session duration is a local ticker
+
+*The ticker was removed later the same day; see the next entry.*
 
 **Decision.** Pushed updates, command polls and command results are published through
 `MerCoordinator._publish`, which sets the data and notifies entities without touching
@@ -345,7 +305,7 @@ the free-socket list plus `total_sockets` and `chargers`. Each charger gets its 
 lookups go through `MerData.sessions` / `session_on_station` / `session_on_socket`, so
 multi-session support later only changes how `sessions` is filled. No "session power"
 sensor: `rateEstimation` is not live power (see docs/api.md) and energy steps too coarsely
-to derive one usefully.
+to derive one usefully. *The "no power sensor" part was reversed in the next entry.*
 
 ## 2026-09-24 (later): socket status replaces socket "available"; charging rate after all
 

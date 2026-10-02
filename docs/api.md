@@ -4,9 +4,8 @@ This documents the web API the Mer UK driver portal (`https://driver.uk.mer.eco`
 uses internally, as reverse-engineered from its own traffic on 2026-09-16/17. The
 portal is a white-label **Driivz** driver portal; nothing here is published or
 supported by Mer or Driivz, and any of it can change without notice. This
-integration talks to the endpoints in [Endpoints used in v1](#endpoints-used-in-v1)
-only; everything else is recorded here for completeness and for anyone extending
-the integration later.
+integration calls only the [endpoints used](#endpoints-used) and the
+[websocket](#websocket); the rest is recorded for anyone extending it.
 
 All endpoints live on the portal host. Responses are JSON envelopes:
 
@@ -65,7 +64,7 @@ a checked constraint. Anonymous access works for public station data; a
 logged-in session is required for restricted chargers' tariffs, sessions,
 history, wallet, and starting or stopping a charge.
 
-## Endpoints used in v1
+## Endpoints used
 
 | Purpose | Method / path | Body | Notes |
 |---|---|---|---|
@@ -74,7 +73,9 @@ history, wallet, and starting or stopping a charge.
 | Stations by id | `POST stationFacade/findStationsByIds` | JSON `{"filterByIds": [ids]}` | Same DTO as above but includes `stationSockets[].socketStatusId` and `maximumPower`. This is the integration's primary polling call. |
 | Station detail | `GET stationFacade/findStationById?stationId=&billingPlanId=` | query string | Full DTO: address, `identityKey`, `siteId`, `siteName`, `stationModelName`, `stationOwnerName`, `siteStationAccessLevel`, `stationSockets[]` with `id`, `name` (e.g. Left/Right), `identityKey`, `socketStatusId`, `maximumPower`, `stationModelSocketSocketTypeId`, `stationModelSocketVoltageType`, `socketPrices[{billingPlanId, billingPlanCode, kwhPrice, plugInMinuteRate, transactionFee, currency}]` |
 | Charging cards | `GET stationFacade/findCustomerCardsBySocketId?stationSocketId=` | query string | `data.cards[{number, type}]`: the account's cards usable on that socket (one `VIRTUAL` card on a typical app account) |
-| Start charge | `POST stationFacade/approveStartCharge` | form `stationSocketId`, `cardNumber` (the first card; omitted when there is none) | Success is `data.operationStatus == "PENDING"`; the charger then waits for the cable to be connected. This is the web app's normal "connect and swipe" start. Not `startChargeNow`: that is the separate "Charge now" button, shown only when the socket's allowed operations include `START_CHARGE_NOW`, and the portal refuses it for a normal start (found live 2026-09-28, the first real start through the integration) |
+| Start capabilities | `POST stationFacade/getStationCapabilitiesAndValidate` | form `stationId`, `stationSocketId`, `socketStatus` | `allowedSocketOperations` / `denySocketOperations` (with reasons) for every socket on the charger. `START_CHARGE_FROM_SERVER` permits the normal start, `START_CHARGE_NOW` "Charge now"; `STOP_CHARGE_FROM_SERVER` is allowed only on your own session. The app's virtual card is denied `START_CHARGE_NOW` with `INVALID_CARD` |
+| Start charge | `POST stationFacade/approveStartCharge` | form `stationSocketId`, `cardNumber` (the first card; omitted when there is none) | The web app's normal "connect and swipe" start. Success is `data.operationStatus == "PENDING"`; the charger then waits for the cable |
+| Charge now | `POST stationFacade/startChargeNow` | form `stationSocketId` | The web app's separate "Charge now" button, used only when capabilities allow `START_CHARGE_NOW`; refused for a normal start (found live 2026-09-28). Untested live |
 | Stop charge | `POST stationFacade/stopCharge` | form `stationSocketId` | |
 | Active session | `POST stationFacade/findLastActiveChargeSocket` | form, empty | `data` is absent/null when idle; when charging, returns the active socket's DTO, including `stationCaption` |
 | Session transaction | `POST stationFacade/findCurrentTransactionStartTime` | form `stationSocketId` | See [`findCurrentTransactionStartTime` returns no start time](#findcurrenttransactionstarttime-returns-no-start-time) below |
@@ -139,11 +140,9 @@ POST customerFacade/findCustomerCars                         form {}            
 POST customerFacade/findNotifications                        form {}            → notification preferences (stationEventType, isSms, isCellApp)
 POST stationFacade/findStationsByStationLandmarkOfCustomer   form {billingPlanId?} → favourites
 POST stationFacade/findCustomerReservations                  form {}            → reservations (empty; RESERVATION_IS_NOT_ALLOWED on Riverside)
-POST stationFacade/getStationCapabilitiesAndValidate         form {stationId, stationSocketId, socketStatus} → allowed/denied operations
 POST stationFacade/findPlacesByQuery / findPlaceDetails      (Google Places proxy)
 GET  configurationFacade/getServerConfiguration              → feature flags (authenticated)
 GET  configurationFacade/getAnonymousConfiguration           → feature flags (anonymous)
-WS   /websocket  (send "0" on open) → JSON with "@c": StationStatusSummaryDtoImp {stationId, stationSocketId, stationSocketStatusDto{socketStatus}}, CustomerDetailChargeEventDtoImp, BillingChargingEstimationMessageImp, ...
 ```
 
 ## Charging estimate fields (measured 2026-09-24)
@@ -164,33 +163,11 @@ snapshots are not differenced: the whole-session average (29.4 kWh over 5.5 h, a
 
 ## What the portal does not expose
 
-`getStationCapabilitiesAndValidate` returns a capability list per socket
-(`allowedSocketOperations`, `denySocketOperations`, `socketStatuses`,
-`stationStatus`), and the logged-in account's own permissions describe a
-wider set of operations than start/stop: **setting the charging current**
-(`SET_CHARGE_CURRENT`), **charge-full-speed** (`CHARGE_FULL_SPEED`),
-**unlocking a socket** (`UNLOCK_SOCKET`), **charging profiles**, and
-**boost**.
-
-None of these has a corresponding endpoint anywhere in the driver portal's
-own JavaScript. They are operator-portal operations — actions available to
-the site operator, surfaced in the driver-facing capability and permission
-data without a driver-facing endpoint to invoke them. This integration does
-not implement them, and that omission is deliberate: it was checked against
-the actual set of endpoints the portal ships, not assumed.
-
-No `getStationCapabilitiesAndValidate` fixture lives in this repository, so
-this claim isn't reproducible from the test suite alone. The check behind it
-was this: the driver portal's own JavaScript bundles were searched for
-endpoints matching those operation names — `SET_CHARGE_CURRENT`,
-`CHARGE_FULL_SPEED`, `UNLOCK_SOCKET`, the charging-profile operations and
-boost — and none exists. The names appear only in the shared capabilities and
-permissions payload, which is the same payload the operator portal consumes,
-and there is no code in the driver portal that would call them. Anyone tempted
-to add a "set current" or "boost" service to this integration on the strength
-of the capability list should know up front that doing so means guessing at an
-unpublished operator-portal endpoint, not calling something the driver portal
-already exposes.
+The capabilities and the account's permissions also name operator operations:
+`SET_CHARGE_CURRENT`, `CHARGE_FULL_SPEED`, `UNLOCK_SOCKET`, charging profiles and boost.
+The driver portal's JavaScript has no endpoint for any of them (checked by searching its
+bundles), so they belong to the operator portal. Adding them would mean guessing at an
+unpublished endpoint.
 
 ## Enumerations
 
@@ -207,19 +184,19 @@ already exposes.
   (others exist on the wider network but were not observed on the chargers
   this integration was developed against).
 
-## Websocket (used since 2026-09-24 for live status)
+## Websocket
 
-`wss://<host>/websocket`; the client sends the literal string `"0"` on open,
-and the server pushes JSON messages whose `@c` (or `@class`) field names the
-DTO, e.g. `StationStatusSummaryDtoImp` with `stationId`, `stationSocketId`,
-`stationSocketStatusDto.socketStatus`, plus `CustomerDetailChargeEventDtoImp`
-and `BillingChargingEstimationMessageImp` for session updates. The integration keeps this
-channel open (`DriivzDriverClient.connect_push`, applied in
-`MerCoordinator.async_run_push`): socket status changes for the monitored chargers and
-charging estimates for the customer's own session are applied as they arrive, and the
-poll drops to five minutes while connected. Observed live: it is a network-wide
-broadcast (84 messages over 90 s across 33 chargers), each status message carries
-`stationSocketId`, `stationSocketStatusDto.socketStatus`, the previous status, and the
-flags `approveStartChargePending` / `stopChargePending`; estimates arrive roughly every
-45 s while charging with `totalKw` (kWh), `cost`, `currency`, `tocSoc`. It does not
-count against `X-Rate-Limit-Remaining`.
+`wss://<host>/websocket`. The client sends the literal string `"0"` on open, and the
+server pushes JSON messages whose `@c` (or `@class`) field names the DTO. It does not count
+against `X-Rate-Limit-Remaining`. Observed live from 2026-09-24:
+
+- **`StationStatusSummaryDtoImp`** is broadcast for the whole network: 84 messages in
+  90 s across 33 chargers. Each carries `stationId`, `stationSocketId`,
+  `stationSocketStatusDto.socketStatus`, the previous status, and the flags
+  `approveStartChargePending` / `stopChargePending`.
+- **`BillingChargingEstimationMessageImp`** is sent only to the account, roughly every
+  45 s while charging. It has the same fields as the polled estimate (see above).
+- **`CustomerDetailChargeEventDtoImp`** is also seen, but not used.
+
+The integration applies these in `MerCoordinator.async_run_push`, through
+`DriivzDriverClient.connect_push`.

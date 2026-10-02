@@ -1,5 +1,7 @@
 # Mer (Driivz) Home Assistant Integration Implementation Plan
 
+> **Historical.** This is the plan the first version was built from, kept for the record. See the README for current behaviour and `docs/decisions.md` for later changes.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A HACS custom integration `mer` that logs in to the Mer UK Driivz driver portal, exposes per-socket availability for chosen chargers, starts and stops charges, and shows live/last session and wallet data.

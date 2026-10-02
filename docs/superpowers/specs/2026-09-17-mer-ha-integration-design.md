@@ -1,7 +1,7 @@
 # Mer (UK) Home Assistant integration — design
 
 Date: 2026-09-17
-Status: approved design, awaiting implementation plan
+Status: historical. This was the original design; parts have since changed. See the README for current behaviour and docs/decisions.md for why.
 
 ## 1. Goal
 
