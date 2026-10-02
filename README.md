@@ -149,6 +149,24 @@ sends **Mer charger free** with the charger's name and a button such as **Start 
   free it sends **No Mer charger free** even when that option is off. Its Start button
   is real.
 
+### In the car
+
+**Android Auto** shows the notifications, Start button included, on the car's screen.
+On the phone:
+
+1. Use the Home Assistant Companion app.
+2. In Android Auto's settings, keep Home Assistant enabled in the launcher. If it is
+   hidden there, the notifications reach the phone but not the car.
+3. If the notification doesn't pop up over the map, open the Home Assistant app's
+   notification settings on the phone and set its **Mer charger** channel to pop up on
+   screen. The channel appears after the first notification.
+
+**CarPlay** can't show the notification usefully. The iPhone app only puts *critical*
+notifications on the CarPlay screen, and those can't have buttons. Instead, add your
+sockets' start buttons to CarPlay under **Companion App Settings → CarPlay → Quick
+Access**. A button only acts while the portal allows a start. Android Auto can do the same
+from **Settings → Companion app → Android Auto favorites**, when parked.
+
 ### Your own automations
 
 The socket status attributes and the account's `available_sockets` list are enough to

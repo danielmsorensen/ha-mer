@@ -132,6 +132,10 @@ async def test_preview_sends_the_offer_for_the_first_free_socket_in_order(
     assert action == {"action": "MER_START_CHARGE", "title": "Start Right"}
     assert offer["data"]["action_data"]["start_button"].endswith("_right_start_charge")
     assert offer["data"]["action_data"]["name"] == "Riverside - Bay 4 - Charger B Right"
+    # Shown in Android Auto, delivered at once, on its own channel.
+    assert offer["data"]["car_ui"] is True
+    assert offer["data"]["channel"] == "Mer charger"
+    assert offer["data"]["ttl"] == 0
 
 
 async def test_preview_says_nothing_free_when_all_taken(
@@ -144,6 +148,7 @@ async def test_preview_says_nothing_free_when_all_taken(
     await run_by_hand(hass)
     (notice,) = sent
     assert notice["title"] == "No Mer charger free"
+    assert notice["data"]["car_ui"] is True
 
 
 async def test_socket_freeing_up_only_notifies_in_the_zone(
@@ -189,6 +194,7 @@ async def test_tapping_start_presses_the_socket_button(
     await hass.async_block_till_done()
     mock_client.start_charge.assert_awaited_once_with(11243)
     assert sent[-1]["message"] == "Starting Riverside - Bay 3 - Charger A Left..."
+    assert sent[-1]["data"]["car_ui"] is True  # replaces the offer in the car too
 
 
 async def test_device_tracker_works_as_the_tracker(

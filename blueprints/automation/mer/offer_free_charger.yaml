@@ -107,6 +107,16 @@ variables:
   # Offers from this automation share one tag, so a newer offer replaces the older one
   # and it can be cleared once you are charging.
   tag: "mer_free_charger_{{ this.entity_id }}"
+  # How every notification is sent, merged into each one below: shown in Android Auto,
+  # delivered at once, on its own "Mer charger" channel (which must pop up on the phone
+  # to pop up in the car). iPhones ignore these.
+  delivery: &delivery
+    tag: "{{ tag }}"
+    car_ui: true
+    priority: high
+    ttl: 0
+    channel: Mer charger
+    importance: high
   free: "{{ sockets | select('is_state', 'available') | list }}"
   best: "{{ free[0] if free else none }}"
   best_charger: "{{ state_attr(best, 'charger') if best else '' }}"
@@ -116,7 +126,7 @@ variables:
     title: Mer charger free
     message: "{{ best_charger }}"
     data:
-      tag: "{{ tag }}"
+      <<: *delivery
       actions:
         - action: MER_START_CHARGE
           title: "Start {{ best_socket }}"
@@ -127,8 +137,7 @@ variables:
   none_free:
     title: No Mer charger free
     message: You will be told when one frees up.
-    data:
-      tag: "{{ tag }}"
+    data: *delivery
 
 actions:
   - choose:
@@ -149,14 +158,12 @@ actions:
                 data:
                   title: Too late
                   message: "{{ name }} is no longer free."
-                  data:
-                    tag: "{{ tag }}"
+                  data: *delivery
             else:
               - action: "{{ notify_service }}"
                 data:
                   message: "Starting {{ name }}..."
-                  data:
-                    tag: "{{ tag }}"
+                  data: *delivery
               # Holds until the charger confirms; the outcome lands on the account's
               # "Last command" sensor and the mer_command_result event.
               - action: button.press
