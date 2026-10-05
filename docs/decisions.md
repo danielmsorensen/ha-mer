@@ -351,3 +351,20 @@ with `INVALID_CARD` for the app's virtual card on every socket, so "Charge now" 
 other card types, which a distributed integration should still support. Reading
 capabilities only on status changes keeps the cost to a few requests an hour at a busy
 site, against a rate limit whose refill is unknown. The "Charge now" path is untested live.
+
+## 2026-10-05: the socket's status, not cached capabilities, decides state-based starts
+
+**Decision.** A start button is available when the socket's status allows a start (free,
+or plugged in and waiting) and the cached capabilities do not refuse both starts for a
+reason other than the socket's state. A denial of `OPERATION_NOT_ALLOWED_IN_CURRENT_SOCKET_STATE`
+defers to the status. **Refresh now** also re-reads every charger's capabilities.
+
+**Why.** On Daniel's live instance a socket showed available while its start button stayed
+greyed out, and Refresh now did not help. The capabilities are read once, 5 s after a status
+change. If the portal still saw the old state then, its "not allowed in the current socket
+state" answer stuck until the socket next changed. A read-only probe showed the portal
+judges each socket by its real state whatever status is sent, so the status the
+integration already has is the better source for state. The capabilities still grey out
+starts refused for other reasons, such as the card. A wrong "available" costs little: the
+press re-reads the capabilities and fails with the portal's reason without sending
+anything.

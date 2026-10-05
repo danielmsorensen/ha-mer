@@ -40,6 +40,9 @@ PATH_START_CHARGE_NOW = "stationFacade/startChargeNow"
 PATH_CAPABILITIES = "stationFacade/getStationCapabilitiesAndValidate"
 OP_START_CHARGE = "START_CHARGE_FROM_SERVER"
 OP_START_CHARGE_NOW = "START_CHARGE_NOW"
+# The denial reason for an operation the socket's current state rules out, as opposed to
+# the account or card (e.g. INVALID_CARD).
+DENIED_FOR_SOCKET_STATE = "OPERATION_NOT_ALLOWED_IN_CURRENT_SOCKET_STATE"
 PATH_WALLET = "billingFacade/findCustomerDetailWalletByCustomerId"
 PATH_TRANSACTIONS = "customerFacade/findDriverChargeTransactionLogByView"
 PATH_IS_SUBSCRIBED_AVAILABLE = "customerFacade/isDriverSubscribedToNotifyMeWhenStationIsAvailable"

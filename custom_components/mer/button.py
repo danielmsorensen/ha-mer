@@ -75,20 +75,19 @@ class MerStartChargeButton(MerSocketEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Greyed out unless the portal would accept a start of either kind here.
+        """Greyed out unless the socket is free (or plugged in and waiting) and a start is allowed.
 
         One button covers both starts: pressing it picks the normal start or "Charge now"
-        from the socket's capabilities, as the web app does. Availability follows the same
-        capabilities, re-read shortly after the charger's sockets change status; until they
-        are known, or if reading them fails, it falls back to the socket being free or
-        plugged in and waiting. Home Assistant has no disabled state for a button, so
-        unavailable stands in: the UI greys it out and button.press skips it.
+        from the socket's capabilities, as the web app does. The status says whether the
+        socket's state allows a start; the capabilities, re-read shortly after the charger's
+        sockets change status and on Refresh now, rule out the rest (see
+        `MerCoordinator.start_allowed`). Home Assistant has no disabled state for a button,
+        so unavailable stands in: the UI greys it out and button.press skips it.
         """
         socket = self.socket
         if not super().available or socket is None:
             return False
-        allowed = self.coordinator.start_allowed(self.socket_id)
-        return socket.can_start if allowed is None else allowed
+        return self.coordinator.start_allowed(socket)
 
     async def async_press(self) -> None:
         await _run(self.coordinator, "start", self.station_id, self.socket_id)
@@ -146,4 +145,4 @@ class MerRefreshButton(MerAccountEntity, ButtonEntity):
         return self.coordinator.data is not None
 
     async def async_press(self) -> None:
-        await self.coordinator.async_refresh()
+        await self.coordinator.async_refresh_now()

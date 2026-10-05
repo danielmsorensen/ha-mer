@@ -57,7 +57,7 @@ Each socket (often "Left" and "Right") adds:
 | --- | --- |
 | *Socket* status | The socket's status, whoever is using it. Attributes: `charger`, `socket`, `start_button`, `my_session`, `max_power_kw`, `connector` |
 | *Socket* price | Your tariff's price per kWh; billing plan, fixed price, per-minute rate and transaction fee as attributes |
-| *Socket* start charge | Starts a charge; greyed out when the portal allows no start on it |
+| *Socket* start charge | Starts a charge; greyed out unless the socket is free (or plugged in and waiting) and the portal allows you a start on it |
 
 ### Account device
 
@@ -93,9 +93,11 @@ ticking.
 When you press a start button, the integration asks the portal what your account may do
 on that socket, as the Mer web app does. It sends the normal start (approved against your
 charging card) or, if only that is allowed, "Charge now". If neither is allowed it fails
-at once with the portal's reason. The same check greys the button out, and is re-read a
-few seconds after any socket on the charger changes. The "Charge now" path is untested
-live: the Mer app's virtual card is refused for it.
+at once with the portal's reason. The button is greyed out when the socket's status
+rules out a start, or when the portal refuses you a start there for another reason, such
+as your card. That check is re-read a few seconds after any socket on the charger changes,
+and on **Refresh now**. The "Charge now" path is untested live: the Mer app's virtual card
+is refused for it.
 
 A press stays open until the charger shows the outcome: the button spins, then shows a
 tick or a red cross with the reason. The outcomes are:
@@ -210,7 +212,7 @@ Pushes do not count against the portal's rate limit.
 | Session started time and duration | No | Every poll |
 | Wallet, last session | No | Every 15 minutes |
 | Socket names, tariffs, model, notify-me state | No | Hourly, one charger per poll |
-| Which start a socket allows | No | A few seconds after a socket on the charger changes |
+| Which start a socket allows | No | A few seconds after a socket on the charger changes, and on **Refresh now** |
 
 Extra polls run after a start or stop resolves, when the channel drops, on **Refresh
 now** and on reload. While a command waits for its outcome it also polls every 5 seconds

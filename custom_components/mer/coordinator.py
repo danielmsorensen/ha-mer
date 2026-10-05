@@ -43,6 +43,7 @@ from .const import (
 )
 from .driivz.client import DriivzDriverClient
 from .driivz.const import (
+    DENIED_FOR_SOCKET_STATE,
     OP_START_CHARGE,
     OP_START_CHARGE_NOW,
     STATUS_AVAILABLE,
@@ -611,12 +612,29 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         )
         raise ApiError("START_NOT_ALLOWED", reason)
 
-    def start_allowed(self, socket_id: int) -> bool | None:
-        """Whether a start of either kind is allowed on the socket; None if not known."""
-        caps = self.capabilities.get(socket_id)
+    def start_allowed(self, socket: Socket) -> bool:
+        """Whether a start of either kind could be accepted on the socket now.
+
+        The socket's status decides whether its state allows a start: it is fresher than
+        capabilities read a few seconds after the last change, when the portal may still
+        see the old state. The capabilities rule out starts it refuses for other reasons,
+        such as the card. Unknown capabilities leave it to the status.
+        """
+        if not socket.can_start:
+            return False
+        caps = self.capabilities.get(socket.id)
         if caps is None:
-            return None
-        return OP_START_CHARGE in caps.allowed or OP_START_CHARGE_NOW in caps.allowed
+            return True
+        return any(
+            op in caps.allowed or caps.denied.get(op) == DENIED_FOR_SOCKET_STATE
+            for op in (OP_START_CHARGE, OP_START_CHARGE_NOW)
+        )
+
+    async def async_refresh_now(self) -> None:
+        """Poll now and re-read every charger's start capabilities (Refresh now)."""
+        await self.async_refresh()
+        for station_id in self.station_ids:
+            await self._read_capabilities(station_id)
 
     def _schedule_capabilities(self, station_id: int) -> None:
         if station_id in self._capabilities_pending:
@@ -629,25 +647,27 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
     async def _refresh_capabilities_later(self, station_id: int) -> None:
         try:
             await asyncio.sleep(CAPABILITY_REFRESH_DELAY_SECONDS)
-            remaining = self.client.rate_limit_remaining
-            if remaining is not None and remaining <= COMMAND_RATE_LIMIT_FLOOR:
-                return
-            station = self.get_station(station_id)
-            if station is None or not station.sockets:
-                return
-            first = station.sockets[0]
-            try:
-                caps = await self.client.find_socket_capabilities(
-                    station_id, first.id, first.status
-                )
-            except DriivzError as err:
-                _LOGGER.debug("Could not read capabilities for charger %s: %s", station_id, err)
-                return
-            self.capabilities = {**self.capabilities, **caps}
-            if self.data is not None:
-                self._publish(self.data)
+            await self._read_capabilities(station_id)
         finally:
             self._capabilities_pending.discard(station_id)
+
+    async def _read_capabilities(self, station_id: int) -> None:
+        """Re-read one charger's capabilities (one call covers all its sockets)."""
+        remaining = self.client.rate_limit_remaining
+        if remaining is not None and remaining <= COMMAND_RATE_LIMIT_FLOOR:
+            return
+        station = self.get_station(station_id)
+        if station is None or not station.sockets:
+            return
+        first = station.sockets[0]
+        try:
+            caps = await self.client.find_socket_capabilities(station_id, first.id, first.status)
+        except DriivzError as err:
+            _LOGGER.debug("Could not read capabilities for charger %s: %s", station_id, err)
+            return
+        self.capabilities = {**self.capabilities, **caps}
+        if self.data is not None:
+            self._publish(self.data)
 
     async def async_stop_charge(self, station_id: int | None, socket_id: int) -> CommandResult:
         """Stop the charge on a socket and wait until the session is gone."""

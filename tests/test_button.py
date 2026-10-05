@@ -394,3 +394,54 @@ async def test_start_button_availability_follows_capabilities(
     assert mock_client.find_socket_capabilities.await_count >= 1
     assert state(f"{eid}_socket_11243_start_charge") == "unavailable"  # free, but not for you
     assert state(f"{eid}_socket_11244_start_charge") != "unavailable"
+
+
+async def test_start_button_follows_status_over_a_stale_state_denial(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Capabilities read while the socket was still busy must not grey out a free socket.
+
+    The portal can still deny a start for the socket's state a few seconds after the
+    socket shows free; that answer would otherwise stick until the socket changes again.
+    """
+    mock_client.find_socket_capabilities.return_value = {
+        11243: caps(
+            set(),
+            {
+                "START_CHARGE_FROM_SERVER": "OPERATION_NOT_ALLOWED_IN_CURRENT_SOCKET_STATE",
+                "START_CHARGE_NOW": "INVALID_CARD",
+            },
+        ),
+    }
+    await setup_integration(hass, mock_config_entry)
+    await hass.async_block_till_done()
+    eid = mock_config_entry.entry_id
+    uid = f"{eid}_socket_11243_start_charge"
+    assert hass.states.get(entity_id_for(hass, uid)).state != "unavailable"  # free: AVAILABLE
+
+    mock_client.find_stations_by_ids.return_value = with_socket_status(
+        stations_from_fixture("stations_by_ids.json"), 11243, "CHARGING"
+    )
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id_for(hass, uid)).state == "unavailable"
+
+
+async def test_refresh_now_rereads_start_capabilities(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    mock_client.find_socket_capabilities.return_value = {
+        11244: caps(set(), {"START_CHARGE_FROM_SERVER": "NO_PERMISSION"}),
+    }
+    await setup_integration(hass, mock_config_entry)
+    await hass.async_block_till_done()
+    eid = mock_config_entry.entry_id
+    uid = f"{eid}_socket_11244_start_charge"
+    assert hass.states.get(entity_id_for(hass, uid)).state == "unavailable"
+
+    mock_client.find_socket_capabilities.return_value = {
+        11244: caps({"START_CHARGE_FROM_SERVER"}),
+    }
+    await press(hass, entity_id_for(hass, f"{eid}_account_refresh"))
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id_for(hass, uid)).state != "unavailable"
