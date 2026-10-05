@@ -39,16 +39,6 @@ blueprint:
             integration: mer
             domain: sensor
             device_class: enum
-    charging:
-      name: Charging sensor
-      description: The Mer account's "Charging" sensor; offers are only made while it is off.
-      default: binary_sensor.mer_account_charging
-      selector:
-        entity:
-          filter:
-            integration: mer
-            domain: binary_sensor
-            device_class: battery_charging
     notify_device:
       name: Phone
       description: The phone (Home Assistant Companion app) to notify.
@@ -56,21 +46,95 @@ blueprint:
         device:
           filter:
             integration: mobile_app
-    freed_for:
-      name: Free for at least
-      description: >-
-        How long a socket must stay free before it is offered, so a car swapping over does
-        not trigger a notification.
-      default:
-        seconds: 30
-      selector:
-        duration: {}
-    notify_none_free:
-      name: Say when nothing is free on arrival
-      description: Also send a notification on arrival when every chosen socket is taken.
-      default: true
-      selector:
-        boolean: {}
+
+    notification:
+      name: Notification
+      icon: mdi:message-text-outline
+      collapsed: true
+      input:
+        free_title:
+          name: Free title
+          description: >-
+            Templates can use `charger` and `socket`, the names of the socket on offer.
+          default: Mer charger free
+          selector:
+            text: {}
+        free_message:
+          name: Free message
+          default: "{{ charger }}"
+          selector:
+            text: {}
+        notify_none_free:
+          name: Say when nothing is free on arrival
+          description: Also send a notification on arrival when every chosen socket is taken.
+          default: true
+          selector:
+            boolean: {}
+        none_title:
+          name: Nothing free title
+          default: No Mer charger free
+          selector:
+            text: {}
+        none_message:
+          name: Nothing free message
+          default: You will be told when one frees up.
+          selector:
+            text: {}
+        tap_opens:
+          name: Open when tapped
+          description: >-
+            A dashboard path such as `/dashboard-ev/0`, or a URL. Leave empty to open the
+            app as usual.
+          default: ""
+          selector:
+            text: {}
+        extra_data:
+          name: Extra notification data
+          description: >-
+            Merged into every notification's data, for any other Companion app option,
+            for example `notification_icon: mdi:ev-station`.
+          default: {}
+          selector:
+            object: {}
+
+    on_charging:
+      name: When charging starts
+      icon: mdi:ev-station
+      collapsed: true
+      input:
+        when_charging:
+          name: Actions
+          description: >-
+            Run when your charge starts on one of the chosen sockets, however it was
+            started.
+          default: []
+          selector:
+            action: {}
+
+    advanced:
+      name: Advanced
+      icon: mdi:tune
+      collapsed: true
+      input:
+        freed_for:
+          name: Free for at least
+          description: >-
+            How long a socket must stay free before it is offered, so a car swapping over
+            does not trigger a notification.
+          default:
+            seconds: 30
+          selector:
+            duration: {}
+        charging:
+          name: Charging sensor
+          description: The Mer account's "Charging" sensor; offers are only made while it is off.
+          default: binary_sensor.mer_account_charging
+          selector:
+            entity:
+              filter:
+                integration: mer
+                domain: binary_sensor
+                device_class: battery_charging
 
 mode: queued
 max_exceeded: silent
@@ -81,11 +145,20 @@ triggers:
     entity_id: !input tracker
     zone: !input zone
     event: enter
+  - trigger: zone
+    id: leave
+    entity_id: !input tracker
+    zone: !input zone
+    event: leave
   - trigger: state
     id: freed
     entity_id: !input sockets
     to: "available"
     for: !input freed_for
+  - trigger: state
+    id: taken
+    entity_id: !input sockets
+    from: "available"
   - trigger: event
     id: start_tapped
     event_type: mobile_app_notification_action
@@ -101,43 +174,47 @@ variables:
   notify_device: !input notify_device
   notify_service: "notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}"
   notify_none_free: !input notify_none_free
+  tap_opens: !input tap_opens
+  extra_data: !input extra_data
+  freed_for: !input freed_for
+  freed_seconds: >-
+    {{ (freed_for.days | default(0)) * 86400 + (freed_for.hours | default(0)) * 3600
+       + (freed_for.minutes | default(0)) * 60 + (freed_for.seconds | default(0)) }}
   # Why this run happened: a trigger id, or "preview" when run by hand (Home Assistant
   # gives a manual run no trigger id).
   run: "{{ trigger.id if trigger.id is defined else 'preview' }}"
-  # Offers from this automation share one tag, so a newer offer replaces the older one
-  # and it can be cleared once you are charging.
+  # Notifications from this automation share one tag, so each replaces the last and it
+  # can be cleared.
   tag: "mer_free_charger_{{ this.entity_id }}"
-  # How every notification is sent, merged into each one below: shown in Android Auto,
-  # delivered at once, on its own "Mer charger" channel (which must pop up on the phone
-  # to pop up in the car). iPhones ignore these.
-  delivery: &delivery
-    tag: "{{ tag }}"
-    car_ui: true
-    priority: high
-    ttl: 0
-    channel: Mer charger
-    importance: high
+  # How every notification is sent: shown in Android Auto, delivered at once, on its own
+  # "Mer charger" channel (which must pop up on the phone to pop up in the car), kept
+  # when tapped, and time-sensitive on an iPhone. Your extra data is merged in last.
+  delivery: >-
+    {% set base = {'tag': tag, 'car_ui': true, 'priority': 'high', 'ttl': 0,
+       'channel': 'Mer charger', 'importance': 'high', 'sticky': true,
+       'push': {'interruption-level': 'time-sensitive'}} %}
+    {% set tap = {'clickAction': tap_opens, 'url': tap_opens} if tap_opens else {} %}
+    {{ dict(dict(base, **tap), **(extra_data or {})) }}
+  # Added to an update of a notification already showing, so it doesn't sound again.
+  quietly: "{{ {'alert_once': true, 'push': {'interruption-level': 'passive'}} }}"
   free: "{{ sockets | select('is_state', 'available') | list }}"
   best: "{{ free[0] if free else none }}"
-  best_charger: "{{ state_attr(best, 'charger') if best else '' }}"
-  best_socket: "{{ state_attr(best, 'socket') if best else '' }}"
-  # The two notifications, defined once and sent from one place below.
+  charger: "{{ state_attr(best, 'charger') if best else '' }}"
+  socket: "{{ state_attr(best, 'socket') if best else '' }}"
+  # The two notifications, defined once and sent from the branches below.
   offer:
-    title: Mer charger free
-    message: "{{ best_charger }}"
-    data:
-      <<: *delivery
-      actions:
-        - action: MER_START_CHARGE
-          title: "Start {{ best_socket }}"
-      action_data:
-        automation: "{{ this.entity_id }}"
-        start_button: "{{ state_attr(best, 'start_button') if best else '' }}"
-        name: "{{ best_charger }} {{ best_socket }}"
+    title: !input free_title
+    message: !input free_message
+    data: >-
+      {{ dict(delivery,
+           actions=[{'action': 'MER_START_CHARGE', 'title': 'Start ' ~ socket}],
+           action_data={'automation': this.entity_id,
+                        'start_button': state_attr(best, 'start_button') if best else '',
+                        'name': charger ~ ' ' ~ socket}) }}
   none_free:
-    title: No Mer charger free
-    message: You will be told when one frees up.
-    data: *delivery
+    title: !input none_title
+    message: !input none_message
+    data: "{{ delivery }}"
 
 actions:
   - choose:
@@ -158,12 +235,12 @@ actions:
                 data:
                   title: Too late
                   message: "{{ name }} is no longer free."
-                  data: *delivery
+                  data: "{{ dict(delivery, **quietly) }}"
             else:
               - action: "{{ notify_service }}"
                 data:
                   message: "Starting {{ name }}..."
-                  data: *delivery
+                  data: "{{ dict(delivery, **quietly) }}"
               # Holds until the charger confirms; the outcome lands on the account's
               # "Last command" sensor and the mer_command_result event.
               - action: button.press
@@ -171,7 +248,7 @@ actions:
                   entity_id: "{{ start_button }}"
                 continue_on_error: true
 
-      # ---- Charging has started: the offer is moot ----------------------------------
+      # ---- Charging has started: clear the offer, run your actions ------------------
       - conditions:
           - "{{ run == 'charging_started' }}"
         sequence:
@@ -180,6 +257,55 @@ actions:
               message: clear_notification
               data:
                 tag: "{{ tag }}"
+          # The socket sensors update just after the Charging sensor, so wait for one of
+          # the chosen sockets to show your session; stop if none does.
+          - wait_template: >-
+              {{ sockets | select('is_state_attr', 'my_session', true) | list | count > 0 }}
+            timeout: "00:00:10"
+            continue_on_timeout: false
+          - sequence: !input when_charging
+
+      # ---- Left the zone: the offer is moot -----------------------------------------
+      - conditions:
+          - "{{ run == 'leave' }}"
+        sequence:
+          - action: "{{ notify_service }}"
+            data:
+              message: clear_notification
+              data:
+                tag: "{{ tag }}"
+
+      # ---- The socket on offer was taken: offer the next one, or say none is free ---
+      - conditions:
+          - "{{ run == 'taken' }}"
+          - condition: state
+            entity_id: !input charging
+            state: "off"
+          - condition: zone
+            entity_id: !input tracker
+            zone: !input zone
+          # It was the one on offer: free long enough to have been offered, and no
+          # socket you prefer to it is free now (only this one changed).
+          - "{{ (now() - trigger.from_state.last_changed).total_seconds() >= freed_seconds }}"
+          - "{{ best is none or sockets.index(trigger.entity_id) < sockets.index(best) }}"
+          # Not taken by your own start from Home Assistant: its start button was not
+          # pressed, and the last command was not a start there, in the last 5 minutes.
+          - >-
+            {% set recent = now() - timedelta(minutes=5) %}
+            {% set pressed = as_datetime(states(state_attr(trigger.entity_id, 'start_button')), none) %}
+            {% set last = expand(integration_entities('mer'))
+                 | selectattr('attributes.requested_at', 'defined') | list | first | default(none) %}
+            {% set started_here = last is not none
+                 and last.attributes.command == 'start'
+                 and last.attributes.charger == state_attr(trigger.entity_id, 'charger')
+                 and last.attributes.socket == state_attr(trigger.entity_id, 'socket')
+                 and as_datetime(last.attributes.requested_at) > recent %}
+            {{ not (pressed is not none and pressed > recent) and not started_here }}
+        sequence:
+          - action: "{{ notify_service }}"
+            data: >-
+              {% set note = offer if best is not none else none_free %}
+              {{ dict(note, data=dict(note.data, **quietly)) }}
 
       # ---- Arrived, a socket freed up while here, or a manual preview ---------------
       # Real triggers only offer while you are in the zone and not charging; a preview

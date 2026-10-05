@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 import shutil
 from typing import Any
@@ -13,8 +14,9 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.mer.const import DOMAIN
 from tests.helpers import setup_integration, stations_from_fixture
@@ -48,6 +50,7 @@ async def setup_blueprint(
     mock_config_entry: MockConfigEntry,
     socket_order: list[int],
     tracker: str = "person.driver",
+    **inputs: Any,
 ) -> list[dict[str, Any]]:
     """Integration, a Work zone, a person, a phone, and an automation from the blueprint."""
     await setup_integration(hass, mock_config_entry)
@@ -91,6 +94,7 @@ async def setup_blueprint(
                         "sockets": [socket_status_entity(hass, eid, s) for s in socket_order],
                         "notify_device": phone.id,
                         "freed_for": {"seconds": 0},
+                        **inputs,
                     },
                 },
             }
@@ -160,6 +164,9 @@ async def test_socket_freeing_up_only_notifies_in_the_zone(
     coordinator = mock_config_entry.runtime_data
 
     hass.states.async_set("person.driver", "not_home", AWAY)
+    await hass.async_block_till_done()
+    assert [n["message"] for n in sent] == ["clear_notification"]  # leaving clears it
+    sent.clear()
     mock_client.find_stations_by_ids.return_value = busy(live, 11244, 11242)  # 11243 frees
     await coordinator.async_refresh()
     await hass.async_block_till_done()
@@ -209,3 +216,145 @@ async def test_device_tracker_works_as_the_tracker(
     (offer,) = sent
     assert offer["title"] == "Mer charger free"
     assert offer["data"]["actions"][0]["title"] == "Start Left"
+
+
+async def test_text_tap_target_and_extra_data_are_options(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    sent = await setup_blueprint(
+        hass,
+        mock_config_entry,
+        [11243],
+        free_title="{{ socket }} is free",
+        free_message="At {{ charger }}",
+        tap_opens="/dashboard-ev/0",
+        extra_data={"notification_icon": "mdi:ev-station"},
+    )
+    await run_by_hand(hass)
+    (offer,) = sent
+    assert offer["title"] == "Left is free"
+    assert offer["message"] == "At Riverside - Bay 3 - Charger A"
+    assert offer["data"]["clickAction"] == offer["data"]["url"] == "/dashboard-ev/0"
+    assert offer["data"]["notification_icon"] == "mdi:ev-station"
+    assert offer["data"]["sticky"] is True
+    assert offer["data"]["push"] == {"interruption-level": "time-sensitive"}
+
+
+async def test_nothing_free_text_is_an_option(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    mock_client.find_stations_by_ids.return_value = busy(
+        stations_from_fixture("stations_by_ids.json"), 11243
+    )
+    sent = await setup_blueprint(
+        hass, mock_config_entry, [11243], none_title="All taken", none_message="Try later"
+    )
+    await run_by_hand(hass)
+    (notice,) = sent
+    assert (notice["title"], notice["message"]) == ("All taken", "Try later")
+    assert "clickAction" not in notice["data"]  # no tap target set: the app opens as usual
+
+
+async def test_offered_socket_taken_offers_the_next_quietly(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    live = stations_from_fixture("stations_by_ids.json")
+    sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
+    coordinator = mock_config_entry.runtime_data
+    await run_by_hand(hass)
+    assert sent[-1]["data"]["actions"][0]["title"] == "Start Left"
+
+    mock_client.find_stations_by_ids.return_value = busy(live, 11243)  # someone takes Left
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    update = sent[-1]
+    assert update["data"]["actions"][0]["title"] == "Start Right"
+    assert update["data"]["alert_once"] is True
+    assert update["data"]["push"] == {"interruption-level": "passive"}
+
+    mock_client.find_stations_by_ids.return_value = busy(live, 11243, 11244)  # and Right
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert sent[-1]["title"] == "No Mer charger free"
+    assert sent[-1]["data"]["alert_once"] is True
+
+
+async def test_taking_a_socket_not_on_offer_changes_nothing(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    live = stations_from_fixture("stations_by_ids.json")
+    sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
+    await run_by_hand(hass)
+    mock_client.find_stations_by_ids.return_value = busy(live, 11244)  # Right, not offered
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert len(sent) == 1
+
+
+async def test_your_own_start_does_not_rewrite_the_notification(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Tapping Start takes the socket; "Starting..." must not be replaced by the next offer."""
+    live = stations_from_fixture("stations_by_ids.json")
+    sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
+    await run_by_hand(hass)
+    mock_client.find_stations_by_ids.return_value = busy(live, 11243, status="PREPARING")
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        {"action": "MER_START_CHARGE", "action_data": sent[0]["data"]["action_data"]},
+    )
+    await hass.async_block_till_done()
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert sent[-1]["message"] == "Starting Riverside - Bay 3 - Charger A Left..."
+
+
+async def test_your_actions_run_when_charging_starts_on_a_chosen_socket(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket,
+) -> None:
+    hooked: list[ServiceCall] = []
+
+    async def hook(call: ServiceCall) -> None:
+        hooked.append(call)
+
+    hass.services.async_register("test", "charging_hook", hook)
+    # The session fixture runs on 11242 (Charger B Right).
+    sent = await setup_blueprint(
+        hass,
+        mock_config_entry,
+        [11242],
+        when_charging=[{"action": "test.charging_hook"}],
+    )
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert len(hooked) == 1
+    assert sent[-1]["message"] == "clear_notification"
+
+
+async def test_your_actions_skip_a_charge_on_another_socket(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket,
+) -> None:
+    hooked: list[ServiceCall] = []
+
+    async def hook(call: ServiceCall) -> None:
+        hooked.append(call)
+
+    hass.services.async_register("test", "charging_hook", hook)
+    await setup_blueprint(
+        hass,
+        mock_config_entry,
+        [11243],
+        when_charging=[{"action": "test.charging_hook"}],
+    )
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await mock_config_entry.runtime_data.async_refresh()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))  # wait times out
+    await hass.async_block_till_done()
+    assert hooked == []

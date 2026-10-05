@@ -143,13 +143,31 @@ When you arrive, and whenever a socket frees up while you are there and not char
 sends **Mer charger free** with the charger's name and a button such as **Start Right**.
 
 - Arriving with everything taken sends **No Mer charger free**.
+- If someone else takes the socket on offer, the notification quietly changes to your
+  next free socket, or to **No Mer charger free**.
 - Tapping Start presses that socket's start button, or tells you the socket has been
   taken.
-- The notification clears once you are charging.
+- The notification stays when tapped, and clears once you are charging or leave the
+  zone.
 - **Preview:** choose **Run actions** from the automation's ⋮ menu. It sends what
   arriving would send right now, skipping the zone and charging checks. If nothing is
   free it sends **No Mer charger free** even when that option is off. Its Start button
   is real.
+
+Notifications are sent at high priority, as time-sensitive on an iPhone, and on their
+own **Mer charger** channel on Android. Updates to a notification already showing don't
+sound again.
+
+The optional settings are in collapsible sections:
+
+| Section | Settings |
+| --- | --- |
+| **Notification** | The title and message of both notifications, which can use `{{ charger }}` and `{{ socket }}`; whether to say when nothing is free on arrival; a page to open when the notification is tapped, such as `/dashboard-ev/0`; and **Extra notification data**, merged into every notification, for any other [Companion app option](https://companion.home-assistant.io/docs/notifications/notifications-basic/) such as `notification_icon: mdi:ev-station` |
+| **When charging starts** | Your own actions, run when your charge starts on one of the chosen sockets, however you started it |
+| **Advanced** | How long a socket must stay free before it is offered (30 s), and the Charging sensor |
+
+Re-import the blueprint from its ⋮ menu to update it. Existing automations keep their
+settings.
 
 ### In the car
 
