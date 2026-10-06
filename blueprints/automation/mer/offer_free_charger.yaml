@@ -47,9 +47,23 @@ blueprint:
           filter:
             integration: mobile_app
 
+    only_when:
+      name: Only offer when
+      icon: mdi:filter-outline
+      collapsed: true
+      input:
+        only_if:
+          name: Conditions
+          description: >-
+            Extra conditions for offering a charger, for example the car's charge level
+            being below its target. A preview skips them.
+          default: []
+          selector:
+            condition: {}
+
     free_notification:
       name: '"Charger free" notification'
-      icon: mdi:ev-station
+      icon: mdi:bell-check-outline
       description: Sent when a socket is free, with a button to start it.
       collapsed: true
       input:
@@ -67,7 +81,7 @@ blueprint:
 
     none_free_notification:
       name: '"Nothing free" notification'
-      icon: mdi:ev-plug-type2
+      icon: mdi:bell-minus-outline
       description: Sent on arrival when every chosen socket is taken.
       collapsed: true
       input:
@@ -89,7 +103,7 @@ blueprint:
 
     both_notifications:
       name: Both notifications
-      icon: mdi:cellphone-message
+      icon: mdi:bell-cog-outline
       collapsed: true
       input:
         tap_opens:
@@ -111,7 +125,7 @@ blueprint:
 
     on_charging:
       name: When charging starts
-      icon: mdi:ev-station
+      icon: mdi:battery-charging-outline
       collapsed: true
       input:
         when_charging:
@@ -122,20 +136,6 @@ blueprint:
           default: []
           selector:
             action: {}
-
-    only_when:
-      name: Only offer when
-      icon: mdi:filter-outline
-      collapsed: true
-      input:
-        only_if:
-          name: Conditions
-          description: >-
-            Extra conditions for offering a charger, for example the car's charge level
-            being below its target. A preview skips them.
-          default: []
-          selector:
-            condition: {}
 
     advanced:
       name: Advanced

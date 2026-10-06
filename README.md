@@ -163,11 +163,11 @@ The optional settings are in collapsible sections:
 
 | Section | Settings |
 | --- | --- |
+| **Only offer when** | Your own conditions, for example the car's charge level being below its target. A preview skips them |
 | **"Charger free" notification** | Its title and message, which can use `{{ charger }}` and `{{ socket }}` |
 | **"Nothing free" notification** | Whether to send it on arrival, and its title and message |
 | **Both notifications** | A page to open when tapped, such as `/dashboard-ev/0`; and **Extra notification data**, merged into every notification, for any other [Companion app option](https://companion.home-assistant.io/docs/notifications/notifications-basic/) such as `notification_icon: mdi:ev-station` |
 | **When charging starts** | Your own actions, run when your charge starts on one of the chosen sockets, however you started it |
-| **Only offer when** | Your own conditions, for example the car's charge level being below its target. A preview skips them |
 | **Advanced** | How long a socket must stay free before it is offered (30 s), and the Charging sensor |
 
 Re-import the blueprint from its ⋮ menu to update it. Existing automations keep their
