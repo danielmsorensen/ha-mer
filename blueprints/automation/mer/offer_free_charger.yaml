@@ -47,39 +47,51 @@ blueprint:
           filter:
             integration: mobile_app
 
-    notification:
-      name: Notification
-      icon: mdi:message-text-outline
+    free_notification:
+      name: '"Charger free" notification'
+      icon: mdi:ev-station
+      description: Sent when a socket is free, with a button to start it.
       collapsed: true
       input:
         free_title:
-          name: Free title
-          description: >-
-            Templates can use `charger` and `socket`, the names of the socket on offer.
+          name: Title
+          description: Templates can use `charger` and `socket`, the names of the socket on offer.
           default: Mer charger free
           selector:
             text: {}
         free_message:
-          name: Free message
+          name: Message
           default: "{{ charger }}"
           selector:
             text: {}
+
+    none_free_notification:
+      name: '"Nothing free" notification'
+      icon: mdi:ev-plug-type2
+      description: Sent on arrival when every chosen socket is taken.
+      collapsed: true
+      input:
         notify_none_free:
-          name: Say when nothing is free on arrival
-          description: Also send a notification on arrival when every chosen socket is taken.
+          name: Send it
           default: true
           selector:
             boolean: {}
         none_title:
-          name: Nothing free title
+          name: Title
           default: No Mer charger free
           selector:
             text: {}
         none_message:
-          name: Nothing free message
+          name: Message
           default: You will be told when one frees up.
           selector:
             text: {}
+
+    both_notifications:
+      name: Both notifications
+      icon: mdi:cellphone-message
+      collapsed: true
+      input:
         tap_opens:
           name: Open when tapped
           description: >-
