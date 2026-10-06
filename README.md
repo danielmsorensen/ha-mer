@@ -55,7 +55,7 @@ Each socket (often "Left" and "Right") adds:
 
 | Entity | Meaning |
 | --- | --- |
-| *Socket* status | The socket's status, whoever is using it. Attributes: `charger`, `socket`, `start_button`, `my_session`, `max_power_kw`, `connector` |
+| *Socket* status | The socket's status, whoever is using it. Attributes: `charger`, `socket`, `station_id`, `socket_id`, `start_button`, `my_session`, `max_power_kw`, `connector` |
 | *Socket* price | Your tariff's price per kWh; billing plan, fixed price, per-minute rate and transaction fee as attributes |
 | *Socket* start charge | Starts a charge; greyed out unless the socket is free (or plugged in and waiting) and the portal allows you a start on it |
 
@@ -65,7 +65,7 @@ Each socket (often "Left" and "Right") adds:
 | --- | --- |
 | Available sockets | Free sockets on your chargers. Attributes: `available_sockets` (each with `charger`, `socket`, `station_id`, `socket_id`, `start_button`, in charger order), `total_sockets`, `chargers` |
 | Sockets in use | Sockets on your chargers in any in-use state |
-| Charging | On while you have an active session anywhere |
+| Charging | On while you have an active session anywhere. Attributes `charger`, `socket`, `station_id` and `socket_id` say where it runs, or where your last session ran once it has ended, with `ended_at` |
 | Active session | Where it is running, as *charger socket*, with ids as attributes |
 | Active session started, energy, cost, duration | As named; unavailable while not charging |
 | Active session charging rate | The portal's estimated rate in kW at the charger, refreshed with each meter reading (the car sees roughly 10% less) |
@@ -143,6 +143,7 @@ When you arrive, and whenever a socket frees up while you are there and not char
 sends **Mer charger free** with the charger's name and a button such as **Start Right**.
 
 - Arriving with everything taken sends **No Mer charger free**.
+- The charger you have unplugged from since arriving is not offered again.
 - If someone else takes the socket on offer, the notification quietly changes to your
   next free socket, or to **No Mer charger free**.
 - Tapping Start presses that socket's start button, or tells you the socket has been
@@ -164,6 +165,7 @@ The optional settings are in collapsible sections:
 | --- | --- |
 | **Notification** | The title and message of both notifications, which can use `{{ charger }}` and `{{ socket }}`; whether to say when nothing is free on arrival; a page to open when the notification is tapped, such as `/dashboard-ev/0`; and **Extra notification data**, merged into every notification, for any other [Companion app option](https://companion.home-assistant.io/docs/notifications/notifications-basic/) such as `notification_icon: mdi:ev-station` |
 | **When charging starts** | Your own actions, run when your charge starts on one of the chosen sockets, however you started it |
+| **Only offer when** | Your own conditions, for example the car's charge level being below its target. A preview skips them |
 | **Advanced** | How long a socket must stay free before it is offered (30 s), and the Charging sensor |
 
 Re-import the blueprint from its ⋮ menu to update it. Existing automations keep their
@@ -241,6 +243,12 @@ at rest; how quickly it refills is unknown. A poll makes two calls while idle an
 during a session. Setup and reload fetch every charger's details at once. When the
 headroom is nearly used up, the next poll is skipped and the entities keep their last
 values.
+
+**Load.** Measured on 2026-10-06, the push channel delivered about 120 messages a minute,
+almost all for chargers elsewhere on the network. Handling them used 0.07% of one CPU
+core, and Home Assistant only writes state when one of your chargers or your session
+changes. The data is about 6 MiB an hour (roughly 140 MiB a day) before compression:
+nothing on home broadband, but worth knowing on a metered connection.
 
 ## The notify-me switch
 

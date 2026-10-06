@@ -27,12 +27,13 @@ from .coordinator import (
     MerCoordinator,
     MerData,
 )
-from .driivz.models import Socket, Station, Transaction, clean_caption
+from .driivz.models import Socket, Station, Transaction
 from .entity import (
     STATUS_OPTIONS,
     MerAccountEntity,
     MerSocketEntity,
     MerStationEntity,
+    session_place,
     socket_label,
     status_option,
 )
@@ -70,6 +71,8 @@ def _socket_status_attributes(entity: MerSocketSensor, socket: Socket) -> dict[s
             "button", DOMAIN, f"{entity.entry_id}_socket_{socket.id}_start_charge"
         ),
         "my_session": entity.coordinator.data.session_on_socket(socket.id) is not None,
+        "station_id": entity.station_id,
+        "socket_id": socket.id,
         "max_power_kw": socket.max_power_kw,
         "connector": socket.socket_type,
     }
@@ -211,46 +214,16 @@ class MerStationSessionSensorDescription(SensorEntityDescription):
     unit_fn: Callable[[ActiveSession | None, MerData], str | None] | None = None
 
 
-def _active_charger_name(coordinator: MerCoordinator, data: MerData) -> str | None:
-    if data.active is None:
-        return None
-    if data.active.station_caption:
-        return clean_caption(data.active.station_caption)
-    if data.active.station_id is not None:
-        station = coordinator.get_station(data.active.station_id)
-        if station is not None:
-            return station.display_name
-    return None
-
-
-def _active_socket_name(coordinator: MerCoordinator, data: MerData) -> str | None:
-    if data.active is None:
-        return None
-    if data.active.station_id is not None:
-        socket = coordinator.get_socket(data.active.station_id, data.active.socket_id)
-        if socket is not None:
-            return socket_label(socket)
-    return data.active.socket_name or f"Socket {data.active.socket_id}"
-
-
 def _active_session_name(coordinator: MerCoordinator, data: MerData) -> str | None:
     """Where the session is running, as "<charger> <socket>"."""
     if data.active is None:
         return None
-    charger = _active_charger_name(coordinator, data)
-    socket = _active_socket_name(coordinator, data)
-    return f"{charger} {socket}" if charger else socket
+    place = session_place(coordinator, data.active)
+    return f"{place['charger']} {place['socket']}" if place["charger"] else place["socket"]
 
 
 def _active_attributes(coordinator: MerCoordinator, data: MerData) -> dict[str, Any]:
-    if data.active is None:
-        return {}
-    return {
-        "charger": _active_charger_name(coordinator, data),
-        "socket": _active_socket_name(coordinator, data),
-        "station_id": data.active.station_id,
-        "socket_id": data.active.socket_id,
-    }
+    return session_place(coordinator, data.active) if data.active else {}
 
 
 def _last(data: MerData) -> Transaction | None:

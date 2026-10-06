@@ -111,6 +111,20 @@ blueprint:
           selector:
             action: {}
 
+    only_when:
+      name: Only offer when
+      icon: mdi:filter-outline
+      collapsed: true
+      input:
+        only_if:
+          name: Conditions
+          description: >-
+            Extra conditions for offering a charger, for example the car's charge level
+            being below its target. A preview skips them.
+          default: []
+          selector:
+            condition: {}
+
     advanced:
       name: Advanced
       icon: mdi:tune
@@ -197,7 +211,19 @@ variables:
     {{ dict(dict(base, **tap), **(extra_data or {})) }}
   # Added to an update of a notification already showing, so it doesn't sound again.
   quietly: "{{ {'alert_once': true, 'push': {'interruption-level': 'passive'}} }}"
-  free: "{{ sockets | select('is_state', 'available') | list }}"
+  # The charger you have unplugged from since arriving is not offered again; the
+  # Charging sensor says where your last session ran and when it ended.
+  charging_sensor: !input charging
+  tracker: !input tracker
+  just_left: >-
+    {% set ended = as_datetime(state_attr(charging_sensor, 'ended_at'), none) %}
+    {% set arrived = states[tracker].last_changed if states[tracker] else none %}
+    {{ state_attr(charging_sensor, 'station_id')
+       if is_state(charging_sensor, 'off') and ended and arrived and ended > arrived
+       else none }}
+  free: >-
+    {{ sockets | select('is_state', 'available')
+       | reject('is_state_attr', 'station_id', just_left) | list }}
   best: "{{ free[0] if free else none }}"
   charger: "{{ state_attr(best, 'charger') if best else '' }}"
   socket: "{{ state_attr(best, 'socket') if best else '' }}"
@@ -284,6 +310,8 @@ actions:
           - condition: zone
             entity_id: !input tracker
             zone: !input zone
+          - condition: and
+            conditions: !input only_if
           # It was the one on offer: free long enough to have been offered, and no
           # socket you prefer to it is free now (only this one changed).
           - "{{ (now() - trigger.from_state.last_changed).total_seconds() >= freed_seconds }}"
@@ -321,6 +349,8 @@ actions:
                   - condition: zone
                     entity_id: !input tracker
                     zone: !input zone
+                  - condition: and
+                    conditions: !input only_if
         sequence:
           - if:
               - "{{ best is not none }}"

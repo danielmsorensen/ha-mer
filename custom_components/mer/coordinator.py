@@ -111,6 +111,14 @@ class ActiveSession:
 
 
 @dataclass(frozen=True, slots=True)
+class EndedSession:
+    """Your most recent session once it has ended, and when the integration saw it end."""
+
+    session: ActiveSession
+    ended_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class CommandResult:
     """How the most recent start/stop command ended."""
 
@@ -230,6 +238,9 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         # staggered so at most one charger is refreshed per cycle. See `_stations_due`.
         self._station_refreshed: dict[int, datetime] = {}
         self._wallet_refreshed: datetime | None = None
+        # Your last session after it ended, until the next one starts. Kept in memory
+        # only; after a restart the Charging sensor falls back to the charge history.
+        self.last_session_end: EndedSession | None = None
         self._skip_next = False
         self._rate_warned_at: datetime | None = None
 
@@ -264,6 +275,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 found = await self.client.find_stations_by_ids(self.station_ids)
                 stations = {s.id: s for s in found}
             active = await self._fetch_active()
+            self._note_session_end(self.data.active if self.data else None, active)
             if self._due(self._wallet_refreshed, WALLET_REFRESH, now):
                 await self._refresh_optional("account", self._refresh_account(now))
                 self._wallet_refreshed = now
@@ -775,8 +787,22 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         everything only a poll provides (session duration, wallet, history) froze.
         Seen live on 2026-09-24.
         """
+        if self._note_session_end(self.data.active if self.data else None, data.active):
+            self.hass.async_create_task(self.async_request_refresh(), "mer session ended")
         self.data = data
         self.async_update_listeners()
+
+    def _note_session_end(self, before: ActiveSession | None, after: ActiveSession | None) -> bool:
+        """Record a session that has just ended, and fetch the history it now belongs to.
+
+        Returns whether one ended, so a pushed end can ask for the poll that refreshes the
+        history and wallet; a poll that finds the end refreshes them itself.
+        """
+        if before is None or (after is not None and after.socket_id == before.socket_id):
+            return False
+        self.last_session_end = EndedSession(before, dt_util.utcnow())
+        self._wallet_refreshed = None
+        return True
 
     def _publish_poll(self, station: Station | None, active: ActiveSession | None) -> None:
         if self.data is None:

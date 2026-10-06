@@ -368,3 +368,22 @@ integration already has is the better source for state. The capabilities still g
 starts refused for other reasons, such as the card. A wrong "available" costs little: the
 press re-reads the capabilities and fails with the portal's reason without sending
 anything.
+
+## 2026-10-06: the Charging sensor remembers where your last session ended
+
+**Decision.** When a session ends, the coordinator records where it ran and when
+(`last_session_end`) and re-reads the charge history in the same poll, or straight after a
+pushed end. The Charging sensor's attributes give the current session's charger, socket and
+ids, or the last session's with `ended_at`; after a restart the history's last session stands
+in, without its socket. Socket status sensors gain `station_id` and `socket_id`.
+
+**Why.** The free charger blueprint offered the charger Daniel had just unplugged from. The
+blueprint leaves out the charger whose session ended after the tracker arrived in the zone,
+comparing ids rather than names. The history alone could not do it: it refreshes every
+15 minutes and records no socket.
+
+**Load, measured.** Three minutes of the push channel (2026-10-06): 354 messages, all status
+for other chargers; 48 µs of parsing each; 0.07% of one core for the whole process including
+TLS; about 6 MiB an hour of JSON before compression. No "only at work" switch was added: the
+CPU cost is negligible, and only the bandwidth would matter, on a metered connection.
+

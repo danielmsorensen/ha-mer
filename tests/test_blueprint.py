@@ -358,3 +358,54 @@ async def test_your_actions_skip_a_charge_on_another_socket(
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))  # wait times out
     await hass.async_block_till_done()
     assert hooked == []
+
+
+async def test_charger_you_just_left_is_not_offered(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket,
+) -> None:
+    """Unplugging from Charger B Right after arriving: offer Charger A instead."""
+    sent = await setup_blueprint(hass, mock_config_entry, [11242, 11243])
+    coordinator = mock_config_entry.runtime_data
+    mock_client.find_last_active_charge_socket.return_value = charging_socket  # on 11242
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    mock_client.find_last_active_charge_socket.return_value = None  # unplugged
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    sent.clear()
+    await run_by_hand(hass)
+    (offer,) = sent
+    assert offer["message"] == "Riverside - Bay 3 - Charger A"
+
+
+async def test_your_conditions_gate_real_offers_but_not_a_preview(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    hass.states.async_set("input_boolean.car_needs_charge", "off")
+    sent = await setup_blueprint(
+        hass,
+        mock_config_entry,
+        [11243],
+        only_if=[
+            {"condition": "state", "entity_id": "input_boolean.car_needs_charge", "state": "on"}
+        ],
+    )
+
+    async def arrive() -> None:
+        hass.states.async_set("person.driver", "not_home", AWAY)
+        await hass.async_block_till_done()
+        hass.states.async_set("person.driver", "Work", WORK)
+        await hass.async_block_till_done()
+
+    await arrive()
+    assert [n["message"] for n in sent] == ["clear_notification"]  # leaving; no offer
+    await run_by_hand(hass)
+    assert sent[-1]["title"] == "Mer charger free"  # a preview skips your conditions
+
+    sent.clear()
+    hass.states.async_set("input_boolean.car_needs_charge", "on")
+    await arrive()
+    assert sent[-1]["title"] == "Mer charger free"

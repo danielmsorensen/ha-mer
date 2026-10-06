@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+import json
 from unittest.mock import MagicMock
 
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
+from custom_components.mer.driivz.const import PUSH_STATION_STATUS
 from custom_components.mer.driivz.models import Socket
 from tests.helpers import setup_integration
 from tests.test_sensor import state_by_unique_id
@@ -158,3 +162,71 @@ async def test_charger_available_sockets_count(
     assert charger_a.state == "2"
     assert charger_a.attributes["total_sockets"] == 2
     assert state_by_unique_id(hass, "sensor", f"{eid}_station_6041_available_sockets").state == "1"
+
+
+async def test_charging_says_where_and_then_where_it_ended(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket: Socket,
+) -> None:
+    """Lets an automation leave out the charger you have just unplugged from."""
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    charging = lambda: state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging")  # noqa: E731
+    # Before any session is seen: the charge history's last one, without a socket.
+    attrs = charging().attributes
+    assert (attrs["charger"], attrs["station_id"], attrs["socket_id"]) == (
+        "Riverside - Bay 4 - Charger B",
+        6041,
+        None,
+    )
+    assert attrs["ended_at"] is not None
+
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    attrs = charging().attributes
+    assert charging().state == STATE_ON
+    assert (attrs["socket"], attrs["station_id"], attrs["socket_id"]) == ("Right", 6041, 11242)
+    assert attrs["ended_at"] is None
+
+    history_reads = mock_client.find_transactions.await_count
+    mock_client.find_last_active_charge_socket.return_value = None
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    attrs = charging().attributes
+    assert charging().state == STATE_OFF
+    assert (attrs["socket"], attrs["station_id"], attrs["socket_id"]) == ("Right", 6041, 11242)
+    assert attrs["ended_at"] is not None
+    # The history is re-read in the same poll, so "Last session" catches up at once.
+    assert mock_client.find_transactions.await_count == history_reads + 1
+
+
+async def test_pushed_session_end_is_recorded_and_refreshes(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket: Socket,
+) -> None:
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await setup_integration(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data
+    mock_client.find_last_active_charge_socket.return_value = None
+    history_reads = mock_client.find_transactions.await_count
+    coordinator._handle_push_text(
+        json.dumps(
+            {
+                "@c": PUSH_STATION_STATUS,
+                "stationId": 6041,
+                "stationSocketId": 11242,
+                "stationSocketStatusDto": {"socketStatus": "AVAILABLE"},
+            }
+        )
+    )
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=15))  # refresh debounce
+    await hass.async_block_till_done()
+    eid = mock_config_entry.entry_id
+    attrs = state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").attributes
+    assert attrs["socket_id"] == 11242 and attrs["ended_at"] is not None
+    assert mock_client.find_transactions.await_count == history_reads + 1

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import MerCoordinator
+from .coordinator import ActiveSession, MerCoordinator
 from .driivz.const import STATUS_UNKNOWN, STATUSES
-from .driivz.models import Socket, Station
+from .driivz.models import Socket, Station, clean_caption
 
 STATUS_OPTIONS: list[str] = [status.lower() for status in STATUSES]
 
@@ -28,6 +30,25 @@ def socket_label(socket: Socket) -> str:
     if socket.identity_key:
         return f"Socket {socket.identity_key}"
     return f"Socket {socket.id}"
+
+
+def session_place(coordinator: MerCoordinator, session: ActiveSession) -> dict[str, Any]:
+    """Where a session runs: the charger and socket names, and their ids."""
+    charger = clean_caption(session.station_caption) if session.station_caption else None
+    socket = None
+    if session.station_id is not None:
+        station = coordinator.get_station(session.station_id)
+        if charger is None and station is not None:
+            charger = station.display_name
+        socket = coordinator.get_socket(session.station_id, session.socket_id)
+    return {
+        "charger": charger,
+        "socket": socket_label(socket)
+        if socket is not None
+        else session.socket_name or f"Socket {session.socket_id}",
+        "station_id": session.station_id,
+        "socket_id": session.socket_id,
+    }
 
 
 class MerEntity(CoordinatorEntity[MerCoordinator]):
