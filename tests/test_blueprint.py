@@ -450,3 +450,72 @@ async def test_your_conditions_gate_real_offers_but_not_a_preview(
     hass.states.async_set("input_boolean.car_needs_charge", "on")
     await arrive()
     assert sent[-1]["title"] == "Mer charger free"
+
+
+def android_tap(offer: dict[str, Any]) -> dict[str, Any]:
+    """What the Android app sends back for a tap: the notification's own fields as strings,
+    and no action_data (captured live on 2026-10-07)."""
+    return {
+        "action": "MER_START_CHARGE",
+        "action_1_key": "MER_START_CHARGE",
+        "action_1_title": offer["data"]["actions"][0]["title"],
+        "title": offer["title"],
+        "message": offer["message"],
+        "tag": offer["data"]["tag"],
+        "car_ui": "true",
+        "channel": "Mer charger",
+        "device_id": "cf22d9e259ccac85",
+    }
+
+
+async def test_android_tap_without_action_data_starts_the_offered_socket(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
+    await run_by_hand(hass)
+    hass.bus.async_fire("mobile_app_notification_action", android_tap(sent[0]))
+    await hass.async_block_till_done()
+    mock_client.start_charge.assert_awaited_once_with(11243)
+    assert sent[1]["title"] == "Starting Riverside - Bay 3 - Charger A Left"
+
+
+async def test_repeat_taps_press_once(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """One tap reported by both the car and the phone, then impatient taps: one start."""
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    await run_by_hand(hass)
+    for _ in range(3):
+        hass.bus.async_fire("mobile_app_notification_action", android_tap(sent[0]))
+    await hass.async_block_till_done()
+    mock_client.start_charge.assert_awaited_once_with(11243)
+
+
+async def test_android_tap_on_an_outdated_offer_says_too_late(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """The notification showed Left, but Left has gone: don't start Right instead."""
+    sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
+    await run_by_hand(hass)
+    tap = android_tap(sent[0])
+    mock_client.find_stations_by_ids.return_value = busy(
+        stations_from_fixture("stations_by_ids.json"), 11243
+    )
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    hass.bus.async_fire("mobile_app_notification_action", tap)
+    await hass.async_block_till_done()
+    mock_client.start_charge.assert_not_awaited()
+    assert sent[-1]["title"] == "Too late"
+    assert sent[-1]["message"] == "Riverside - Bay 3 - Charger A Left is no longer free."
+
+
+async def test_tap_on_another_automations_notification_is_ignored(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    await run_by_hand(hass)
+    tap = {**android_tap(sent[0]), "tag": "mer_free_charger_automation.someone_else"}
+    hass.bus.async_fire("mobile_app_notification_action", tap)
+    await hass.async_block_till_done()
+    mock_client.start_charge.assert_not_awaited()

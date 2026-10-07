@@ -233,7 +233,7 @@ Pushes do not count against the portal's rate limit.
 | --- | --- | --- |
 | Charger and socket status | As it changes | Every poll |
 | Your session's energy, cost, charging rate | About every 45 s | Every poll |
-| Session start and end | End: as the socket stops charging. Start: on its first estimate, which triggers a poll | Every poll |
+| Session start and end | End: as the socket stops charging. Start: a socket on your chargers starting to charge, or the session's first estimate, triggers a poll | Every poll |
 | Session started time and duration | No | Every poll |
 | Wallet, last session | No | Every 15 minutes |
 | Socket names, tariffs, model, notify-me state | No | Hourly, one charger per poll |

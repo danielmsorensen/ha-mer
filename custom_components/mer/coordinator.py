@@ -241,6 +241,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         # Your last session after it ended, until the next one starts. Kept in memory
         # only; after a restart the Charging sensor falls back to the charge history.
         self.last_session_end: EndedSession | None = None
+        # Start/stop commands waiting for their outcome; they poll for it themselves.
+        self._commands_running = 0
         self._skip_next = False
         self._rate_warned_at: datetime | None = None
 
@@ -705,20 +707,24 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         method_of: Callable[[], str | None] = lambda: None,
     ) -> CommandResult:
         requested_at = dt_util.utcnow()
+        self._commands_running += 1
         try:
-            await send()
-        except DriivzError as err:
-            self._record_command(
-                command,
-                RESULT_REJECTED,
-                station_id,
-                socket_id,
-                requested_at,
-                str(err),
-                method=method_of(),
-            )
-            raise
-        result = await self._await_outcome(station_id, socket_id, done)
+            try:
+                await send()
+            except DriivzError as err:
+                self._record_command(
+                    command,
+                    RESULT_REJECTED,
+                    station_id,
+                    socket_id,
+                    requested_at,
+                    str(err),
+                    method=method_of(),
+                )
+                raise
+            result = await self._await_outcome(station_id, socket_id, done)
+        finally:
+            self._commands_running -= 1
         record = self._record_command(
             command, result, station_id, socket_id, requested_at, method=method_of()
         )
@@ -787,22 +793,21 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         everything only a poll provides (session duration, wallet, history) froze.
         Seen live on 2026-09-24.
         """
-        if self._note_session_end(self.data.active if self.data else None, data.active):
-            self.hass.async_create_task(self.async_request_refresh(), "mer session ended")
+        self._note_session_end(self.data.active if self.data else None, data.active)
         self.data = data
         self.async_update_listeners()
 
-    def _note_session_end(self, before: ActiveSession | None, after: ActiveSession | None) -> bool:
-        """Record a session that has just ended, and fetch the history it now belongs to.
+    def _note_session_end(self, before: ActiveSession | None, after: ActiveSession | None) -> None:
+        """Record a session that has just ended, and have the next poll re-read the history.
 
-        Returns whether one ended, so a pushed end can ask for the poll that refreshes the
-        history and wallet; a poll that finds the end refreshes them itself.
+        A poll that finds the end re-reads it in the same cycle. A pushed end does not poll
+        at once: the portal can still report the session for a while after the charger has
+        finished, and that poll would bring it back.
         """
         if before is None or (after is not None and after.socket_id == before.socket_id):
-            return False
+            return
         self.last_session_end = EndedSession(before, dt_util.utcnow())
         self._wallet_refreshed = None
-        return True
 
     def _publish_poll(self, station: Station | None, active: ActiveSession | None) -> None:
         if self.data is None:
@@ -956,11 +961,24 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         if push.station_id not in self.data.stations and not on_active_socket:
             return  # the broadcast covers every charger on the network
         stations = dict(self.data.stations)
+        poll_for_session = False
         if push.station_id in stations:
             before = stations[push.station_id]
             stations[push.station_id] = before.with_push(push)
             if _socket_statuses(before) != _socket_statuses(stations[push.station_id]):
                 self._schedule_capabilities(push.station_id)
+            # A socket on your chargers has just started charging and no session of yours
+            # is known: it may be yours (a start that waited for the cable, or one from the
+            # app). Poll now rather than at the next poll, up to 5 minutes away; seen live
+            # on 2026-10-07. Charges by others cost one extra poll each. A running start
+            # command polls for itself.
+            was = _socket_of(before, push.socket_id) if push.socket_id is not None else None
+            poll_for_session = (
+                active is None
+                and not self._commands_running
+                and push.socket_status in _CHARGING_STATUSES
+                and (was is None or was.status not in _CHARGING_STATUSES)
+            )
         # A session whose socket left the charging states is over; the next poll fills
         # in the history, but the entities should not claim you are charging meanwhile.
         if (
@@ -972,6 +990,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             active = None
         self._publish(replace(self.data, stations=stations, active=active))
         self._push_event.set()
+        if poll_for_session:
+            # Only after publishing: the poll can finish before this returns, and
+            # publishing afterwards would overwrite what it found.
+            self.hass.async_create_task(self.async_request_refresh(), "mer charge started")
 
     def _apply_estimate_push(self, push: EstimatePush) -> None:
         assert self.data is not None

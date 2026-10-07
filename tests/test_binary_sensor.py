@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import json
 from unittest.mock import MagicMock
 
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
-from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mer.driivz.const import PUSH_STATION_STATUS
 from custom_components.mer.driivz.models import Socket
@@ -203,7 +201,7 @@ async def test_charging_says_where_and_then_where_it_ended(
     assert mock_client.find_transactions.await_count == history_reads + 1
 
 
-async def test_pushed_session_end_is_recorded_and_refreshes(
+async def test_pushed_session_end_is_recorded_and_history_follows(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
@@ -224,9 +222,12 @@ async def test_pushed_session_end_is_recorded_and_refreshes(
             }
         )
     )
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=15))  # refresh debounce
     await hass.async_block_till_done()
     eid = mock_config_entry.entry_id
     attrs = state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").attributes
     assert attrs["socket_id"] == 11242 and attrs["ended_at"] is not None
+    # No poll straight away (the portal may still report the session); the next one
+    # re-reads the history.
+    assert mock_client.find_transactions.await_count == history_reads
+    await coordinator.async_refresh()
     assert mock_client.find_transactions.await_count == history_reads + 1

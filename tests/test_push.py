@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiohttp import WSMsgType
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -131,11 +132,11 @@ async def test_status_push_updates_socket_without_polling(
     polls = mock_client.find_stations_by_ids.await_count
     assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status").state == "available"
 
-    fake_ws.push(status_push(6042, 11243, "CHARGING"))
+    fake_ws.push(status_push(6042, 11243, "OCCUPIED"))
     await _settle(hass)
 
-    assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status").state == "charging"
-    assert state_by_unique_id(hass, "sensor", f"{eid}_station_6042_status").state == "charging"
+    assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status").state == "occupied"
+    assert state_by_unique_id(hass, "sensor", f"{eid}_station_6042_status").state == "occupied"
     # The other socket on the charger is untouched, and no request was spent.
     assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11244_status").state == "available"
     assert mock_client.find_stations_by_ids.await_count == polls
@@ -440,3 +441,25 @@ async def test_public_charger_session_start_and_end_by_push(
     fake_ws.push(status_push(17886, 15028, "FINISHING"))
     await _settle(hass)
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == "off"
+
+
+async def test_socket_starting_to_charge_polls_for_your_session(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+    charging_socket: Socket,
+) -> None:
+    """A start that waited for the cable: the session is picked up at once, not at the next poll.
+
+    Seen live on 2026-10-07: the socket went to charging at 07:27:22 and the session was
+    only recognised at the 5-minute poll at 07:32:11.
+    """
+    await setup_integration(hass, mock_config_entry)
+    await _settle(hass)
+    eid = mock_config_entry.entry_id
+    mock_client.find_last_active_charge_socket.return_value = charging_socket  # on 11242
+    fake_ws.push(status_push(6041, 11242, "CHARGING"))
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))  # refresh debounce
+    await _settle(hass)
+    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == "on"

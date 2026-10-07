@@ -387,3 +387,31 @@ for other chargers; 48 µs of parsing each; 0.07% of one core for the whole proc
 TLS; about 6 MiB an hour of JSON before compression. No "only at work" switch was added: the
 CPU cost is negligible, and only the bandwidth would matter, on a metered connection.
 
+## 2026-10-07: Android taps carry no action_data; a socket starting to charge polls
+
+**What happened.** Read from Daniel's live instance (automation traces and history). The
+offer went out at 07:24:31, the moment he arrived. Six Start taps between 07:25:35 and
+07:25:56, from the car and the phone, were all ignored: the Android app sends back the
+notification's own fields (tag, title, message, `action_1_title`), but not `action_data`, so
+the blueprint never matched them. A press in Home Assistant at 07:26:06 worked: "Ready, plug
+in" at 07:26:12. The socket went to charging at 07:27:22, but the session was only recognised
+at the 5-minute poll at 07:32:11, so the notification stayed until then.
+
+**Decision.**
+- The blueprint recognises its own notification by the tag, and on Android starts the socket
+  on offer now, provided `action_1_title` still names it. If the offer has changed, it says
+  "Too late" rather than starting another socket. A repeat tap within a minute of a press is
+  ignored; one tap was reported twice, by the car and the phone.
+- A status push showing a socket on your chargers starting to charge, while no session of
+  yours is known and no command is running, polls straight away. A charge by someone else
+  costs one extra poll.
+- A refresh requested from a push handler is requested after the push is published. Mocked
+  requests can complete before the handler returns, and the handler's publish then
+  overwrote the poll's result.
+- A pushed session end no longer polls at once to refresh the history. The portal can still
+  report the session briefly, and that poll would bring it back. The history is re-read at
+  the next poll instead.
+
+The minute's delay before the notification appeared in the car is not on Home Assistant's
+side: it sent the notification in the same second as the arrival.
+

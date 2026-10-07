@@ -257,24 +257,53 @@ variables:
 actions:
   - choose:
       # ---- Start tapped on one of this automation's notifications ------------------
+      # An iPhone sends back action_data. Android sends back the notification's own
+      # fields instead (its tag, and "Start <socket>" as action_1_title) but not
+      # action_data: seen live on 2026-10-07, when every tap was ignored.
       - conditions:
           - "{{ run == 'start_tapped' }}"
-          - "{{ trigger.event.data.action_data.automation == this.entity_id }}"
+          - >-
+            {% set tapped = trigger.event.data %}
+            {{ tapped.get('tag') == tag
+               or (tapped.action_data is defined
+                   and tapped.action_data.get('automation') == this.entity_id) }}
         sequence:
           - variables:
-              start_button: "{{ trigger.event.data.action_data.start_button }}"
-              name: "{{ trigger.event.data.action_data.name }}"
-          - if:
+              tapped: "{{ trigger.event.data }}"
+              # On Android: the socket on offer now, if it is still the one the
+              # notification showed (the notification is kept up to date).
+              still_offered: >-
+                {{ best is not none
+                   and tapped.get('action_1_title', 'Start ' ~ socket) == 'Start ' ~ socket }}
+              start_button: >-
+                {% if tapped.action_data is defined %}{{ tapped.action_data.start_button }}
+                {% elif still_offered %}{{ state_attr(best, 'start_button') }}
+                {% else %}{% endif %}
+              name: >-
+                {% if tapped.action_data is defined %}{{ tapped.action_data.name }}
+                {% elif still_offered %}{{ charger }} {{ socket }}
+                {% else %}{{ tapped.get('message', 'The charger') }}
+                  {{- (' ' ~ tapped.action_1_title[6:]) if tapped.get('action_1_title') else '' }}
+                {% endif %}
+              # Variables hold text, not times, so compare here.
+              pressed_recently: >-
+                {% set pressed = as_datetime(states(start_button), none) if start_button else none %}
+                {{ pressed is not none and now() - pressed < timedelta(minutes=1) }}
+          - choose:
               # The button is unavailable once the socket is taken or already charging,
               # and Home Assistant would silently skip the press.
-              - "{{ states(start_button) == 'unavailable' }}"
-            then:
-              - action: "{{ notify_service }}"
-                data:
-                  title: Too late
-                  message: "{{ name }} is no longer free."
-                  data: "{{ delivery }}"
-            else:
+              - conditions: "{{ not start_button or states(start_button) == 'unavailable' }}"
+                sequence:
+                  - action: "{{ notify_service }}"
+                    data:
+                      title: Too late
+                      message: "{{ name }} is no longer free."
+                      data: "{{ delivery }}"
+              # A repeat tap (or one tap reported by both the car and the phone): the
+              # first press is already under way or done.
+              - conditions: "{{ pressed_recently }}"
+                sequence: []
+            default:
               # Not sent quietly: a quiet update may not show in the car at all.
               - action: "{{ notify_service }}"
                 data:
