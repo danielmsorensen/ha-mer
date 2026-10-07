@@ -273,18 +273,64 @@ actions:
                 data:
                   title: Too late
                   message: "{{ name }} is no longer free."
-                  data: "{{ dict(delivery, **quietly) }}"
+                  data: "{{ delivery }}"
             else:
+              # Not sent quietly: a quiet update may not show in the car at all.
               - action: "{{ notify_service }}"
                 data:
-                  message: "Starting {{ name }}..."
-                  data: "{{ dict(delivery, **quietly) }}"
-              # Holds until the charger confirms; the outcome lands on the account's
-              # "Last command" sensor and the mer_command_result event.
+                  title: "Starting {{ name }}"
+                  message: Waiting for the charger...
+                  data: "{{ delivery }}"
+              - variables:
+                  tapped_at: "{{ as_timestamp(now()) }}"
+              # Holds until the charger shows the outcome, up to a minute; the outcome
+              # lands on the account's "Last command" sensor.
               - action: button.press
                 target:
                   entity_id: "{{ start_button }}"
                 continue_on_error: true
+              - variables:
+                  outcome: >-
+                    {% set last = expand(integration_entities('mer'))
+                         | selectattr('attributes.requested_at', 'defined')
+                         | list | first | default(none) %}
+                    {% if last is not none
+                          and as_timestamp(last.attributes.requested_at) >= tapped_at - 5 %}
+                      {{ {'result': last.state, 'message': last.attributes.message} }}
+                    {% else %}
+                      {{ {'result': 'not_sent', 'message': none} }}
+                    {% endif %}
+              - choose:
+                  # Charging: nothing more to say.
+                  - conditions: "{{ outcome.result == 'charging' }}"
+                    sequence:
+                      - action: "{{ notify_service }}"
+                        data:
+                          message: clear_notification
+                          data:
+                            tag: "{{ tag }}"
+                  - conditions: "{{ outcome.result == 'awaiting_cable' }}"
+                    sequence:
+                      - action: "{{ notify_service }}"
+                        data:
+                          title: Plug in
+                          message: "{{ name }} is waiting for your cable."
+                          data: "{{ delivery }}"
+                  - conditions: "{{ outcome.result == 'unconfirmed' }}"
+                    sequence:
+                      - action: "{{ notify_service }}"
+                        data:
+                          title: "Start sent to {{ name }}"
+                          message: >-
+                            Mer accepted it, but the charger hasn't confirmed it yet. Plug
+                            in if you haven't.
+                          data: "{{ delivery }}"
+                default:
+                  - action: "{{ notify_service }}"
+                    data:
+                      title: "Couldn't start {{ name }}"
+                      message: "{{ outcome.message or 'Check the Mer integration in Home Assistant.' }}"
+                      data: "{{ delivery }}"
 
       # ---- Charging has started: clear the offer, run your actions ------------------
       - conditions:

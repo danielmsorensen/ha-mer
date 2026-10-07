@@ -188,20 +188,65 @@ async def test_socket_freeing_up_only_notifies_in_the_zone(
     assert offer["data"]["tag"] == arrival["data"]["tag"]  # replaces the earlier notice
 
 
-async def test_tapping_start_presses_the_socket_button(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    sent = await setup_blueprint(hass, mock_config_entry, [11243])
-    await run_by_hand(hass)
-    action_data = sent[0]["data"]["action_data"]
+async def tap_start(hass: HomeAssistant, sent: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Tap Start on the first offer; return what was sent from then on."""
+    before = len(sent)
     hass.bus.async_fire(
         "mobile_app_notification_action",
-        {"action": "MER_START_CHARGE", "action_data": action_data},
+        {"action": "MER_START_CHARGE", "action_data": sent[0]["data"]["action_data"]},
     )
     await hass.async_block_till_done()
+    return sent[before:]
+
+
+async def test_tapping_start_presses_the_socket_button_and_says_so(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """No result from the charger within the wait: say the start was sent anyway."""
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    await run_by_hand(hass)
+    starting, outcome = await tap_start(hass, sent)
     mock_client.start_charge.assert_awaited_once_with(11243)
-    assert sent[-1]["message"] == "Starting Riverside - Bay 3 - Charger A Left..."
-    assert sent[-1]["data"]["car_ui"] is True  # replaces the offer in the car too
+    assert starting["title"] == "Starting Riverside - Bay 3 - Charger A Left"
+    assert starting["data"]["car_ui"] is True  # replaces the offer in the car too
+    assert "alert_once" not in starting["data"]  # alerts, so it shows in the car
+    assert outcome["title"] == "Start sent to Riverside - Bay 3 - Charger A Left"
+
+
+async def test_start_confirmed_charging_dismisses_the_notification(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    live = stations_from_fixture("stations_by_ids.json")
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    await run_by_hand(hass)
+    mock_client.find_stations_by_ids.return_value = busy(live, 11243, status="CHARGING")
+    after = await tap_start(hass, sent)
+    assert after[-1]["message"] == "clear_notification"
+
+
+async def test_start_waiting_for_the_cable_says_plug_in(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    live = stations_from_fixture("stations_by_ids.json")
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    await run_by_hand(hass)
+    mock_client.find_stations_by_ids.return_value = busy(live, 11243, status="PREPARING")
+    after = await tap_start(hass, sent)
+    assert after[-1]["title"] == "Plug in"
+    assert after[-1]["message"] == "Riverside - Bay 3 - Charger A Left is waiting for your cable."
+
+
+async def test_start_refused_says_why(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    from custom_components.mer.driivz.exceptions import ApiError
+
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    await run_by_hand(hass)
+    mock_client.start_charge.side_effect = ApiError("NOT_AUTHORIZED")
+    after = await tap_start(hass, sent)
+    assert after[-1]["title"] == "Couldn't start Riverside - Bay 3 - Charger A Left"
+    assert "NOT_AUTHORIZED" in after[-1]["message"]
 
 
 async def test_device_tracker_works_as_the_tracker(
@@ -299,14 +344,10 @@ async def test_your_own_start_does_not_rewrite_the_notification(
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
     await run_by_hand(hass)
     mock_client.find_stations_by_ids.return_value = busy(live, 11243, status="PREPARING")
-    hass.bus.async_fire(
-        "mobile_app_notification_action",
-        {"action": "MER_START_CHARGE", "action_data": sent[0]["data"]["action_data"]},
-    )
-    await hass.async_block_till_done()
+    await tap_start(hass, sent)
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
-    assert sent[-1]["message"] == "Starting Riverside - Bay 3 - Charger A Left..."
+    assert sent[-1]["title"] == "Plug in"  # not an offer for Right
 
 
 async def test_your_actions_run_when_charging_starts_on_a_chosen_socket(

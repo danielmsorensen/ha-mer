@@ -146,8 +146,11 @@ sends **Mer charger free** with the charger's name and a button such as **Start 
 - The charger you have unplugged from since arriving is not offered again.
 - If someone else takes the socket on offer, the notification quietly changes to your
   next free socket, or to **No Mer charger free**.
-- Tapping Start presses that socket's start button, or tells you the socket has been
-  taken.
+- Tapping Start says **Starting…**, presses that socket's start button, and waits for
+  the charger. Once it is charging the notification is dismissed; otherwise it is
+  replaced with **Plug in**, **Start sent** (Mer accepted it but the charger hasn't
+  confirmed it yet) or **Couldn't start** with the reason. If the socket has been taken it
+  says **Too late**.
 - The notification stays when tapped, and clears once you are charging or leave the
   zone.
 - **Preview:** choose **Run actions** from the automation's ⋮ menu. It sends what
