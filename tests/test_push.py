@@ -463,3 +463,36 @@ async def test_socket_starting_to_charge_polls_for_your_session(
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))  # refresh debounce
     await _settle(hass)
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == "on"
+
+
+async def test_your_start_is_followed_until_the_portal_reports_the_session(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+    charging_socket: Socket,
+) -> None:
+    """Seen live on 2026-10-12: the socket went to "paused" 4 s before the portal reported
+    the session, so one poll found nothing and the session appeared 5 minutes later."""
+    await setup_integration(hass, mock_config_entry)
+    await _settle(hass)
+    eid = mock_config_entry.entry_id
+    coordinator = mock_config_entry.runtime_data
+    # Your start went through and the charger is waiting for the cable.
+    coordinator._record_command("start", "awaiting_cable", 6041, 11242, dt_util.utcnow())
+
+    checks = 0
+
+    async def portal_catches_up() -> Socket | None:
+        nonlocal checks
+        checks += 1
+        return charging_socket if checks >= 3 else None
+
+    mock_client.find_last_active_charge_socket.side_effect = portal_catches_up
+    with patch("custom_components.mer.coordinator.SESSION_WATCH_DELAYS_SECONDS", (0, 0, 0, 0)):
+        fake_ws.push(status_push(6041, 11242, "PAUSED"))
+        await _settle(hass)
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))  # debounce
+        await _settle(hass)
+    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == "on"
+    assert checks >= 3

@@ -31,6 +31,7 @@ from .const import (
     DOMAIN,
     EVENT_COMMAND_RESULT,
     HISTORY_LOOKBACK,
+    OWN_START_WINDOW,
     PUSH_POLL_INTERVAL_SECONDS,
     PUSH_RECONNECT_MAX_SECONDS,
     PUSH_RECONNECT_MIN_SECONDS,
@@ -38,6 +39,7 @@ from .const import (
     RATE_LIMIT_SKIP_THRESHOLD,
     RATE_LIMIT_WARN_INTERVAL,
     REFRESH_AFTER_COMMAND_SECONDS,
+    SESSION_WATCH_DELAYS_SECONDS,
     SUBENTRY_TYPE_SITE,
     WALLET_REFRESH,
 )
@@ -243,6 +245,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self.last_session_end: EndedSession | None = None
         # Start/stop commands waiting for their outcome; they poll for it themselves.
         self._commands_running = 0
+        # Looking for the session of your own start, once its socket is charging.
+        self._session_watch: asyncio.Task[None] | None = None
         self._skip_next = False
         self._rate_warned_at: datetime | None = None
 
@@ -993,7 +997,55 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         if poll_for_session:
             # Only after publishing: the poll can finish before this returns, and
             # publishing afterwards would overwrite what it found.
-            self.hass.async_create_task(self.async_request_refresh(), "mer charge started")
+            if push.socket_id is not None and self._own_recent_start(push.socket_id):
+                self._watch_for_session()
+            else:
+                self.hass.async_create_task(self.async_request_refresh(), "mer charge started")
+
+    def _own_recent_start(self, socket_id: int) -> bool:
+        """Whether your last command was a start on this socket, recently, that went through."""
+        last = self._last_command
+        return (
+            last is not None
+            and last.command == "start"
+            and last.socket_id == socket_id
+            and last.result != RESULT_REJECTED
+            and dt_util.utcnow() - last.requested_at < OWN_START_WINDOW
+        )
+
+    def _watch_for_session(self) -> None:
+        """Look for your session until it appears, after your own start began charging."""
+        if self._session_watch is None or self._session_watch.done():
+            # Tied to the entry, so unloading it cancels the watch.
+            self._session_watch = self.config_entry.async_create_background_task(
+                self.hass, self._look_for_session(), "mer session watch"
+            )
+
+    async def _look_for_session(self) -> None:
+        """Ask the portal for the active session at growing intervals; poll once it has one.
+
+        One request per check, and only after a start of yours, so a portal that is slow
+        to report the session costs at most a handful of requests rather than a 5-minute
+        wait. Stops once any poll has found the session.
+        """
+        waited = 0
+        for delay in SESSION_WATCH_DELAYS_SECONDS:
+            await asyncio.sleep(delay - waited)
+            waited = delay
+            if self.data is not None and self.data.active is not None:
+                return
+            remaining = self.client.rate_limit_remaining
+            if remaining is not None and remaining <= COMMAND_RATE_LIMIT_FLOOR:
+                return
+            try:
+                found = await self.client.find_last_active_charge_socket()
+            except DriivzError as err:
+                _LOGGER.debug("Looking for the new session failed: %s", err)
+                continue
+            if found is not None:
+                await self.async_request_refresh()
+                return
+        _LOGGER.debug("No session reported %s s after your start began charging", waited)
 
     def _apply_estimate_push(self, push: EstimatePush) -> None:
         assert self.data is not None

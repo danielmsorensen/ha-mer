@@ -415,3 +415,18 @@ at the 5-minute poll at 07:32:11, so the notification stayed until then.
 The minute's delay before the notification appeared in the car is not on Home Assistant's
 side: it sent the notification in the same second as the arrival.
 
+## 2026-10-12: after your own start, keep asking for the session until it appears
+
+**What happened.** Read from Daniel's live instance. The start at 11:23:17 reached "Ready,
+plug in" at 11:23:38. At 11:23:59 the socket went to "paused" (a charging state), and the
+2026-10-07 rule polled once, but the portal did not report the session yet. At 11:24:03 it
+went from paused to charging, which is not a new start of charging, so there was no second
+poll. The session appeared at the regular poll at 11:28:59, which cleared the "Plug in"
+notification and enabled Stop.
+
+**Decision.** When a socket you recently started (a start on it within 10 minutes that wasn't
+rejected) begins charging and no session is known, the coordinator asks
+`findLastActiveChargeSocket` at 10, 20, 30, 60 and 120 s, one request each, and polls fully
+as soon as it reports the session. Charges by others keep the single poll. The watch is tied
+to the config entry, so it is cancelled on unload.
+

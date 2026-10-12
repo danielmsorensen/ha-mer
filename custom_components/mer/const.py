@@ -51,6 +51,12 @@ EVENT_COMMAND_RESULT = "mer_command_result"
 # A charger's socket capabilities are re-read this long after one of its sockets
 # changes status, so a burst of changes costs one request.
 CAPABILITY_REFRESH_DELAY_SECONDS = 5
+# After your own start, once its socket is charging: when to ask the portal for the session
+# until it appears (seconds after the socket started charging). The portal can take a while
+# to report it; on 2026-10-12 a poll 4 s in found nothing, and the next came 5 minutes later.
+SESSION_WATCH_DELAYS_SECONDS: tuple[int, ...] = (10, 20, 30, 60, 120)
+# How recent a start of yours on the socket must be for its charging to be expected as yours.
+OWN_START_WINDOW = timedelta(minutes=10)
 # While the push channel is connected, socket status arrives instantly, so the poll
 # only has to cover wallet, history and details; it drops to this interval.
 PUSH_POLL_INTERVAL_SECONDS = 300
