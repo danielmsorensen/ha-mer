@@ -401,25 +401,45 @@ async def test_your_actions_skip_a_charge_on_another_socket(
     assert hooked == []
 
 
-async def test_charger_you_just_left_is_not_offered(
+async def test_after_you_stop_only_sockets_freed_later_are_offered(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
     charging_socket,
 ) -> None:
-    """Unplugging from Charger B Right after arriving: offer Charger A instead."""
-    sent = await setup_blueprint(hass, mock_config_entry, [11242, 11243])
+    """Seen live on 2026-10-12: stopping to go home offered a charger already free.
+
+    After your charge ends, sockets already free are not offered, nor is the charger you
+    left; one that frees up later is, so stopping early for someone else can still top up.
+    """
+    live = stations_from_fixture("stations_by_ids.json")  # B Left charging; the rest free
+    sent = await setup_blueprint(hass, mock_config_entry, [11242, 11241, 11243, 11244])
     coordinator = mock_config_entry.runtime_data
+
+    async def poll(stations) -> None:
+        mock_client.find_stations_by_ids.return_value = stations
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
     mock_client.find_last_active_charge_socket.return_value = charging_socket  # on 11242
-    await coordinator.async_refresh()
-    await hass.async_block_till_done()
-    mock_client.find_last_active_charge_socket.return_value = None  # unplugged
-    await coordinator.async_refresh()
-    await hass.async_block_till_done()
+    await poll(live)
+    mock_client.find_last_active_charge_socket.return_value = None  # you stop
+    await poll(live)
     sent.clear()
-    await run_by_hand(hass)
+
+    await run_by_hand(hass)  # Charger A was already free: nothing to offer
+    assert [n["title"] for n in sent] == ["No Mer charger free"]
+    sent.clear()
+
+    left_free = busy(live, 11241, status="AVAILABLE")
+    await poll(left_free)  # the other socket on the charger you left frees up
+    await poll(busy(left_free, 11243, status="OCCUPIED"))  # one already free is taken
+    assert sent == []
+
+    await poll(left_free)  # and frees up again, after you stopped
     (offer,) = sent
     assert offer["message"] == "Riverside - Bay 3 - Charger A"
+    assert offer["data"]["actions"][0]["title"] == "Start Left"
 
 
 async def test_your_conditions_gate_real_offers_but_not_a_preview(
@@ -519,3 +539,18 @@ async def test_tap_on_another_automations_notification_is_ignored(
     hass.bus.async_fire("mobile_app_notification_action", tap)
     await hass.async_block_till_done()
     mock_client.start_charge.assert_not_awaited()
+
+
+async def test_a_less_preferred_socket_freeing_up_does_not_alert_again(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Charger A Left is on offer; Right freeing up leaves the offer as it is."""
+    live = stations_from_fixture("stations_by_ids.json")
+    mock_client.find_stations_by_ids.return_value = busy(live, 11244)
+    sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
+    await run_by_hand(hass)
+    assert len(sent) == 1
+    mock_client.find_stations_by_ids.return_value = live  # Right frees up
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert len(sent) == 1

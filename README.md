@@ -143,7 +143,10 @@ When you arrive, and whenever a socket frees up while you are there and not char
 sends **Mer charger free** with the charger's name and a button such as **Start Right**.
 
 - Arriving with everything taken sends **No Mer charger free**.
-- The charger you have unplugged from since arriving is not offered again.
+- Once you have stopped charging, only sockets that free up afterwards are offered, and
+  not on the charger you left. Stop to go home and you aren't offered the ones already
+  free; stop early to let someone else charge and you can still top up when another frees
+  up.
 - If someone else takes the socket on offer, the notification quietly changes to your
   next free socket, or to **No Mer charger free**.
 - Tapping Start says **Starting…**, presses that socket's start button, and waits for

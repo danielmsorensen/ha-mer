@@ -430,3 +430,20 @@ rejected) begins charging and no session is known, the coordinator asks
 as soon as it reports the session. Charges by others keep the single poll. The watch is tied
 to the config entry, so it is cancelled on unload.
 
+## 2026-10-15: after you stop, only sockets that free up later are offered
+
+**What happened.** Read from Daniel's live instance. On 2026-10-12 he stopped charging on
+Explorer 1 at 15:31:57 to go home. At 15:32:42, once Explorer 1 Right had been free for
+30 s, the blueprint offered Explorer 2, which had been free all along. Explorer 1 was
+correctly left out as the charger he had just left. His "Only offer when" condition (the
+car below its target) held at 96.8% of 100%.
+
+**Decision.** Once a charge of yours has ended since you arrived, only sockets that become
+free after it ended are offered, and still never on the charger you left. Stopping to go
+home offers nothing already free, and you are out of the zone before anything else frees.
+Stopping early to let someone else charge still offers one that frees up later, so you can
+top up. The "taken" update applies the same rule, so a socket that was never on offer being
+taken changes nothing. A socket freeing up now sends the offer only when it is the one to
+offer. Before, any socket freeing up re-sent the current best offer, alerting again for an
+offer already showing.
+
