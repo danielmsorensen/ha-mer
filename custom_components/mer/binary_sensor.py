@@ -33,17 +33,23 @@ class MerStationBinaryDescription(BinarySensorEntityDescription):
 def _charging_attributes(coordinator: MerCoordinator, data: MerData) -> dict[str, Any]:
     """Where your session is running; once it ends, where it ran and when it ended.
 
-    Lets an automation leave out the charger you have just unplugged from. The end is
+    `socket_reused_at` says when someone else started using the socket you left after
+    you unplugged, so an automation can leave it out of offers until it frees after that. The end is
     the moment the integration saw it; after a restart, the charge history's last
     session stands in (without its socket, which the history does not record).
     """
     if data.active is not None:
-        return {**session_place(coordinator, data.active), "ended_at": None}
+        return {
+            **session_place(coordinator, data.active),
+            "ended_at": None,
+            "socket_reused_at": None,
+        }
     ended = coordinator.last_session_end
     if ended is not None:
         return {
             **session_place(coordinator, ended.session),
             "ended_at": ended.ended_at.isoformat(),
+            "socket_reused_at": ended.reused_at.isoformat() if ended.reused_at else None,
         }
     last = data.last_transaction
     return {
@@ -52,6 +58,7 @@ def _charging_attributes(coordinator: MerCoordinator, data: MerData) -> dict[str
         "station_id": last.station_id if last else None,
         "socket_id": None,
         "ended_at": last.stopped_at.isoformat() if last and last.stopped_at else None,
+        "socket_reused_at": None,
     }
 
 

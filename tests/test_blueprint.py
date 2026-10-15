@@ -401,18 +401,13 @@ async def test_your_actions_skip_a_charge_on_another_socket(
     assert hooked == []
 
 
-async def test_after_you_stop_only_sockets_freed_later_are_offered(
+async def stop_charging_on_charger_b_right(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
     charging_socket,
-) -> None:
-    """Seen live on 2026-10-12: stopping to go home offered a charger already free.
-
-    After your charge ends, sockets already free are not offered, nor is the charger you
-    left; one that frees up later is, so stopping early for someone else can still top up.
-    """
-    live = stations_from_fixture("stations_by_ids.json")  # B Left charging; the rest free
+) -> tuple[list[dict[str, Any]], Any]:
+    """Charge on Charger B Right (11242), then stop; return what's sent and a poller."""
     sent = await setup_blueprint(hass, mock_config_entry, [11242, 11241, 11243, 11244])
     coordinator = mock_config_entry.runtime_data
 
@@ -421,24 +416,59 @@ async def test_after_you_stop_only_sockets_freed_later_are_offered(
         await coordinator.async_refresh()
         await hass.async_block_till_done()
 
-    mock_client.find_last_active_charge_socket.return_value = charging_socket  # on 11242
-    await poll(live)
-    mock_client.find_last_active_charge_socket.return_value = None  # you stop
-    await poll(live)
+    live = stations_from_fixture("stations_by_ids.json")  # B Left charging; the rest free
+    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    await poll(busy(live, 11242, status="CHARGING"))
+    mock_client.find_last_active_charge_socket.return_value = None
+    await poll(busy(live, 11242, status="FINISHING"))  # you stop
+    await poll(live)  # and unplug: Right is free
     sent.clear()
+    return sent, poll
 
-    await run_by_hand(hass)  # Charger A was already free: nothing to offer
+
+async def test_after_you_stop_only_sockets_freed_later_are_offered(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket,
+) -> None:
+    """Seen live on 2026-10-12: stopping to go home offered a charger already free.
+
+    After your charge ends, sockets already free are not offered, nor is the socket you
+    left until someone else has used it.
+    """
+    sent, poll = await stop_charging_on_charger_b_right(
+        hass, mock_config_entry, mock_client, charging_socket
+    )
+    live = stations_from_fixture("stations_by_ids.json")
+    await run_by_hand(hass)  # Charger A was already free; Right is the one you left
     assert [n["title"] for n in sent] == ["No Mer charger free"]
     sent.clear()
 
-    left_free = busy(live, 11241, status="AVAILABLE")
-    await poll(left_free)  # the other socket on the charger you left frees up
-    await poll(busy(left_free, 11243, status="OCCUPIED"))  # one already free is taken
+    await poll(busy(live, 11243, status="OCCUPIED"))  # one already free is taken
+    await poll(busy(live, 11243, 11242, status="OCCUPIED"))  # and someone takes yours
     assert sent == []
 
-    await poll(left_free)  # and frees up again, after you stopped
+    await poll(busy(live, 11243, status="OCCUPIED"))  # they finish: yours frees again
     (offer,) = sent
-    assert offer["message"] == "Riverside - Bay 3 - Charger A"
+    assert offer["message"] == "Riverside - Bay 4 - Charger B"
+    assert offer["data"]["actions"][0]["title"] == "Start Right"
+
+
+async def test_after_you_stop_another_socket_freeing_up_is_offered(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket,
+) -> None:
+    """Stopping early for someone else: you can top up when another socket frees."""
+    sent, poll = await stop_charging_on_charger_b_right(
+        hass, mock_config_entry, mock_client, charging_socket
+    )
+    live = stations_from_fixture("stations_by_ids.json")
+    await poll(busy(live, 11241, status="AVAILABLE"))  # Charger B Left frees up
+    (offer,) = sent
+    assert offer["message"] == "Riverside - Bay 4 - Charger B"
     assert offer["data"]["actions"][0]["title"] == "Start Left"
 
 

@@ -224,10 +224,10 @@ variables:
   # Added to an update of a notification already showing, so it doesn't sound again.
   quietly: "{{ {'alert_once': true, 'push': {'interruption-level': 'passive'}} }}"
   # Once a charge of yours has ended since you arrived, only sockets that free up after
-  # it ended are offered, and never on the charger you left: stopping to go home doesn't
-  # offer the ones already free, while stopping early to let someone else charge still
-  # offers one that frees up later. The Charging sensor says where your last session ran
-  # and when it ended.
+  # it ended are offered, and the socket you left only once someone else has used it:
+  # stopping to go home doesn't offer the ones already free, while stopping early to let
+  # someone else charge still offers one that frees up later. The Charging sensor says
+  # where your last session ran, when it ended and whether its socket has been used since.
   charging_sensor: !input charging
   tracker: !input tracker
   ended_here: >-
@@ -236,12 +236,20 @@ variables:
     {{ as_timestamp(ended)
        if is_state(charging_sensor, 'off') and ended and arrived and ended > arrived
        else none }}
-  just_left: "{{ state_attr(charging_sensor, 'station_id') if ended_here else none }}"
+  left_socket: "{{ state_attr(charging_sensor, 'socket_id') if ended_here else none }}"
+  # The socket you left counts again once it frees after someone else started using it.
+  reused_at: >-
+    {{ as_timestamp(state_attr(charging_sensor, 'socket_reused_at'), none)
+       if ended_here else none }}
   free: >-
     {% set ns = namespace(free=[]) %}
-    {% for s in sockets | select('is_state', 'available')
-                        | reject('is_state_attr', 'station_id', just_left) %}
-      {% if ended_here is none or as_timestamp(states[s].last_changed) > ended_here %}
+    {% for s in sockets | select('is_state', 'available') %}
+      {% set freed = as_timestamp(states[s].last_changed) %}
+      {% set mine = left_socket is not none
+                    and state_attr(s, 'socket_id') == left_socket %}
+      {% if ended_here is none
+            or (freed > ended_here
+                and (not mine or (reused_at is not none and freed > reused_at))) %}
         {% set ns.free = ns.free + [s] %}
       {% endif %}
     {% endfor %}
@@ -414,9 +422,12 @@ actions:
           # you prefer to it is free now (only this one changed).
           - "{{ (now() - trigger.from_state.last_changed).total_seconds() >= freed_seconds }}"
           - >-
+            {% set freed = as_timestamp(trigger.from_state.last_changed) %}
+            {% set mine = left_socket is not none
+                          and state_attr(trigger.entity_id, 'socket_id') == left_socket %}
             {{ ended_here is none
-               or (state_attr(trigger.entity_id, 'station_id') != just_left
-                   and as_timestamp(trigger.from_state.last_changed) > ended_here) }}
+               or (freed > ended_here
+                   and (not mine or (reused_at is not none and freed > reused_at))) }}
           - "{{ best is none or sockets.index(trigger.entity_id) < sockets.index(best) }}"
           # Not taken by your own start from Home Assistant: its start button was not
           # pressed, and the last command was not a start there, in the last 5 minutes.

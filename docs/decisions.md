@@ -447,3 +447,11 @@ taken changes nothing. A socket freeing up now sends the offer only when it is t
 offer. Before, any socket freeing up re-sent the current best offer, alerting again for an
 offer already showing.
 
+**Refined the same day.** Leaving out the whole charger you left for the rest of the visit
+was too broad. Now only the socket you left is held back, and only until someone else has
+used it. The coordinator records when that socket, having freed after your session, next
+goes into use (`socket_reused_at` on the Charging sensor). The blueprint offers it again
+only if it freed after that time. A timestamp rather than a flag, because the flag flips in
+the same update that has the socket taken: the "taken" check then counted the socket as
+having been on offer when it never was.
+

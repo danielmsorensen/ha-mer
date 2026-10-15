@@ -231,3 +231,40 @@ async def test_pushed_session_end_is_recorded_and_history_follows(
     assert mock_client.find_transactions.await_count == history_reads
     await coordinator.async_refresh()
     assert mock_client.find_transactions.await_count == history_reads + 1
+
+
+async def test_charging_says_when_the_socket_you_left_is_used_again(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket: Socket,
+) -> None:
+    from tests.helpers import stations_from_fixture
+    from tests.test_button import with_socket_status
+
+    live = stations_from_fixture("stations_by_ids.json")
+    mock_client.find_last_active_charge_socket.return_value = charging_socket  # on 11242
+    mock_client.find_stations_by_ids.return_value = with_socket_status(live, 11242, "CHARGING")
+    await setup_integration(hass, mock_config_entry)
+    coordinator = mock_config_entry.runtime_data
+    eid = mock_config_entry.entry_id
+    reused = lambda: state_by_unique_id(  # noqa: E731
+        hass, "binary_sensor", f"{eid}_account_charging"
+    ).attributes["socket_reused_at"]
+    assert reused() is None  # charging
+
+    async def poll(status: str) -> None:
+        mock_client.find_stations_by_ids.return_value = with_socket_status(live, 11242, status)
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    mock_client.find_last_active_charge_socket.return_value = None
+    await poll("FINISHING")  # you stop; still plugged in
+    assert reused() is None
+    await poll("AVAILABLE")  # you unplug
+    assert reused() is None
+    await poll("PREPARING")  # someone else plugs in
+    taken_at = reused()
+    assert taken_at is not None
+    await poll("AVAILABLE")  # and it is kept once they leave
+    assert reused() == taken_at

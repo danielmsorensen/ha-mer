@@ -46,6 +46,7 @@ from .const import (
 from .driivz.client import DriivzDriverClient
 from .driivz.const import (
     DENIED_FOR_SOCKET_STATE,
+    IN_USE_STATUSES,
     OP_START_CHARGE,
     OP_START_CHARGE_NOW,
     STATUS_AVAILABLE,
@@ -118,6 +119,10 @@ class EndedSession:
 
     session: ActiveSession
     ended_at: datetime
+    # The socket you left: whether it has been free since, and when someone else then
+    # started using it.
+    freed: bool = False
+    reused_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +308,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             previous = self.data.stations.get(station_id) if self.data else None
             if previous is None or _socket_statuses(previous) != _socket_statuses(station):
                 self._schedule_capabilities(station_id)
+        self._follow_left_socket(stations)
         return MerData(
             stations=stations,
             details=dict(self._details),
@@ -798,6 +804,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         Seen live on 2026-09-24.
         """
         self._note_session_end(self.data.active if self.data else None, data.active)
+        self._follow_left_socket(data.stations)
         self.data = data
         self.async_update_listeners()
 
@@ -812,6 +819,24 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             return
         self.last_session_end = EndedSession(before, dt_util.utcnow())
         self._wallet_refreshed = None
+
+    def _follow_left_socket(self, stations: dict[int, Station]) -> None:
+        """Note when the socket you left frees up, and then when someone else uses it.
+
+        Lets an automation leave the socket you unplugged from out of offers until it has
+        been taken and freed again by someone else.
+        """
+        ended = self.last_session_end
+        if ended is None or ended.reused_at or ended.session.station_id is None:
+            return
+        socket = _socket_of(stations.get(ended.session.station_id), ended.session.socket_id)
+        if socket is None:
+            return
+        if socket.status == STATUS_AVAILABLE:
+            if not ended.freed:
+                self.last_session_end = replace(ended, freed=True)
+        elif ended.freed and socket.status in IN_USE_STATUSES:
+            self.last_session_end = replace(ended, reused_at=dt_util.utcnow())
 
     def _publish_poll(self, station: Station | None, active: ActiveSession | None) -> None:
         if self.data is None:

@@ -65,7 +65,7 @@ Each socket (often "Left" and "Right") adds:
 | --- | --- |
 | Available sockets | Free sockets on your chargers. Attributes: `available_sockets` (each with `charger`, `socket`, `station_id`, `socket_id`, `start_button`, in charger order), `total_sockets`, `chargers` |
 | Sockets in use | Sockets on your chargers in any in-use state |
-| Charging | On while you have an active session anywhere. Attributes `charger`, `socket`, `station_id` and `socket_id` say where it runs, or where your last session ran once it has ended, with `ended_at` |
+| Charging | On while you have an active session anywhere. Attributes `charger`, `socket`, `station_id` and `socket_id` say where it runs, or where your last session ran once it has ended, with `ended_at` and `socket_reused_at` (when someone else started using the socket you left) |
 | Active session | Where it is running, as *charger socket*, with ids as attributes |
 | Active session started, energy, cost, duration | As named; unavailable while not charging |
 | Active session charging rate | The portal's estimated rate in kW at the charger, refreshed with each meter reading (the car sees roughly 10% less) |
@@ -144,9 +144,9 @@ sends **Mer charger free** with the charger's name and a button such as **Start 
 
 - Arriving with everything taken sends **No Mer charger free**.
 - Once you have stopped charging, only sockets that free up afterwards are offered, and
-  not on the charger you left. Stop to go home and you aren't offered the ones already
-  free; stop early to let someone else charge and you can still top up when another frees
-  up.
+  the socket you left only after someone else has used it. Stop to go home and you aren't
+  offered the ones already free; stop early to let someone else charge and you can still
+  top up when one frees up, yours included.
 - If someone else takes the socket on offer, the notification quietly changes to your
   next free socket, or to **No Mer charger free**.
 - Tapping Start says **Starting…**, presses that socket's start button, and waits for
