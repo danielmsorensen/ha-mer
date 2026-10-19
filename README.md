@@ -139,8 +139,10 @@ actions:
 - the sockets to watch, in order of preference, by picking their *socket* status sensors;
 - your phone.
 
-When you arrive, and whenever a socket frees up while you are there and not charging, it
-sends **Mer charger free** with the charger's name and a button such as **Start Right**.
+When you arrive, and whenever a socket frees up that becomes your best option while you
+are there and not charging, it sends **Mer charger free** with the charger's name and a
+button such as **Start Right**. A less preferred socket freeing up doesn't alert you again
+for an offer already showing.
 
 - Arriving with everything taken sends **No Mer charger free**.
 - Once you have stopped charging, only sockets that free up afterwards are offered, and
@@ -236,7 +238,7 @@ Pushes do not count against the portal's rate limit.
 | --- | --- | --- |
 | Charger and socket status | As it changes | Every poll |
 | Your session's energy, cost, charging rate | About every 45 s | Every poll |
-| Session start and end | End: as the socket stops charging. Start: a socket on your chargers starting to charge, or the session's first estimate, triggers a poll | Every poll |
+| Session start and end | End: as the socket stops charging. Start: a socket on your chargers starting to charge, or the session's first estimate, triggers a poll; after your own start the portal is asked again at 10, 20, 30, 60 and 120 s until it reports the session | Every poll |
 | Session started time and duration | No | Every poll |
 | Wallet, last session | No | Every 15 minutes |
 | Socket names, tariffs, model, notify-me state | No | Hourly, one charger per poll |
@@ -279,7 +281,7 @@ from Windows:
 | `scripts/lint` | `ruff check` and `ruff format --check` |
 | `scripts/format` | `ruff format` |
 | `scripts/dev-hass` | A throwaway Home Assistant instance at <http://localhost:8123>, config in `~/ha-mer-dev`; `--reset` wipes it |
-| `scripts/release <version> "<notes>"` | Sets the manifest version, commits, tags `v<version>`, pushes, and publishes the GitHub release. CI fails a tag that does not match the manifest |
+| `scripts/release <version> "<notes>"` | Sets the manifest version, commits, tags `v<version>`, pushes, and publishes the GitHub release. Runs in the Windows shell, so needs Python and the GitHub CLI there. CI fails a tag that does not match the manifest |
 
 On Linux or macOS, `pip install -r requirements_test.txt` into a virtualenv and run
 `pytest` and `ruff` directly.

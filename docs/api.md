@@ -188,7 +188,8 @@ unpublished endpoint.
 
 `wss://<host>/websocket`. The client sends the literal string `"0"` on open, and the
 server pushes JSON messages whose `@c` (or `@class`) field names the DTO. It does not count
-against `X-Rate-Limit-Remaining`. Observed live from 2026-09-24:
+against `X-Rate-Limit-Remaining` while the portal sent that header (until 2026-10-06).
+Observed live from 2026-09-24:
 
 - **`StationStatusSummaryDtoImp`** is broadcast for the whole network: 84 messages in
   90 s across 33 chargers. Each carries `stationId`, `stationSocketId`,

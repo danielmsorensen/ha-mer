@@ -90,7 +90,9 @@ blueprint:
     none_free_notification:
       name: '"Nothing free" notification'
       icon: mdi:bell-minus-outline
-      description: Sent on arrival when every chosen socket is taken.
+      description: >-
+        Sent on arrival when every chosen socket is taken, and in place of an offer once
+        its socket is taken and nothing else is free.
       collapsed: true
       input:
         notify_none_free:
@@ -161,7 +163,9 @@ blueprint:
             duration: {}
         charging:
           name: Charging sensor
-          description: The Mer account's "Charging" sensor; offers are only made while it is off.
+          description: >-
+            The Mer account's "Charging" sensor. Offers are only made while it is off,
+            unless "Notify even while the account is charging" is on.
           default: binary_sensor.mer_account_charging
           selector:
             entity:

@@ -471,3 +471,21 @@ response without it now clears the value instead of keeping a stale one; HTML pa
 leave it alone. The sensor is disabled by default for new installs and stays enabled where it
 already exists. In the 9.4 days checked, about 3,000 polls met no rate-limit refusal.
 
+## 2026-10-19: an option to notify even while the account is charging
+
+**Decision.** The blueprint gains "Notify even while the account is charging", off by
+default. With it on, offers ignore the account's Charging sensor and the after-stop rules,
+and a charge starting moves the notification on to the next free socket, quietly, instead
+of clearing it. The zone check and the user's own conditions still apply.
+
+**Why.** Daniel raised three cases where the account's charging says nothing about whether
+an offer is wanted: a second car, looking out for a friend or colleague, and an account
+shared with family or colleagues, whose charges elsewhere would otherwise suppress offers.
+
+**Why an option, not a default condition.** A default in the "Only offer when" conditions
+would not reach automations that already set their own conditions: Daniel's would have
+started offering while charging after a re-import. It also could not switch off the
+after-stop rules or change what happens when a charge starts, and a default cannot refer to
+the Charging sensor chosen in another input. Narrower rules come from turning the option on
+and adding a condition, such as the user's own car not charging.
+
