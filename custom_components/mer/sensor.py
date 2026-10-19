@@ -14,7 +14,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfPower, UnitOfTime
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
@@ -587,6 +587,37 @@ class MerSocketSensor(MerSocketEntity, SensorEntity):
         description: MerSocketSensorDescription,
     ) -> None:
         super().__init__(coordinator, station_id, socket_id, description)
+
+    async def async_added_to_hass(self) -> None:
+        """Rewrite the status's `start_button` once the button is registered or renamed.
+
+        Home Assistant sets up the sensor and button platforms in parallel, so on a fresh
+        install (or a newly added charger) the status can be written before its button
+        exists, leaving `start_button` empty until the next update. An offer sent then had
+        no button to press; it made the blueprint tests flaky in CI.
+        """
+        await super().async_added_to_hass()
+        if self.entity_description.attributes_fn is not _socket_status_attributes:
+            return
+        button_unique_id = f"{self.entry_id}_socket_{self.socket_id}_start_charge"
+        registry = er.async_get(self.hass)
+
+        @callback
+        def _is_our_button(event_data: er.EventEntityRegistryUpdatedData) -> bool:
+            if event_data["action"] not in ("create", "update"):
+                return False
+            entry = registry.async_get(event_data["entity_id"])
+            return entry is not None and entry.unique_id == button_unique_id
+
+        @callback
+        def _rewrite(_event: Event[er.EventEntityRegistryUpdatedData]) -> None:
+            self.async_write_ha_state()
+
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                er.EVENT_ENTITY_REGISTRY_UPDATED, _rewrite, event_filter=_is_our_button
+            )
+        )
 
     @property
     def native_value(self) -> StateType:

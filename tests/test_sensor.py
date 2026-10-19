@@ -389,3 +389,17 @@ async def test_session_on_charger_not_added(
     await hass.async_block_till_done()
     fetched = [c.args[0] for c in mock_client.find_station_by_id.await_args_list]
     assert fetched.count(17886) == 1  # cached for the session
+
+
+async def test_status_picks_up_its_start_button_once_registered(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """The status can be written before its button exists (platforms set up in parallel)."""
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    registry = er.async_get(hass)
+    button = registry.async_get_entity_id("button", "mer", f"{eid}_socket_11243_start_charge")
+    registry.async_update_entity(button, new_entity_id="button.my_left_start")
+    await hass.async_block_till_done()
+    status = state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status")
+    assert status.attributes["start_button"] == "button.my_left_start"
