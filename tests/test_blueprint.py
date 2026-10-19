@@ -514,7 +514,7 @@ def android_tap(offer: dict[str, Any]) -> dict[str, Any]:
         "tag": offer["data"]["tag"],
         "car_ui": "true",
         "channel": "Mer charger",
-        "device_id": "cf22d9e259ccac85",
+        "device_id": "0123456789abcdef",
     }
 
 

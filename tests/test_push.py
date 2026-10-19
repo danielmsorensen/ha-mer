@@ -452,8 +452,8 @@ async def test_socket_starting_to_charge_polls_for_your_session(
 ) -> None:
     """A start that waited for the cable: the session is picked up at once, not at the next poll.
 
-    Seen live on 2026-10-07: the socket went to charging at 07:27:22 and the session was
-    only recognised at the 5-minute poll at 07:32:11.
+    Seen live on 2026-10-07: the socket went to charging and the session was only
+    recognised at the next 5-minute poll, nearly 5 minutes later.
     """
     await setup_integration(hass, mock_config_entry)
     await _settle(hass)

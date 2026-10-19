@@ -206,7 +206,7 @@ site device and its three aggregate entities are gone; the aggregates now live o
 account device and cover every added charger, since one entry can hold chargers from
 several sites. Configure keeps only the poll interval.
 
-**Why.** Daniel asked for setup to stop requiring a charger up front and for chargers
+**Why.** The maintainer asked for setup to stop requiring a charger up front and for chargers
 to be searchable and addable afterwards. Subentries are HA's native shape for exactly
 that: per-charger cards, an Add button, per-charger delete, and automatic removal of
 the devices and entities registered under a deleted subentry. An options-flow
@@ -230,7 +230,7 @@ unticks chargers; setup then deletes devices of chargers no longer monitored. En
 `VERSION` 3, with a migration from version 2's one-subentry-per-charger.
 
 **Why.** Per-charger subentries put every charger in its own group titled with its own
-name, a duplicate of the device inside it. Daniel asked for chargers to sit together
+name, a duplicate of the device inside it. The maintainer asked for chargers to sit together
 under their site. The account device's "Devices that don't belong to a sub-entry"
 group is Home Assistant's fixed label for entry-level devices and cannot be renamed.
 
@@ -274,7 +274,7 @@ stops the ticker. Each poll re-reads the duration from the portal and corrects d
 **Why.** `async_set_updated_data` pushes the next scheduled poll a full interval into the
 future. With estimates arriving every ~45 s over the push channel, the 5-minute poll
 never ran: energy tracked the app while the duration, wallet and history froze for over
-an hour on Daniel's live instance (diagnostics, 2026-09-24). Nothing pushes the duration,
+an hour on a live instance (diagnostics, 2026-09-24). Nothing pushes the duration,
 and polling it every 5 minutes would make it jump in 5-minute steps, so it is kept
 locally. 30 s rather than 1 s because the sensors show hours and minutes and every state
 change is recorded; the "Active session started" timestamp sensor gives a live
@@ -291,7 +291,7 @@ table records which data is pushed and which is polled.
 removed. The duration sensors update on polls only; the "Active session started"
 timestamp sensor is the live view.
 
-**Why.** Daniel preferred it: fewer recorder rows, no extra timer and separate code path
+**Why.** The maintainer preferred it: fewer recorder rows, no extra timer and separate code path
 to reason about, and it matches how other integrations present a running total. The
 timestamp sensor already gives a per-second display for free, so the ticker bought
 little. The push-versus-poll table and the no-reschedule publish path stay.
@@ -359,7 +359,7 @@ or plugged in and waiting) and the cached capabilities do not refuse both starts
 reason other than the socket's state. A denial of `OPERATION_NOT_ALLOWED_IN_CURRENT_SOCKET_STATE`
 defers to the status. **Refresh now** also re-reads every charger's capabilities.
 
-**Why.** On Daniel's live instance a socket showed available while its start button stayed
+**Why.** On a live instance a socket showed available while its start button stayed
 greyed out, and Refresh now did not help. The capabilities are read once, 5 s after a status
 change. If the portal still saw the old state then, its "not allowed in the current socket
 state" answer stuck until the socket next changed. A read-only probe showed the portal
@@ -377,7 +377,7 @@ pushed end. The Charging sensor's attributes give the current session's charger,
 ids, or the last session's with `ended_at`; after a restart the history's last session stands
 in, without its socket. Socket status sensors gain `station_id` and `socket_id`.
 
-**Why.** The free charger blueprint offered the charger Daniel had just unplugged from. The
+**Why.** The free charger blueprint offered the charger the user had just unplugged from. The
 blueprint leaves out the charger whose session ended after the tracker arrived in the zone,
 comparing ids rather than names. The history alone could not do it: it refreshes every
 15 minutes and records no socket.
@@ -389,13 +389,14 @@ CPU cost is negligible, and only the bandwidth would matter, on a metered connec
 
 ## 2026-10-07: Android taps carry no action_data; a socket starting to charge polls
 
-**What happened.** Read from Daniel's live instance (automation traces and history). The
-offer went out at 07:24:31, the moment he arrived. Six Start taps between 07:25:35 and
-07:25:56, from the car and the phone, were all ignored: the Android app sends back the
+**What happened.** Read from a live instance (automation traces and history). The offer
+went out the moment the tracker arrived. About a minute later, six Start taps over 20
+seconds, from the car and the phone, were all ignored: the Android app sends back the
 notification's own fields (tag, title, message, `action_1_title`), but not `action_data`, so
-the blueprint never matched them. A press in Home Assistant at 07:26:06 worked: "Ready, plug
-in" at 07:26:12. The socket went to charging at 07:27:22, but the session was only recognised
-at the 5-minute poll at 07:32:11, so the notification stayed until then.
+the blueprint never matched them. A press in Home Assistant 10 s later worked, reaching
+"Ready, plug in" 6 s after that. The socket went to charging about a minute later, but the
+session was only recognised at the next 5-minute poll, nearly 5 minutes on, so the
+notification stayed until then.
 
 **Decision.**
 - The blueprint recognises its own notification by the tag, and on Android starts the socket
@@ -417,11 +418,11 @@ side: it sent the notification in the same second as the arrival.
 
 ## 2026-10-12: after your own start, keep asking for the session until it appears
 
-**What happened.** Read from Daniel's live instance. The start at 11:23:17 reached "Ready,
-plug in" at 11:23:38. At 11:23:59 the socket went to "paused" (a charging state), and the
-2026-10-07 rule polled once, but the portal did not report the session yet. At 11:24:03 it
-went from paused to charging, which is not a new start of charging, so there was no second
-poll. The session appeared at the regular poll at 11:28:59, which cleared the "Plug in"
+**What happened.** Read from a live instance. A start reached "Ready, plug in" after 21 s.
+21 s later the socket went to "paused" (a charging state), and the 2026-10-07 rule polled
+once, but the portal did not report the session yet. 4 s after that it went from paused to
+charging, which is not a new start of charging, so there was no second poll. The session
+appeared at the next regular poll, about 5 minutes later, which cleared the "Plug in"
 notification and enabled Stop.
 
 **Decision.** When a socket you recently started (a start on it within 10 minutes that wasn't
@@ -432,11 +433,10 @@ to the config entry, so it is cancelled on unload.
 
 ## 2026-10-15: after you stop, only sockets that free up later are offered
 
-**What happened.** Read from Daniel's live instance. On 2026-10-12 he stopped charging on
-Explorer 1 at 15:31:57 to go home. At 15:32:42, once Explorer 1 Right had been free for
-30 s, the blueprint offered Explorer 2, which had been free all along. Explorer 1 was
-correctly left out as the charger he had just left. His "Only offer when" condition (the
-car below its target) held at 96.8% of 100%.
+**What happened.** Read from a live instance. The user stopped charging on Charger A to go
+home. Once its socket had been free for 30 s, the blueprint offered Charger B, which had
+been free all along. Charger A was correctly left out as the charger just left. The "Only
+offer when" condition (the car below its target) held at 96.8% of 100%.
 
 **Decision.** Once a charge of yours has ended since you arrived, only sockets that become
 free after it ended are offered, and still never on the charger you left. Stopping to go
@@ -457,7 +457,7 @@ having been on offer when it never was.
 
 ## 2026-10-19: the portal stopped sending its rate-limit header
 
-**What happened.** Daniel's Portal requests remaining sensor had read "unknown" for as long
+**What happened.** A live instance's Portal requests remaining sensor had read "unknown" for as long
 as the recorder's 10-day history went back. Its long-term statistics show it moving every
 hour (5 to 9) from 2026-09-24, then frozen at 8 from 05:00 UTC on 2026-10-06, and unknown
 after the v0.7.2 restart that morning. The client kept its last value when a response had no
@@ -478,12 +478,12 @@ default. With it on, offers ignore the account's Charging sensor and the after-s
 and a charge starting moves the notification on to the next free socket, quietly, instead
 of clearing it. The zone check and the user's own conditions still apply.
 
-**Why.** Daniel raised three cases where the account's charging says nothing about whether
+**Why.** The maintainer raised three cases where the account's charging says nothing about whether
 an offer is wanted: a second car, looking out for a friend or colleague, and an account
 shared with family or colleagues, whose charges elsewhere would otherwise suppress offers.
 
 **Why an option, not a default condition.** A default in the "Only offer when" conditions
-would not reach automations that already set their own conditions: Daniel's would have
+would not reach automations that already set their own conditions: the maintainer's would have
 started offering while charging after a re-import. It also could not switch off the
 after-stop rules or change what happens when a charge starts, and a default cannot refer to
 the Charging sensor chosen in another input. Narrower rules come from turning the option on

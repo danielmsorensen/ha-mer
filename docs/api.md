@@ -36,11 +36,10 @@ or, on failure:
   `SPRING_SECURITY_REMEMBER_ME_COOKIE` carries a JWT valid 24 hours; the
   servlet session cookie is `HttpOnly`. The CSRF token can change after login,
   so it is re-read from any HTML page (`/findCharger`) once logged in.
-- reCAPTCHA Enterprise is disabled on this tenant
-  (`reCaptchaEnterpriseEnabled: false`), which is why scripted login works at
-  all. If it is ever turned on, login will start failing with a recaptcha
-  error that needs to surface clearly rather than being mistaken for bad
-  credentials.
+- The login page has reCAPTCHA Enterprise turned off for this tenant
+  (`reCaptchaEnterpriseEnabled: false`), and the integration's login depends on that. If
+  it is turned on, login fails with a reCAPTCHA error, which should be reported as such
+  rather than as bad credentials.
 - `POST /logout` with the CSRF token as the body ends the session.
 
 ## Request conventions
