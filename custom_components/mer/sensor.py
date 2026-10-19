@@ -430,6 +430,9 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         translation_key="requests_remaining",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
+        # The portal stopped sending the header on 2026-10-06; off for new installs so it
+        # doesn't sit at "unknown". It fills in again if the header comes back.
+        entity_registry_enabled_default=False,
         always_available=True,
         value_fn=lambda coordinator, _d: coordinator.client.rate_limit_remaining,
     ),

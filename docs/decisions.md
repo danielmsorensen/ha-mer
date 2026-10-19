@@ -455,3 +455,19 @@ only if it freed after that time. A timestamp rather than a flag, because the fl
 the same update that has the socket taken: the "taken" check then counted the socket as
 having been on offer when it never was.
 
+## 2026-10-19: the portal stopped sending its rate-limit header
+
+**What happened.** Daniel's Portal requests remaining sensor had read "unknown" for as long
+as the recorder's 10-day history went back. Its long-term statistics show it moving every
+hour (5 to 9) from 2026-09-24, then frozen at 8 from 05:00 UTC on 2026-10-06, and unknown
+after the v0.7.2 restart that morning. The client kept its last value when a response had no
+header, which is why it froze rather than cleared. A read-only probe on 2026-10-19, from
+another network and with plain requests, found no rate-limit header on any response. The
+reading code has not changed since 2026-09-17. So the change was Mer's or Driivz's: a
+weekday 06:00 UK deployment, by the look of it.
+
+**Decision.** Keep reading the header, so the safeguards work again if it returns. An API
+response without it now clears the value instead of keeping a stale one; HTML page fetches
+leave it alone. The sensor is disabled by default for new installs and stays enabled where it
+already exists. In the 9.4 days checked, about 3,000 polls met no rate-limit refusal.
+

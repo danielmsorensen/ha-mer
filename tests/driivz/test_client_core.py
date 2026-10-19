@@ -153,6 +153,26 @@ async def test_request_returns_data_and_tracks_rate_limit(
     assert client.rate_limit_remaining == 7
 
 
+async def test_response_without_the_header_clears_the_rate_limit(
+    client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """The portal stopped sending it on 2026-10-06; a stale value looked healthy for hours."""
+    mock_login(aioclient_mock)
+    aioclient_mock.post(
+        WALLET_URL,
+        json=load_json_fixture("wallet.json"),
+        headers={"X-Rate-Limit-Remaining": "7"},
+    )
+    await client.login()
+    await client._request("POST", WALLET_PATH, data={})
+    assert client.rate_limit_remaining == 7
+    aioclient_mock.clear_requests()
+    mock_login(aioclient_mock)
+    aioclient_mock.post(WALLET_URL, json=load_json_fixture("wallet.json"))
+    await client._request("POST", WALLET_PATH, data={})
+    assert client.rate_limit_remaining is None
+
+
 async def test_request_maps_success_false_to_api_error(
     client: DriivzDriverClient, aioclient_mock: AiohttpClientMocker
 ) -> None:

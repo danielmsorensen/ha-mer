@@ -322,8 +322,14 @@ async def test_poll_diagnostics(
     """Last poll and requests remaining, and both stay visible when a poll fails."""
     from custom_components.mer.driivz.exceptions import DriivzConnectionError
 
-    await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
+    # Requests remaining is disabled by default (the portal stopped sending the header);
+    # an install that already had it keeps it enabled, as here.
+    mock_config_entry.add_to_hass(hass)
+    er.async_get(hass).async_get_or_create(
+        "sensor", DOMAIN, f"{eid}_account_requests_remaining", config_entry=mock_config_entry
+    )
+    await setup_integration(hass, mock_config_entry)
     last_poll = state_by_unique_id(hass, "sensor", f"{eid}_account_last_poll")
     assert last_poll.state not in ("unknown", "unavailable")
     assert last_poll.attributes["poll_interval_seconds"] == 60
@@ -403,3 +409,15 @@ async def test_status_picks_up_its_start_button_once_registered(
     await hass.async_block_till_done()
     status = state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status")
     assert status.attributes["start_button"] == "button.my_left_start"
+
+
+async def test_requests_remaining_is_disabled_by_default(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    await setup_integration(hass, mock_config_entry)
+    entry = er.async_get(hass).async_get(
+        er.async_get(hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{mock_config_entry.entry_id}_account_requests_remaining"
+        )
+    )
+    assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION

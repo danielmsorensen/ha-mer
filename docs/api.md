@@ -54,13 +54,13 @@ which one each endpoint expects:
   endpoints, which take a `queryInfo`-shaped object.
 - **Form** (`application/x-www-form-urlencoded`): most other facade calls.
 
-Every response carries `X-Rate-Limit-Remaining` (observed at 9 at rest,
-decrementing per burst of calls). **The refill window was never measured.**
-Nothing in this repository establishes how long the budget takes to return to
-9, or whether it refills steadily or resets on a fixed boundary — only that it
-was seen at 9 while idle. Treat any sizing of the poll interval or of a
-per-cycle call budget against that number as an unverified assumption, not as
-a checked constraint. Anonymous access works for public station data; a
+Until 2026-10-06 every response carried `X-Rate-Limit-Remaining` (9 at rest,
+decrementing per burst of calls; the refill window was never measured). It stopped
+at about 05:00 UTC that day: a live instance's long-term statistics show the value
+moving every hour from 2026-09-24 and frozen from that hour on. A probe on
+2026-10-19 found no rate-limit header on any response, anonymous or logged in. No
+429 has been seen since; whether limiting is still enforced without the header is
+unknown. Anonymous access works for public station data; a
 logged-in session is required for restricted chargers' tariffs, sessions,
 history, wallet, and starting or stopping a charge.
 

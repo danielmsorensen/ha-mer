@@ -140,9 +140,20 @@ class DriivzDriverClient:
         """aiohttp form fields must be strings; drop None values."""
         return {key: str(value) for key, value in values.items() if value is not None}
 
-    def _track_rate_limit(self, response: aiohttp.ClientResponse) -> None:
+    def _track_rate_limit(
+        self, response: aiohttp.ClientResponse, *, clear_if_absent: bool = True
+    ) -> None:
+        """Record the portal's rate-limit headroom from a response.
+
+        An API response without the header clears it: the portal stopped sending it on
+        2026-10-06 (about 06:00 UK time), and keeping the last value showed a stale,
+        healthy-looking 8 for hours. HTML page fetches leave it as it is, since they may
+        never have carried the header.
+        """
         value = response.headers.get(HEADER_RATE_LIMIT_REMAINING)
         if value is None:
+            if clear_if_absent:
+                self._rate_limit_remaining = None
             return
         with contextlib.suppress(ValueError):
             self._rate_limit_remaining = int(value)
@@ -150,7 +161,7 @@ class DriivzDriverClient:
     async def _fetch_csrf(self, path: str) -> str:
         try:
             async with self._session.get(self._url(path), headers=self._headers()) as response:
-                self._track_rate_limit(response)
+                self._track_rate_limit(response, clear_if_absent=False)
                 # Mirrors `_send`: a 429 here has to surface as RateLimitError too, or a
                 # rate-limited login would be reported as a connection error and the
                 # coordinator would keep hammering instead of skipping a cycle.

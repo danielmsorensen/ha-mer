@@ -80,7 +80,7 @@ Diagnostic entities on the account device:
 | --- | --- |
 | Live status | On while the portal's push channel is connected; `connected_since` attribute |
 | Last poll | Last successful poll; the attributes give the poll interval, whether the last poll succeeded, and its error |
-| Portal requests remaining | The portal's rate-limit headroom after the last request |
+| Portal requests remaining | The portal's rate-limit headroom after the last request. Disabled by default: the portal stopped reporting it on 6 October 2026, so it shows unknown; it fills in again if that changes |
 | Last command | Outcome of the last start or stop, with charger, socket, method, times and any error |
 | Refresh now | Polls the portal immediately |
 
@@ -246,11 +246,13 @@ Extra polls run after a start or stop resolves, when the channel drops, on **Ref
 now** and on reload. While a command waits for its outcome it also polls every 5 seconds
 if nothing is pushed.
 
-**Rate limits.** Every portal response carries `X-Rate-Limit-Remaining`, which is about 9
-at rest; how quickly it refills is unknown. A poll makes two calls while idle and four
-during a session. Setup and reload fetch every charger's details at once. When the
-headroom is nearly used up, the next poll is skipped and the entities keep their last
-values.
+**Rate limits.** Until 6 October 2026 every portal response carried
+`X-Rate-Limit-Remaining`, about 9 at rest; since about 06:00 UK time that day it has not
+been sent at all. A poll makes two calls while idle and four during a session, and setup
+and reload fetch every charger's details at once. In the 9.4 days of history checked on
+19 October, about 3,000 polls and the extra calls around starts met no rate-limit refusal.
+If the header comes back, the integration uses it again: when the headroom is nearly used
+up, the next poll is skipped and the entities keep their last values.
 
 **Load.** Measured on 2026-10-06, the push channel delivered about 120 messages a minute,
 almost all for chargers elsewhere on the network. Handling them used 0.07% of one CPU
