@@ -169,7 +169,7 @@ The optional settings are in collapsible sections:
 
 | Section | Settings |
 | --- | --- |
-| **Only offer when** | Your own conditions, for example the car's charge level being below its target. A preview skips them |
+| **Only offer when** | Your own conditions, for example the car's charge level being below its target, which a preview skips; and **Notify even while the account is charging**, for a second car, a friend or a shared account. With it on, offers ignore the account's charging and the after-stop rules, and a charge starting moves the notification on to the next free socket instead of clearing it |
 | **"Charger free" notification** | Its title and message, which can use `{{ charger }}` and `{{ socket }}` |
 | **"Nothing free" notification** | Whether to send it on arrival, and its title and message |
 | **Both notifications** | A page to open when tapped, such as `/dashboard-ev/0`; and **Extra notification data**, merged into every notification, for any other [Companion app option](https://companion.home-assistant.io/docs/notifications/notifications-basic/) such as `notification_icon: mdi:ev-station` |

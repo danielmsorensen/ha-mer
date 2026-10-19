@@ -60,6 +60,14 @@ blueprint:
           default: []
           selector:
             condition: {}
+        offer_while_charging:
+          name: Notify even while the account is charging
+          description: >-
+            Notifies of free sockets even while the account is charging. Sockets that were
+            already free when a charge ended, and the one just unplugged, are included too.
+          default: false
+          selector:
+            boolean: {}
 
     free_notification:
       name: '"Charger free" notification'
@@ -200,6 +208,7 @@ variables:
   notify_device: !input notify_device
   notify_service: "notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}"
   notify_none_free: !input notify_none_free
+  offer_while_charging: !input offer_while_charging
   tap_opens: !input tap_opens
   extra_data: !input extra_data
   freed_for: !input freed_for
@@ -234,7 +243,8 @@ variables:
     {% set ended = as_datetime(state_attr(charging_sensor, 'ended_at'), none) %}
     {% set arrived = states[tracker].last_changed if states[tracker] else none %}
     {{ as_timestamp(ended)
-       if is_state(charging_sensor, 'off') and ended and arrived and ended > arrived
+       if not offer_while_charging
+          and is_state(charging_sensor, 'off') and ended and arrived and ended > arrived
        else none }}
   left_socket: "{{ state_attr(charging_sensor, 'socket_id') if ended_here else none }}"
   # The socket you left counts again once it frees after someone else started using it.
@@ -380,14 +390,26 @@ actions:
                       data: "{{ delivery }}"
 
       # ---- Charging has started: clear the offer, run your actions ------------------
+      # Offering while charging, another free socket is offered instead, quietly.
       - conditions:
           - "{{ run == 'charging_started' }}"
         sequence:
-          - action: "{{ notify_service }}"
-            data:
-              message: clear_notification
-              data:
-                tag: "{{ tag }}"
+          - if:
+              - "{{ offer_while_charging and best is not none }}"
+              - condition: zone
+                entity_id: !input tracker
+                zone: !input zone
+              - condition: and
+                conditions: !input only_if
+            then:
+              - action: "{{ notify_service }}"
+                data: "{{ dict(offer, data=dict(offer.data, **quietly)) }}"
+            else:
+              - action: "{{ notify_service }}"
+                data:
+                  message: clear_notification
+                  data:
+                    tag: "{{ tag }}"
           # The socket sensors update just after the Charging sensor, so wait for one of
           # the chosen sockets to show your session; stop if none does.
           - wait_template: >-
@@ -409,9 +431,11 @@ actions:
       # ---- The socket on offer was taken: offer the next one, or say none is free ---
       - conditions:
           - "{{ run == 'taken' }}"
-          - condition: state
-            entity_id: !input charging
-            state: "off"
+          - or:
+              - "{{ offer_while_charging }}"
+              - condition: state
+                entity_id: !input charging
+                state: "off"
           - condition: zone
             entity_id: !input tracker
             zone: !input zone
@@ -456,9 +480,11 @@ actions:
           - or:
               - "{{ run == 'preview' }}"
               - and:
-                  - condition: state
-                    entity_id: !input charging
-                    state: "off"
+                  - or:
+                      - "{{ offer_while_charging }}"
+                      - condition: state
+                        entity_id: !input charging
+                        state: "off"
                   - condition: zone
                     entity_id: !input tracker
                     zone: !input zone

@@ -584,3 +584,77 @@ async def test_a_less_preferred_socket_freeing_up_does_not_alert_again(
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert len(sent) == 1
+
+
+async def start_session(mock_client: MagicMock, coordinator, socket) -> None:
+    mock_client.find_last_active_charge_socket.return_value = socket
+    await coordinator.async_refresh()
+
+
+async def test_offer_while_charging_offers_on_arrival_during_a_charge(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket,
+) -> None:
+    """A second car, a friend, or a shared account charging elsewhere."""
+    sent = await setup_blueprint(hass, mock_config_entry, [11243], offer_while_charging=True)
+    await start_session(mock_client, mock_config_entry.runtime_data, charging_socket)
+    await hass.async_block_till_done()
+    hass.states.async_set("person.driver", "not_home", AWAY)
+    await hass.async_block_till_done()
+    hass.states.async_set("person.driver", "Work", WORK)
+    await hass.async_block_till_done()
+    assert sent[-1]["title"] == "Mer charger free"
+    assert sent[-1]["message"] == "Riverside - Bay 3 - Charger A"
+
+
+async def test_without_the_option_no_offer_while_charging(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket,
+) -> None:
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    await start_session(mock_client, mock_config_entry.runtime_data, charging_socket)
+    await hass.async_block_till_done()
+    sent.clear()
+    hass.states.async_set("person.driver", "not_home", AWAY)
+    await hass.async_block_till_done()
+    hass.states.async_set("person.driver", "Work", WORK)
+    await hass.async_block_till_done()
+    assert [n["message"] for n in sent] == ["clear_notification"]  # leaving; no offer
+
+
+async def test_offer_while_charging_moves_the_offer_on_when_a_charge_starts(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket,
+) -> None:
+    """Instead of clearing, the notification quietly offers the next free socket."""
+    sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244], offer_while_charging=True)
+    await start_session(mock_client, mock_config_entry.runtime_data, charging_socket)
+    await hass.async_block_till_done()
+    update = sent[-1]
+    assert update["title"] == "Mer charger free"
+    assert update["data"]["actions"][0]["title"] == "Start Left"
+    assert update["data"]["alert_once"] is True
+
+
+async def test_offer_while_charging_offers_already_free_sockets_after_a_stop(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket,
+) -> None:
+    """Swapping cars: what was already free, and the socket just left, stay on offer."""
+    sent = await setup_blueprint(hass, mock_config_entry, [11242, 11243], offer_while_charging=True)
+    coordinator = mock_config_entry.runtime_data
+    await start_session(mock_client, coordinator, charging_socket)
+    await start_session(mock_client, coordinator, None)  # stopped
+    await hass.async_block_till_done()
+    sent.clear()
+    await run_by_hand(hass)
+    (offer,) = sent
+    assert offer["message"] == "Riverside - Bay 4 - Charger B"  # the socket just left
