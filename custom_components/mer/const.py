@@ -57,6 +57,10 @@ CAPABILITY_REFRESH_DELAY_SECONDS = 5
 SESSION_WATCH_DELAYS_SECONDS: tuple[int, ...] = (10, 20, 30, 60, 120)
 # How recent a start of yours on the socket must be for its charging to be expected as yours.
 OWN_START_WINDOW = timedelta(minutes=10)
+# How long a session ended by a push stays ended against polls that still report it. The
+# portal can keep reporting a stopped session for a while; on 2026-11-02 a poll 0.1 s after
+# the pushed end brought it back for 24 s, and that counted as a charge starting.
+PUSHED_END_TRUST = timedelta(minutes=2)
 # While the push channel is connected, socket status arrives instantly, so the poll
 # only has to cover wallet, history and details; it drops to this interval.
 PUSH_POLL_INTERVAL_SECONDS = 300

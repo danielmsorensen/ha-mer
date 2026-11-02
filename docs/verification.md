@@ -29,7 +29,8 @@ mean to charge.
    - **Active session** names the right charger and socket;
    - energy rises in steps every few minutes, which is normal;
    - **charging rate** matches the app's "estimated rate".
-8. Press **Stop charge**. It should end on **Stopped**, and **Charging** should turn off.
+8. Press **Stop charge**. It should end on **Stopped**, and **Charging** should turn off
+   once, without turning back on.
 
 If anything disagrees with the charger or the app, file an issue before relying on it
 unattended.

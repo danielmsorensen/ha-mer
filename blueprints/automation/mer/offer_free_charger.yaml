@@ -494,6 +494,12 @@ actions:
                     zone: !input zone
                   - condition: and
                     conditions: !input only_if
+                  # Back in the zone within 2 minutes of leaving it is the location
+                  # bouncing at the zone's edge, not an arrival (seen live on 2026-11-02,
+                  # 10 s after leaving, when it offered the socket just unplugged).
+                  - >-
+                    {{ run != 'arrive' or trigger.from_state is none
+                       or now() - trigger.from_state.last_changed > timedelta(minutes=2) }}
         sequence:
           - if:
               # A socket freeing up only sends the offer when it is now the one to

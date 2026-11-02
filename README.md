@@ -157,7 +157,8 @@ for an offer already showing.
   confirmed it yet) or **Couldn't start** with the reason. If the socket has been taken it
   says **Too late**.
 - The notification stays when tapped, and clears once you are charging or leave the
-  zone.
+  zone. Coming back into the zone within 2 minutes of leaving isn't an arrival: phone
+  locations often bounce across the zone's edge as you drive off.
 - **Preview:** choose **Run actions** from the automation's ⋮ menu. It sends what
   arriving would send right now, skipping the zone and charging checks. If nothing is
   free it sends **No Mer charger free** even when that option is off. Its Start button
@@ -238,7 +239,7 @@ Pushes do not count against the portal's rate limit.
 | --- | --- | --- |
 | Charger and socket status | As it changes | Every poll |
 | Your session's energy, cost, charging rate | About every 45 s | Every poll |
-| Session start and end | End: as the socket stops charging. Start: a socket on your chargers starting to charge, or the session's first estimate, triggers a poll; after your own start the portal is asked again at 10, 20, 30, 60 and 120 s until it reports the session | Every poll |
+| Session start and end | End: as the socket stops charging, and for 2 minutes a poll that still reports the session doesn't bring it back. Start: a socket on your chargers starting to charge, or the session's first estimate, triggers a poll; after your own start the portal is asked again at 10, 20, 30, 60 and 120 s until it reports the session | Every poll |
 | Session started time and duration | No | Every poll |
 | Wallet, last session | No | Every 15 minutes |
 | Socket names, tariffs, model, notify-me state | No | Hourly, one charger per poll |

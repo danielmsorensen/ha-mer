@@ -9,6 +9,7 @@ import shutil
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.automation import DOMAIN as AUTOMATION_DOMAIN
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import device_registry as dr
@@ -104,6 +105,17 @@ async def setup_blueprint(
     return sent
 
 
+async def leave_and_arrive(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, tracker: str = "person.driver"
+) -> None:
+    """Leave the zone and come back after the 2-minute bounce window."""
+    hass.states.async_set(tracker, "not_home", AWAY)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(minutes=3))
+    hass.states.async_set(tracker, "Work", WORK)
+    await hass.async_block_till_done()
+
+
 async def run_by_hand(hass: HomeAssistant) -> None:
     await hass.services.async_call(
         AUTOMATION_DOMAIN, "trigger", {"entity_id": "automation.offer"}, blocking=True
@@ -156,7 +168,10 @@ async def test_preview_says_nothing_free_when_all_taken(
 
 
 async def test_socket_freeing_up_only_notifies_in_the_zone(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     live = stations_from_fixture("stations_by_ids.json")
     mock_client.find_stations_by_ids.return_value = busy(live, 11243, 11244, 11242)
@@ -175,6 +190,7 @@ async def test_socket_freeing_up_only_notifies_in_the_zone(
     mock_client.find_stations_by_ids.return_value = busy(live, 11243, 11244, 11242)
     await coordinator.async_refresh()
     await hass.async_block_till_done()
+    freezer.tick(timedelta(minutes=3))
     hass.states.async_set("person.driver", "Work", WORK)
     # Walking back into the zone is itself an arrival, with the socket taken.
     assert [n["title"] for n in sent] == ["No Mer charger free"]
@@ -250,14 +266,14 @@ async def test_start_refused_says_why(
 
 
 async def test_device_tracker_works_as_the_tracker(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """A car's tracker instead of a person: arriving in the zone sends the offer."""
     sent = await setup_blueprint(hass, mock_config_entry, [11243], tracker="device_tracker.car")
-    hass.states.async_set("device_tracker.car", "not_home", AWAY)
-    await hass.async_block_till_done()
-    hass.states.async_set("device_tracker.car", "Work", WORK)
-    await hass.async_block_till_done()
+    await leave_and_arrive(hass, freezer, "device_tracker.car")
     (offer,) = sent
     assert offer["title"] == "Mer charger free"
     assert offer["data"]["actions"][0]["title"] == "Start Left"
@@ -473,7 +489,10 @@ async def test_after_you_stop_another_socket_freeing_up_is_offered(
 
 
 async def test_your_conditions_gate_real_offers_but_not_a_preview(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     hass.states.async_set("input_boolean.car_needs_charge", "off")
     sent = await setup_blueprint(
@@ -486,10 +505,7 @@ async def test_your_conditions_gate_real_offers_but_not_a_preview(
     )
 
     async def arrive() -> None:
-        hass.states.async_set("person.driver", "not_home", AWAY)
-        await hass.async_block_till_done()
-        hass.states.async_set("person.driver", "Work", WORK)
-        await hass.async_block_till_done()
+        await leave_and_arrive(hass, freezer)
 
     await arrive()
     assert [n["message"] for n in sent] == ["clear_notification"]  # leaving; no offer
@@ -595,16 +611,16 @@ async def test_offer_while_charging_offers_on_arrival_during_a_charge(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
     charging_socket,
 ) -> None:
     """A second car, a friend, or a shared account charging elsewhere."""
-    sent = await setup_blueprint(hass, mock_config_entry, [11243], offer_while_charging=True)
+    # Watching the session's socket (11242) too, so "When charging starts" doesn't wait
+    # for it on the frozen clock.
+    sent = await setup_blueprint(hass, mock_config_entry, [11243, 11242], offer_while_charging=True)
     await start_session(mock_client, mock_config_entry.runtime_data, charging_socket)
     await hass.async_block_till_done()
-    hass.states.async_set("person.driver", "not_home", AWAY)
-    await hass.async_block_till_done()
-    hass.states.async_set("person.driver", "Work", WORK)
-    await hass.async_block_till_done()
+    await leave_and_arrive(hass, freezer)
     assert sent[-1]["title"] == "Mer charger free"
     assert sent[-1]["message"] == "Riverside - Bay 3 - Charger A"
 
@@ -613,16 +629,14 @@ async def test_without_the_option_no_offer_while_charging(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
     charging_socket,
 ) -> None:
-    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    sent = await setup_blueprint(hass, mock_config_entry, [11243, 11242])
     await start_session(mock_client, mock_config_entry.runtime_data, charging_socket)
     await hass.async_block_till_done()
     sent.clear()
-    hass.states.async_set("person.driver", "not_home", AWAY)
-    await hass.async_block_till_done()
-    hass.states.async_set("person.driver", "Work", WORK)
-    await hass.async_block_till_done()
+    await leave_and_arrive(hass, freezer)
     assert [n["message"] for n in sent] == ["clear_notification"]  # leaving; no offer
 
 
@@ -658,3 +672,20 @@ async def test_offer_while_charging_offers_already_free_sockets_after_a_stop(
     await run_by_hand(hass)
     (offer,) = sent
     assert offer["message"] == "Riverside - Bay 4 - Charger B"  # the socket just left
+
+
+async def test_bouncing_back_into_the_zone_is_not_an_arrival(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Seen live on 2026-11-02: leaving after a stop, the location bounced back into the
+    zone for 10 s and the "arrival" offered the socket just unplugged."""
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    hass.states.async_set("person.driver", "not_home", AWAY)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=10))
+    hass.states.async_set("person.driver", "Work", WORK)
+    await hass.async_block_till_done()
+    assert [n["message"] for n in sent] == ["clear_notification"]  # leaving; no offer

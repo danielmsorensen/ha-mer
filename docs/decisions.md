@@ -489,3 +489,21 @@ after-stop rules or change what happens when a charge starts, and a default cann
 the Charging sensor chosen in another input. Narrower rules come from turning the option on
 and adding a condition, such as the user's own car not charging.
 
+## 2026-11-02: a pushed end stays ended; a zone-edge bounce is not an arrival
+
+**What happened.** Read from a live instance. Stop charge from Home Assistant worked,
+reaching "Stopped" 30 s after the press, the first stop confirmed live. Six seconds after
+the press, a push showed the socket had stopped charging and Charging went off. 0.1 s later,
+the stop command's own poll still found the session in the portal and brought it back, until
+the portal caught up 24 s later. That "on" counted as a charge starting, so the blueprint
+ran the user's "When charging starts" actions for nothing. Then, leaving the zone, the
+phone's location went back inside the zone for 10 s. The blueprint took that as an arrival
+after the stop, outside the after-stop rules, and offered the charger just unplugged.
+
+**Decision.**
+- A session ended by a push stays ended against polls for 2 minutes (`PUSHED_END_TRUST`),
+  unless a push shows that socket charging again. This covers regular and command polls,
+  so a stop also resolves as soon as the push arrives.
+- The blueprint ignores a re-entry within 2 minutes of leaving the zone. Real arrivals come
+  from further away; the bounce seen was 10 s.
+

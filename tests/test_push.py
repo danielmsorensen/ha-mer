@@ -496,3 +496,43 @@ async def test_your_start_is_followed_until_the_portal_reports_the_session(
         await _settle(hass)
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == "on"
     assert checks >= 3
+
+
+async def test_pushed_end_is_not_undone_by_a_lagging_poll(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    fake_ws: FakeWebSocket,
+    charging_socket: Socket,
+) -> None:
+    """Seen live on 2026-11-02: after a stop, a poll still reported the session for 24 s.
+
+    Bringing it back counted as a charge starting and ran "When charging starts" actions.
+    """
+    mock_client.find_last_active_charge_socket.return_value = charging_socket  # on 11242
+    await setup_integration(hass, mock_config_entry)
+    await _settle(hass)
+    eid = mock_config_entry.entry_id
+    charging = lambda: state_by_unique_id(  # noqa: E731
+        hass, "binary_sensor", f"{eid}_account_charging"
+    ).state
+    changes: list[str] = []
+    hass.bus.async_listen(
+        "state_changed",
+        lambda event: changes.append(event.data["new_state"].state)
+        if event.data["entity_id"].endswith("_charging")
+        else None,
+    )
+
+    fake_ws.push(status_push(6041, 11242, "FINISHING"))  # stopped
+    await _settle(hass)
+    await mock_config_entry.runtime_data.async_refresh()  # the portal still reports it
+    await hass.async_block_till_done()
+    assert charging() == "off"
+    assert changes == ["off"]
+
+    fake_ws.push(status_push(6041, 11242, "CHARGING"))  # genuinely charging again
+    await _settle(hass)
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert charging() == "on"

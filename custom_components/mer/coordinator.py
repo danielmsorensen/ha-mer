@@ -36,6 +36,7 @@ from .const import (
     PUSH_RECONNECT_MAX_SECONDS,
     PUSH_RECONNECT_MIN_SECONDS,
     PUSH_SILENCE_TIMEOUT_SECONDS,
+    PUSHED_END_TRUST,
     RATE_LIMIT_SKIP_THRESHOLD,
     RATE_LIMIT_WARN_INTERVAL,
     REFRESH_AFTER_COMMAND_SECONDS,
@@ -250,6 +251,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self.last_session_end: EndedSession | None = None
         # Start/stop commands waiting for their outcome; they poll for it themselves.
         self._commands_running = 0
+        # A session a push has just ended: its socket and when. See `_unless_pushed_end`.
+        self._pushed_end: tuple[int, datetime] | None = None
         # Looking for the session of your own start, once its socket is charging.
         self._session_watch: asyncio.Task[None] | None = None
         self._skip_next = False
@@ -285,7 +288,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             if self.station_ids:
                 found = await self.client.find_stations_by_ids(self.station_ids)
                 stations = {s.id: s for s in found}
-            active = await self._fetch_active()
+            active = self._unless_pushed_end(await self._fetch_active())
             self._note_session_end(self.data.active if self.data else None, active)
             if self._due(self._wallet_refreshed, WALLET_REFRESH, now):
                 await self._refresh_optional("account", self._refresh_account(now))
@@ -775,7 +778,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 if station_id is not None:
                     found = await self.client.find_stations_by_ids([station_id])
                     station = found[0] if found else None
-                active = await self._fetch_active()
+                active = self._unless_pushed_end(await self._fetch_active())
             except DriivzError as err:
                 _LOGGER.debug("Command polling failed (%s); waiting for the next poll", err)
                 continue
@@ -807,6 +810,21 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._follow_left_socket(data.stations)
         self.data = data
         self.async_update_listeners()
+
+    def _unless_pushed_end(self, active: ActiveSession | None) -> ActiveSession | None:
+        """A polled session, unless a push has just ended it.
+
+        The push says the socket stopped charging; the portal's session lookup can lag
+        behind it, and bringing the session back counted as a new charge starting.
+        """
+        ended = self._pushed_end
+        if active is None or ended is None:
+            return active
+        socket_id, at = ended
+        if dt_util.utcnow() - at >= PUSHED_END_TRUST:
+            self._pushed_end = None
+            return active
+        return None if active.socket_id == socket_id else active
 
     def _note_session_end(self, before: ActiveSession | None, after: ActiveSession | None) -> None:
         """Record a session that has just ended, and have the next poll re-read the history.
@@ -1017,6 +1035,13 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             and push.socket_status not in _CHARGING_STATUSES
         ):
             active = None
+            self._pushed_end = (push.socket_id, dt_util.utcnow())
+        elif (
+            self._pushed_end is not None
+            and push.socket_id == self._pushed_end[0]
+            and push.socket_status in _CHARGING_STATUSES
+        ):
+            self._pushed_end = None  # charging again: a poll may report it
         self._publish(replace(self.data, stations=stations, active=active))
         self._push_event.set()
         if poll_for_session:
