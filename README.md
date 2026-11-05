@@ -15,14 +15,12 @@ stops charges, and reports your active session, last session and wallet balance.
 [![Open your Home Assistant instance and open this repository.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=danielmsorensen&repository=ha-mer&category=integration)
 
 The button opens the repository in the Marketplace (Home Assistant 2026.11+) or HACS
-(older). If it isn't listed yet, accept the offer to add it as a custom repository.
-Then install **Mer EV Charging (UK)**.
+(older). Then install **Mer EV Charging (UK)**.
 
 - **2026.11+:** no restart needed to install; an update asks for a restart with a repair.
 - **Older, HACS:** restart Home Assistant after installing or updating.
 
-Without the button: **Settings → Marketplace** (or HACS) **→ ⋮ → Custom repositories**,
-add this repository's URL with category **Integration**.
+Without the button: search **Mer EV Charging** in **Settings → Marketplace** (or HACS).
 
 ## Setup
 
