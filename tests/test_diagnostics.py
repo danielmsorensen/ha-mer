@@ -4,18 +4,17 @@ from __future__ import annotations
 
 from datetime import timedelta
 import json
-from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mer.diagnostics import async_get_config_entry_diagnostics
-from custom_components.mer.driivz.models import Socket
+from tests.fake_portal import FakePortal
 from tests.helpers import setup_integration
 
 
 async def test_diagnostics_redacts_secrets(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     diag = await async_get_config_entry_diagnostics(hass, mock_config_entry)
@@ -51,15 +50,14 @@ async def test_diagnostics_redacts_secrets(
 async def test_diagnostics_serialises_active_session(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
 ) -> None:
     """A charge in progress carries `timedelta` fields that must not blow up diagnostics.
 
     This is exactly the moment someone is most likely to pull diagnostics, so it must not
     be the moment diagnostics crash.
     """
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await setup_integration(hass, mock_config_entry)
     diag = await async_get_config_entry_diagnostics(hass, mock_config_entry)
     active = diag["data"]["active"]

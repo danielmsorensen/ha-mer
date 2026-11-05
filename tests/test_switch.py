@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from unittest.mock import MagicMock
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.switch import DOMAIN as SWITCH_DOMAIN
@@ -20,6 +19,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.mer.const import DOMAIN
 from custom_components.mer.driivz.exceptions import ApiError
+from tests.fake_portal import FakePortal
 from tests.helpers import setup_integration
 from tests.test_sensor import state_by_unique_id
 
@@ -43,7 +43,7 @@ async def turn_off(hass: HomeAssistant, entity_id: str) -> None:
 
 
 async def test_initial_state_reflects_subscription(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """6042 is subscribed via the app, 6041 is not."""
     await setup_integration(hass, mock_config_entry)
@@ -60,38 +60,38 @@ async def test_initial_state_reflects_subscription(
 async def test_turn_on_subscribes_and_stays_on(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     entity_id = entity_id_for(hass, f"{eid}_station_6041_notify_available")
     await turn_on(hass, entity_id)
-    mock_client.subscribe_to_availability.assert_awaited_once_with(6041)
+    assert portal.calls["subscribe_to_availability"] == [(6041,)]
     assert hass.states.get(entity_id).state == STATE_ON
 
 
 async def test_turn_off_unsubscribes(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     entity_id = entity_id_for(hass, f"{eid}_station_6042_notify_available")
     await turn_off(hass, entity_id)
-    mock_client.unsubscribe_from_availability.assert_awaited_once_with(6042)
+    assert portal.calls["unsubscribe_from_availability"] == [(6042,)]
     assert hass.states.get(entity_id).state == STATE_OFF
 
 
 async def test_subscribe_error_raises_command_failed(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     entity_id = entity_id_for(hass, f"{eid}_station_6041_notify_available")
-    mock_client.subscribe_to_availability.side_effect = ApiError("STATION_NOT_FOUND")
+    portal.fail("subscribe_to_availability", ApiError("STATION_NOT_FOUND"))
     with pytest.raises(HomeAssistantError) as excinfo:
         await turn_on(hass, entity_id)
     assert "STATION_NOT_FOUND" in str(excinfo.value)
@@ -100,12 +100,12 @@ async def test_subscribe_error_raises_command_failed(
 
 
 async def test_unsubscribe_error_raises_command_failed(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     entity_id = entity_id_for(hass, f"{eid}_station_6042_notify_available")
-    mock_client.unsubscribe_from_availability.side_effect = ApiError("STATION_NOT_FOUND")
+    portal.fail("unsubscribe_from_availability", ApiError("STATION_NOT_FOUND"))
     with pytest.raises(HomeAssistantError) as excinfo:
         await turn_off(hass, entity_id)
     assert "STATION_NOT_FOUND" in str(excinfo.value)
@@ -116,14 +116,14 @@ async def test_unsubscribe_error_raises_command_failed(
 async def test_toggle_keeps_poll_schedule(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     """A toggle must neither push the next poll back nor trigger an extra one."""
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     entity_id = entity_id_for(hass, f"{eid}_station_6041_notify_available")
-    polls = mock_client.find_stations_by_ids.await_count
+    polls = len(portal.calls["find_stations_by_ids"])
 
     async def advance(seconds: int) -> None:
         freezer.tick(timedelta(seconds=seconds))
@@ -134,6 +134,6 @@ async def test_toggle_keeps_poll_schedule(
     await turn_on(hass, entity_id)
     await advance(6)  # past any follow-up refresh delay
     await advance(12)  # 58 s after setup: the 60 s poll is not due yet
-    assert mock_client.find_stations_by_ids.await_count == polls, "toggle triggered a poll"
+    assert len(portal.calls["find_stations_by_ids"]) == polls, "toggle triggered a poll"
     await advance(3)  # 61 s: the poll scheduled at setup has run
-    assert mock_client.find_stations_by_ids.await_count == polls + 1, "toggle delayed the poll"
+    assert len(portal.calls["find_stations_by_ids"]) == polls + 1, "toggle delayed the poll"

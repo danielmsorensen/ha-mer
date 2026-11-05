@@ -65,6 +65,23 @@ Repeatedly asking the portal for your session after an own start begins charging
 **Session tracker**:
 The integration's one view of your session: running, just ended, and what to look for next.
 
+### Commands
+
+**Command**:
+A start or stop you sent to a socket, held open until the charger shows how it went.
+_Avoid_: action, request
+
+**Outcome**:
+How a command ended: charging, awaiting cable, stopped, rejected (refused, nothing waited for), or unconfirmed (accepted, nothing seen in time).
+_Avoid_: result (except on Last command), status
+
+**Start method**:
+The normal start, or Charge now; the portal's capabilities pick it.
+
+**Capabilities**:
+What the portal allows this account on a socket, and why it refuses the rest. Only refusals for a reason other than the socket's state count; the status decides those.
+_Avoid_: permissions
+
 ### What entities read
 
 **Snapshot**:

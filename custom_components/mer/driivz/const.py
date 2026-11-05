@@ -43,6 +43,9 @@ OP_START_CHARGE_NOW = "START_CHARGE_NOW"
 # The denial reason for an operation the socket's current state rules out, as opposed to
 # the account or card (e.g. INVALID_CARD).
 DENIED_FOR_SOCKET_STATE = "OPERATION_NOT_ALLOWED_IN_CURRENT_SOCKET_STATE"
+# Start methods, as recorded on Last command: the normal start, or "Charge now".
+START_METHOD_NORMAL = "start"
+START_METHOD_CHARGE_NOW = "charge_now"
 PATH_WALLET = "billingFacade/findCustomerDetailWalletByCustomerId"
 PATH_TRANSACTIONS = "customerFacade/findDriverChargeTransactionLogByView"
 PATH_IS_SUBSCRIBED_AVAILABLE = "customerFacade/isDriverSubscribedToNotifyMeWhenStationIsAvailable"

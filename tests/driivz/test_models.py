@@ -10,6 +10,7 @@ from custom_components.mer.driivz.models import (
     SessionEstimate,
     Site,
     Socket,
+    SocketCapabilities,
     Station,
     Transaction,
     Wallet,
@@ -216,3 +217,32 @@ def test_socket_from_dict_minimal() -> None:
     socket = Socket.from_dict({"id": 5})
     assert socket.status == "UNKNOWN"
     assert socket.prices == ()
+
+
+def caps(allowed: set[str], denied: dict[str, str] | None = None) -> SocketCapabilities:
+    return SocketCapabilities(allowed=frozenset(allowed), denied=denied or {})
+
+
+def test_start_method_prefers_the_normal_start_then_charge_now() -> None:
+    both = {"START_CHARGE_FROM_SERVER", "START_CHARGE_NOW"}
+    assert caps(both).start_method == "start"
+    assert caps({"START_CHARGE_NOW"}).start_method == "charge_now"
+    assert caps({"STOP_CHARGE"}).start_method is None
+
+
+def test_start_refusal_is_the_portals_reason_when_no_start_is_allowed() -> None:
+    assert caps({"START_CHARGE_NOW"}).start_refusal is None
+    refused = caps(set(), {"START_CHARGE_FROM_SERVER": "INVALID_CARD", "START_CHARGE_NOW": "X"})
+    assert refused.start_refusal == "INVALID_CARD"
+    assert caps(set(), {"START_CHARGE_NOW": "INVALID_CARD"}).start_refusal == "INVALID_CARD"
+
+
+def test_only_non_state_denials_refuse_a_start_whatever_the_state() -> None:
+    """ADR 2026-10-05: the socket's status decides state; capabilities only the rest."""
+    state = "OPERATION_NOT_ALLOWED_IN_CURRENT_SOCKET_STATE"
+    assert caps({"START_CHARGE_NOW"}).refuses_start_whatever_the_state is False
+    assert (
+        caps(set(), {"START_CHARGE_FROM_SERVER": state}).refuses_start_whatever_the_state is False
+    )
+    card = {"START_CHARGE_FROM_SERVER": "INVALID_CARD", "START_CHARGE_NOW": "INVALID_CARD"}
+    assert caps(set(), card).refuses_start_whatever_the_state is True

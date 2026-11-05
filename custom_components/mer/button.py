@@ -8,8 +8,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import COMMAND_TIMEOUT_SECONDS, DOMAIN
-from .coordinator import CommandUnconfirmed, MerConfigEntry, MerCoordinator
+from .commands import CommandUnconfirmed
+from .const import DOMAIN
+from .coordinator import MerConfigEntry, MerCoordinator
 from .driivz.exceptions import DriivzError
 from .entity import START_CHARGE_KEY, MerAccountEntity, MerSocketEntity, MerStationEntity
 
@@ -63,7 +64,7 @@ async def _run(
         raise HomeAssistantError(
             translation_domain=DOMAIN,
             translation_key="command_unconfirmed",
-            translation_placeholders={"seconds": str(COMMAND_TIMEOUT_SECONDS)},
+            translation_placeholders={"seconds": f"{err.seconds:g}"},
         ) from err
 
 

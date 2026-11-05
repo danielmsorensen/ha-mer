@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.mer.driivz.models import Socket
+from tests.fake_portal import FakePortal
 from tests.helpers import setup_integration
 from tests.test_sensor import state_by_unique_id
 
 
 async def test_socket_available_and_account_counts(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
@@ -24,17 +22,7 @@ async def test_socket_available_and_account_counts(
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == STATE_OFF
 
     # everything occupied -> nothing available
-    stations = mock_client.find_stations_by_ids.return_value
-    busy = []
-    for station in stations:
-        raw = {
-            "id": station.id,
-            "caption": station.caption,
-            "stationStatusId": "OCCUPIED",
-            "stationSockets": [{"id": s.id, "socketStatusId": "OCCUPIED"} for s in station.sockets],
-        }
-        busy.append(type(station).from_dict(raw))
-    mock_client.find_stations_by_ids.return_value = busy
+    portal.take(11241, 11242, 11243, 11244)
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_available_sockets").state == "0"
@@ -45,10 +33,9 @@ async def test_socket_available_and_account_counts(
 async def test_account_charging_on_when_session_active(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
 ) -> None:
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == STATE_ON
@@ -57,15 +44,14 @@ async def test_account_charging_on_when_session_active(
 async def test_session_here_on_station_of_active_session(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
 ) -> None:
-    """The active session is on socket 11242, station 6041 (see fixtures/last_active_charging.json).
+    """The active session is on socket 11242, station 6041.
 
     session_here must be on for the charger the driver is actually plugged into (6041) and off
     for the other configured charger (6042), never a site- or account-wide signal.
     """
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     assert (
@@ -79,7 +65,7 @@ async def test_session_here_on_station_of_active_session(
 
 
 async def test_session_here_off_for_both_when_idle(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
@@ -94,7 +80,7 @@ async def test_session_here_off_for_both_when_idle(
 
 
 async def test_available_sockets_lists_free_sockets_with_start_buttons(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
@@ -119,7 +105,7 @@ async def test_available_sockets_lists_free_sockets_with_start_buttons(
 
 
 async def test_charger_available_sockets_count(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
@@ -133,8 +119,7 @@ async def test_charger_available_sockets_count(
 async def test_charging_says_where_and_then_where_it_ended(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
 ) -> None:
     """Lets an automation leave out the charger you have just unplugged from."""
     await setup_integration(hass, mock_config_entry)
@@ -149,7 +134,7 @@ async def test_charging_says_where_and_then_where_it_ended(
     )
     assert attrs["ended_at"] is not None
 
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     attrs = charging().attributes
@@ -157,8 +142,8 @@ async def test_charging_says_where_and_then_where_it_ended(
     assert (attrs["socket"], attrs["station_id"], attrs["socket_id"]) == ("Right", 6041, 11242)
     assert attrs["ended_at"] is None
 
-    history_reads = mock_client.find_transactions.await_count
-    mock_client.find_last_active_charge_socket.return_value = None
+    history_reads = len(portal.calls["find_transactions"])
+    portal.free(11242)
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     attrs = charging().attributes
@@ -167,4 +152,4 @@ async def test_charging_says_where_and_then_where_it_ended(
     assert attrs["ended_at"] is not None
     assert "socket_reused_at" not in attrs  # the socket status sensors say what is held back
     # The history is re-read in the same poll, so "Last session" catches up at once.
-    assert mock_client.find_transactions.await_count == history_reads + 1
+    assert len(portal.calls["find_transactions"]) == history_reads + 1

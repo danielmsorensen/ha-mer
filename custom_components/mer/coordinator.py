@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Coroutine, Mapping
 import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -19,11 +19,19 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .commands import (
+    COMMAND_START,
+    COMMAND_STOP,
+    RATE_LIMIT_FLOOR,
+    RESULT_UNCONFIRMED,
+    CommandResult,
+    Commands,
+    CommandUnconfirmed,
+    Outcome,
+    View,
+)
 from .const import (
     CAPABILITY_REFRESH_DELAY_SECONDS,
-    COMMAND_MAX_POLLS,
-    COMMAND_POLL_INTERVAL_SECONDS,
-    COMMAND_RATE_LIMIT_FLOOR,
     CONF_SCAN_INTERVAL,
     CONF_STATION_IDS,
     DEFAULT_SCAN_INTERVAL,
@@ -41,14 +49,7 @@ from .const import (
     WALLET_REFRESH,
 )
 from .driivz.client import DriivzDriverClient
-from .driivz.const import (
-    DENIED_FOR_SOCKET_STATE,
-    OP_START_CHARGE,
-    OP_START_CHARGE_NOW,
-    STATUS_AVAILABLE,
-    STATUS_PREPARING,
-)
-from .driivz.exceptions import ApiError, AuthError, DriivzError, RateLimitError
+from .driivz.exceptions import AuthError, DriivzError, RateLimitError
 from .driivz.models import (
     EstimatePush,
     Socket,
@@ -61,7 +62,6 @@ from .driivz.models import (
     parse_push,
 )
 from .session_tracker import (
-    CHARGING_STATUSES,
     ActiveSession,
     CommandFinished,
     CommandStarted,
@@ -77,56 +77,7 @@ from .session_tracker import (
     WatchForSession,
 )
 
-# Outcomes of a start/stop command, also the states of the "Last command" sensor.
-RESULT_CHARGING = "charging"
-RESULT_AWAITING_CABLE = "awaiting_cable"
-RESULT_STOPPED = "stopped"
-RESULT_REJECTED = "rejected"
-RESULT_UNCONFIRMED = "unconfirmed"
-COMMAND_RESULTS: tuple[str, ...] = (
-    RESULT_CHARGING,
-    RESULT_AWAITING_CABLE,
-    RESULT_STOPPED,
-    RESULT_REJECTED,
-    RESULT_UNCONFIRMED,
-)
-
 _LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class CommandResult:
-    """How the most recent start/stop command ended."""
-
-    command: str  # "start" or "stop"
-    result: str  # one of COMMAND_RESULTS
-    station_id: int | None
-    station_name: str | None
-    socket_id: int
-    socket_name: str | None
-    requested_at: datetime
-    finished_at: datetime
-    message: str | None = None
-    # For a start: "start" (the normal one) or "charge_now".
-    method: str | None = None
-
-    def as_event_data(self) -> dict[str, Any]:
-        return {
-            "command": self.command,
-            "result": self.result,
-            "station_id": self.station_id,
-            "station_name": self.station_name,
-            "socket_id": self.socket_id,
-            "socket_name": self.socket_name,
-            "requested_at": self.requested_at.isoformat(),
-            "finished_at": self.finished_at.isoformat(),
-            "message": self.message,
-            "method": self.method,
-        }
-
-
-class CommandUnconfirmed(Exception):
-    """The portal accepted the command but the charger did not show the outcome in time."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,20 +131,12 @@ class MerData:
     def start_allowed(self, socket: Socket) -> bool:
         """Whether a start of either kind could be accepted on the socket now.
 
-        The socket's status decides whether its state allows a start: it is fresher than
-        capabilities read a few seconds after the last change, when the portal may still
-        see the old state. The capabilities rule out starts it refuses for other reasons,
-        such as the card. Unknown capabilities leave it to the status.
+        The socket's status decides what its state allows; the capabilities only rule out
+        the rest (`SocketCapabilities.refuses_start_whatever_the_state`). Unknown
+        capabilities leave it to the status.
         """
-        if not socket.can_start:
-            return False
         caps = self.capabilities.get(socket.id)
-        if caps is None:
-            return True
-        return any(
-            op in caps.allowed or caps.denied.get(op) == DENIED_FOR_SOCKET_STATE
-            for op in (OP_START_CHARGE, OP_START_CHARGE_NOW)
-        )
+        return socket.can_start and not (caps and caps.refuses_start_whatever_the_state)
 
     # Session lookups. Everything per charger or per socket goes through these rather
     # than reading `active` directly, so supporting several simultaneous sessions later
@@ -274,6 +217,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._session_watch: asyncio.Task[None] | None = None
         self._skip_next = False
         self._rate_warned_at: datetime | None = None
+        # Start/stop. Its cadence is public so tests can make it fast.
+        self.commands = Commands(client, _CommandChanges(self))
 
     # ----- lifecycle -----------------------------------------------------
 
@@ -575,67 +520,14 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         """Start a charge and wait until the charger shows the outcome.
 
         Raises `DriivzError` if the portal rejects the command and `CommandUnconfirmed`
-        if it accepted it but nothing visible happened within the timeout. Either way
-        the outcome is recorded as the last command and fired as an event.
-        """
-        socket_before = self._snapshot().socket(station_id, socket_id)
-        # Plugged in already: expect charging. Free socket: the charger accepts the
-        # command and then waits for the cable, which is the positive outcome here.
-        expect_cable = socket_before is not None and socket_before.status == STATUS_AVAILABLE
-
-        def done(station: Station | None, active_socket_id: int | None) -> str | None:
-            socket = _socket_of(station, socket_id)
-            if active_socket_id == socket_id or (socket and socket.status in CHARGING_STATUSES):
-                return RESULT_CHARGING
-            if expect_cable and socket and socket.status == STATUS_PREPARING:
-                return RESULT_AWAITING_CABLE
-            return None
-
-        method: str | None = None
-
-        async def send() -> None:
-            nonlocal method
-            method = await self._choose_start_method(station_id, socket_id)
-            if method == "charge_now":
-                await self.client.start_charge_now(socket_id)
-            else:
-                await self.client.start_charge(socket_id)
-
-        return await self._run_command(
-            "start", station_id, socket_id, done, send, method_of=lambda: method
-        )
-
-    async def _choose_start_method(self, station_id: int, socket_id: int) -> str:
-        """Which start the portal will accept on this socket, as the web app decides it.
-
-        The normal start if the socket's capabilities allow `START_CHARGE_FROM_SERVER`,
-        else "Charge now" if they allow `START_CHARGE_NOW`, else fail with the portal's
-        reason instead of sending a command it will refuse. If the capabilities cannot be
-        read, the normal start is sent and the portal has the last word.
+        if it accepted it but nothing visible happened in time. Either way the outcome is
+        recorded as the last command and fired as an event.
         """
         socket = self._snapshot().socket(station_id, socket_id)
-        try:
-            caps = await self.client.find_socket_capabilities(
-                station_id, socket_id, socket.status if socket else "UNKNOWN"
-            )
-        except AuthError, RateLimitError:
-            raise
-        except DriivzError as err:
-            _LOGGER.debug("Could not read socket capabilities (%s); sending the normal start", err)
-            return "start"
-        self._capabilities = {**self._capabilities, **caps}
-        self._publish()
-        socket_caps = caps.get(socket_id)
-        if socket_caps is None:
-            return "start"
-        if OP_START_CHARGE in socket_caps.allowed:
-            return "start"
-        if OP_START_CHARGE_NOW in socket_caps.allowed:
-            return "charge_now"
-        reason = socket_caps.denied.get(OP_START_CHARGE) or socket_caps.denied.get(
-            OP_START_CHARGE_NOW
+        status = socket.status if socket else None
+        return await self._command(
+            COMMAND_START, station_id, socket_id, self.commands.start(station_id, socket_id, status)
         )
-        raise ApiError("START_NOT_ALLOWED", reason)
 
     async def async_refresh_now(self) -> None:
         """Poll now and re-read every charger's start capabilities (Refresh now)."""
@@ -661,7 +553,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
     async def _read_capabilities(self, station_id: int) -> None:
         """Re-read one charger's capabilities (one call covers all its sockets)."""
         remaining = self.client.rate_limit_remaining
-        if remaining is not None and remaining <= COMMAND_RATE_LIMIT_FLOOR:
+        if remaining is not None and remaining <= RATE_LIMIT_FLOOR:
             return
         station = self._snapshot().station(station_id)
         if station is None or not station.sockets:
@@ -677,102 +569,34 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
 
     async def async_stop_charge(self, station_id: int | None, socket_id: int) -> CommandResult:
         """Stop the charge on a socket and wait until the session is gone."""
-
-        def done(station: Station | None, active_socket_id: int | None) -> str | None:
-            socket = _socket_of(station, socket_id)
-            still_charging = socket is not None and socket.status in CHARGING_STATUSES
-            if active_socket_id != socket_id and not still_charging:
-                return RESULT_STOPPED
-            return None
-
-        return await self._run_command(
-            "stop", station_id, socket_id, done, lambda: self.client.stop_charge(socket_id)
+        return await self._command(
+            COMMAND_STOP, station_id, socket_id, self.commands.stop(station_id, socket_id)
         )
 
-    async def _run_command(
+    async def _command(
         self,
         command: str,
         station_id: int | None,
         socket_id: int,
-        done: Callable[[Station | None, int | None], str | None],
-        send: Callable[[], Coroutine[Any, Any, None]],
-        method_of: Callable[[], str | None] = lambda: None,
+        run: Coroutine[Any, Any, Outcome],
     ) -> CommandResult:
+        """Run a command, telling the tracker, then record its outcome and raise a failure."""
         requested_at = dt_util.utcnow()
         self._observe(CommandStarted(command, socket_id, requested_at))
         rejected = False
         try:
-            try:
-                await send()
-            except DriivzError as err:
-                rejected = True
-                self._record_command(
-                    command,
-                    RESULT_REJECTED,
-                    station_id,
-                    socket_id,
-                    requested_at,
-                    str(err),
-                    method=method_of(),
-                )
-                raise
-            result = await self._await_outcome(station_id, socket_id, done)
+            outcome = await run
+            rejected = outcome.error is not None
         finally:
             self._observe(CommandFinished(command, socket_id, rejected, requested_at))
-        record = self._record_command(
-            command, result, station_id, socket_id, requested_at, method=method_of()
-        )
-        if result == RESULT_UNCONFIRMED:
-            raise CommandUnconfirmed
+        if outcome.capabilities:
+            self._capabilities = {**self._capabilities, **outcome.capabilities}
+        record = self._record_command(command, outcome, station_id, socket_id, requested_at)
+        if outcome.error is not None:
+            raise outcome.error
+        if outcome.result == RESULT_UNCONFIRMED:
+            raise CommandUnconfirmed(self.commands.cadence.timeout_seconds)
         return record
-
-    async def _await_outcome(
-        self,
-        station_id: int | None,
-        socket_id: int,
-        done: Callable[[Station | None, int | None], str | None],
-    ) -> str:
-        """Wait until `done` says so, or time runs out.
-
-        With the push channel connected, each pushed change for one of our chargers
-        wakes this immediately and the check runs on the data it already updated, so
-        no request is spent. Otherwise, or when the push channel is quiet, the charger
-        and the active session are polled; every poll is published to the entities, so
-        status, availability and the session sensors update live while the button shows
-        its spinner. Polling stops early when the portal's rate-limit headroom gets low;
-        the normal refresh then picks the outcome up.
-        """
-        for _ in range(COMMAND_MAX_POLLS):
-            woken_by_push = await self._wait_for_push(COMMAND_POLL_INTERVAL_SECONDS)
-            if woken_by_push and self._push_connected:
-                merged = self._snapshot().station(station_id) if station_id is not None else None
-                active = self._tracker.active
-                if (result := done(merged, active.socket_id if active else None)) is not None:
-                    return result
-                continue
-            remaining = self.client.rate_limit_remaining
-            if remaining is not None and remaining <= COMMAND_RATE_LIMIT_FLOOR:
-                _LOGGER.debug("Stopping command polling early; rate limit remaining %s", remaining)
-                break
-            try:
-                station = None
-                if station_id is not None:
-                    found = await self.client.find_stations_by_ids([station_id])
-                    station = found[0] if found else None
-                polled = await self._fetch_active()
-            except DriivzError as err:
-                _LOGGER.debug("Command polling failed (%s); waiting for the next poll", err)
-                continue
-            if station is not None:
-                self._stations = {**self._stations, station.id: station}
-            intents = self._observe(Polled(polled, self._stations))
-            self._publish()
-            self._execute(intents)
-            merged = self._snapshot().station(station_id) if station_id is not None else None
-            active = self._tracker.active
-            if (result := done(merged, active.socket_id if active else None)) is not None:
-                return result
-        return RESULT_UNCONFIRMED
 
     async def _wait_for_push(self, timeout: float) -> bool:
         """Sleep up to `timeout` seconds, returning early (True) on a pushed change."""
@@ -782,6 +606,11 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             return False
         self._push_event.clear()
         return True
+
+    def _command_view(self, station_id: int | None) -> View:
+        station = self._snapshot().station(station_id) if station_id is not None else None
+        active = self._tracker.active
+        return View(station, active.socket_id if active else None)
 
     def _publish(self) -> None:
         """Hand a fresh snapshot to the entities without disturbing the poll schedule.
@@ -820,26 +649,24 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
     def _record_command(
         self,
         command: str,
-        result: str,
+        outcome: Outcome,
         station_id: int | None,
         socket_id: int,
         requested_at: datetime,
-        message: str | None = None,
-        method: str | None = None,
     ) -> CommandResult:
         station = self._snapshot().station(station_id) if station_id is not None else None
         socket = _socket_of(station, socket_id)
         record = CommandResult(
             command=command,
-            result=result,
+            result=outcome.result,
             station_id=station_id,
             station_name=station.display_name if station else None,
             socket_id=socket_id,
             socket_name=socket.name if socket else None,
             requested_at=requested_at,
             finished_at=dt_util.utcnow(),
-            message=message,
-            method=method,
+            message=outcome.message,
+            method=outcome.method,
         )
         self._last_command = record
         self._publish()
@@ -992,7 +819,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             if self._tracker.active is not None:
                 return
             remaining = self.client.rate_limit_remaining
-            if remaining is not None and remaining <= COMMAND_RATE_LIMIT_FLOOR:
+            if remaining is not None and remaining <= RATE_LIMIT_FLOOR:
                 return
             try:
                 found = await self.client.find_last_active_charge_socket()
@@ -1021,6 +848,35 @@ def _socket_of(station: Station | None, socket_id: int) -> Socket | None:
     if station is None:
         return None
     return next((s for s in station.sockets if s.id == socket_id), None)
+
+
+class _CommandChanges:
+    """What a command waits on (`commands.Changes`): pushes while connected, else polls."""
+
+    def __init__(self, coordinator: MerCoordinator) -> None:
+        self._coordinator = coordinator
+
+    async def pushed(self, station_id: int | None, timeout: float) -> View | None:
+        c = self._coordinator
+        if not await c._wait_for_push(timeout) or not c._push_connected:
+            return None
+        # The push handler has already applied and published what it changed.
+        return c._command_view(station_id)
+
+    async def poll(self, station_id: int | None) -> View:
+        """Poll the charger and your session and publish them, so entities update live."""
+        c = self._coordinator
+        station = None
+        if station_id is not None:
+            found = await c.client.find_stations_by_ids([station_id])
+            station = found[0] if found else None
+        polled = await c._fetch_active()
+        if station is not None:
+            c._stations = {**c._stations, station.id: station}
+        intents = c._observe(Polled(polled, c._stations))
+        c._publish()
+        c._execute(intents)
+        return c._command_view(station_id)
 
 
 type MerConfigEntry = ConfigEntry[MerCoordinator]

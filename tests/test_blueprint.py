@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 import shutil
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.automation import DOMAIN as AUTOMATION_DOMAIN
@@ -18,27 +16,18 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.mer.const import DOMAIN
 from tests.conftest import make_config_entry
-from tests.helpers import setup_integration, stations_from_fixture
+from tests.fake_portal import FakePortal
+from tests.helpers import fast_commands, setup_integration
 
 BLUEPRINT = (
     Path(__file__).parent.parent / "blueprints" / "automation" / "mer" / "offer_free_charger.yaml"
 )
 WORK = {"latitude": 51.5, "longitude": -0.12}
 AWAY = {"latitude": 52.5, "longitude": -1.5}
-
-
-@pytest.fixture(autouse=True)
-def fast_command_polling():
-    with (
-        patch("custom_components.mer.coordinator.COMMAND_POLL_INTERVAL_SECONDS", 0),
-        patch("custom_components.mer.coordinator.COMMAND_MAX_POLLS", 1),
-    ):
-        yield
 
 
 def socket_status_entity(hass: HomeAssistant, entry_id: str, socket_id: int) -> str:
@@ -58,6 +47,7 @@ async def setup_blueprint(
 ) -> list[dict[str, Any]]:
     """Integration, a Work zone, a person, a phone, and an automation from the blueprint."""
     await setup_integration(hass, mock_config_entry)
+    fast_commands(mock_config_entry)
     eid = mock_config_entry.entry_id
 
     target = Path(hass.config.path("blueprints", "automation", "mer", "offer_free_charger.yaml"))
@@ -126,20 +116,8 @@ async def run_by_hand(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
 
 
-def busy(stations, *socket_ids: int, status: str = "OCCUPIED"):
-    return [
-        replace(
-            station,
-            sockets=tuple(
-                replace(s, status=status) if s.id in socket_ids else s for s in station.sockets
-            ),
-        )
-        for station in stations
-    ]
-
-
 async def test_preview_sends_the_offer_for_the_first_free_socket_in_order(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     # Fixture: Charger A (6042) Left and Right free; Charger B (6041) Left charging, Right free.
     sent = await setup_blueprint(hass, mock_config_entry, [11241, 11242, 11243, 11244])
@@ -158,11 +136,9 @@ async def test_preview_sends_the_offer_for_the_first_free_socket_in_order(
 
 
 async def test_preview_says_nothing_free_when_all_taken(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
-    mock_client.find_stations_by_ids.return_value = busy(
-        stations_from_fixture("stations_by_ids.json"), 11241, 11242, 11243, 11244
-    )
+    portal.take(11241, 11242, 11243, 11244)
     sent = await setup_blueprint(hass, mock_config_entry, [11242, 11243])
     await run_by_hand(hass)
     (notice,) = sent
@@ -173,11 +149,10 @@ async def test_preview_says_nothing_free_when_all_taken(
 async def test_socket_freeing_up_only_notifies_in_the_zone(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    live = stations_from_fixture("stations_by_ids.json")
-    mock_client.find_stations_by_ids.return_value = busy(live, 11243, 11244, 11242)
+    portal.take(11243, 11244, 11242)
     sent = await setup_blueprint(hass, mock_config_entry, [11243])
     coordinator = mock_config_entry.runtime_data
 
@@ -185,19 +160,19 @@ async def test_socket_freeing_up_only_notifies_in_the_zone(
     await hass.async_block_till_done()
     assert [n["message"] for n in sent] == ["clear_notification"]  # leaving clears it
     sent.clear()
-    mock_client.find_stations_by_ids.return_value = busy(live, 11244, 11242)  # 11243 frees
+    portal.free(11243)
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     assert sent == []  # away: no offer, and no "nothing free" either
 
-    mock_client.find_stations_by_ids.return_value = busy(live, 11243, 11244, 11242)
+    portal.take(11243)
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     freezer.tick(timedelta(minutes=3))
     hass.states.async_set("person.driver", "Work", WORK)
     # Walking back into the zone is itself an arrival, with the socket taken.
     assert [n["title"] for n in sent] == ["No Mer charger free"]
-    mock_client.find_stations_by_ids.return_value = busy(live, 11244, 11242)
+    portal.free(11243)
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     arrival, offer = sent
@@ -219,13 +194,13 @@ async def tap_start(hass: HomeAssistant, sent: list[dict[str, Any]]) -> list[dic
 
 
 async def test_tapping_start_presses_the_socket_button_and_says_so(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """No result from the charger within the wait: say the start was sent anyway."""
     sent = await setup_blueprint(hass, mock_config_entry, [11243])
     await run_by_hand(hass)
     starting, outcome = await tap_start(hass, sent)
-    mock_client.start_charge.assert_awaited_once_with(11243)
+    assert portal.calls["start_charge"] == [(11243,)]
     assert starting["title"] == "Starting Riverside - Bay 3 - Charger A Left"
     assert starting["data"]["car_ui"] is True  # replaces the offer in the car too
     assert "alert_once" not in starting["data"]  # alerts, so it shows in the car
@@ -233,36 +208,34 @@ async def test_tapping_start_presses_the_socket_button_and_says_so(
 
 
 async def test_start_confirmed_charging_dismisses_the_notification(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
-    live = stations_from_fixture("stations_by_ids.json")
     sent = await setup_blueprint(hass, mock_config_entry, [11243])
     await run_by_hand(hass)
-    mock_client.find_stations_by_ids.return_value = busy(live, 11243, status="CHARGING")
+    portal.charge(11243)
     after = await tap_start(hass, sent)
     assert after[-1]["message"] == "clear_notification"
 
 
 async def test_start_waiting_for_the_cable_says_plug_in(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
-    live = stations_from_fixture("stations_by_ids.json")
     sent = await setup_blueprint(hass, mock_config_entry, [11243])
     await run_by_hand(hass)
-    mock_client.find_stations_by_ids.return_value = busy(live, 11243, status="PREPARING")
+    portal.await_cable(11243)
     after = await tap_start(hass, sent)
     assert after[-1]["title"] == "Plug in"
     assert after[-1]["message"] == "Riverside - Bay 3 - Charger A Left is waiting for your cable."
 
 
 async def test_start_refused_says_why(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     from custom_components.mer.driivz.exceptions import ApiError
 
     sent = await setup_blueprint(hass, mock_config_entry, [11243])
     await run_by_hand(hass)
-    mock_client.start_charge.side_effect = ApiError("NOT_AUTHORIZED")
+    portal.fail("start_charge", ApiError("NOT_AUTHORIZED"))
     after = await tap_start(hass, sent)
     assert after[-1]["title"] == "Couldn't start Riverside - Bay 3 - Charger A Left"
     assert "NOT_AUTHORIZED" in after[-1]["message"]
@@ -271,7 +244,7 @@ async def test_start_refused_says_why(
 async def test_device_tracker_works_as_the_tracker(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     """A car's tracker instead of a person: arriving in the zone sends the offer."""
@@ -283,7 +256,7 @@ async def test_device_tracker_works_as_the_tracker(
 
 
 async def test_text_tap_target_and_extra_data_are_options(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     sent = await setup_blueprint(
         hass,
@@ -305,11 +278,9 @@ async def test_text_tap_target_and_extra_data_are_options(
 
 
 async def test_nothing_free_text_is_an_option(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
-    mock_client.find_stations_by_ids.return_value = busy(
-        stations_from_fixture("stations_by_ids.json"), 11243
-    )
+    portal.take(11243)
     sent = await setup_blueprint(
         hass, mock_config_entry, [11243], none_title="All taken", none_message="Try later"
     )
@@ -320,15 +291,14 @@ async def test_nothing_free_text_is_an_option(
 
 
 async def test_offered_socket_taken_offers_the_next_quietly(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
-    live = stations_from_fixture("stations_by_ids.json")
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
     coordinator = mock_config_entry.runtime_data
     await run_by_hand(hass)
     assert sent[-1]["data"]["actions"][0]["title"] == "Start Left"
 
-    mock_client.find_stations_by_ids.return_value = busy(live, 11243)  # someone takes Left
+    portal.take(11243)  # someone takes Left
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     update = sent[-1]
@@ -336,7 +306,7 @@ async def test_offered_socket_taken_offers_the_next_quietly(
     assert update["data"]["alert_once"] is True
     assert update["data"]["push"] == {"interruption-level": "passive"}
 
-    mock_client.find_stations_by_ids.return_value = busy(live, 11243, 11244)  # and Right
+    portal.take(11244)  # and Right
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     assert sent[-1]["title"] == "No Mer charger free"
@@ -344,25 +314,23 @@ async def test_offered_socket_taken_offers_the_next_quietly(
 
 
 async def test_taking_a_socket_not_on_offer_changes_nothing(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
-    live = stations_from_fixture("stations_by_ids.json")
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
     await run_by_hand(hass)
-    mock_client.find_stations_by_ids.return_value = busy(live, 11244)  # Right, not offered
+    portal.take(11244)  # Right, not offered
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert len(sent) == 1
 
 
 async def test_your_own_start_does_not_rewrite_the_notification(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """Tapping Start takes the socket; "Starting..." must not be replaced by the next offer."""
-    live = stations_from_fixture("stations_by_ids.json")
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
     await run_by_hand(hass)
-    mock_client.find_stations_by_ids.return_value = busy(live, 11243, status="PREPARING")
+    portal.await_cable(11243)
     await tap_start(hass, sent)
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
@@ -373,6 +341,7 @@ async def add_other_account(hass: HomeAssistant) -> MockConfigEntry:
     """A second Mer account; added last, its entities come first in expand()."""
     other = make_config_entry([6042, 6041], username="other@example.com")
     await setup_integration(hass, other)
+    fast_commands(other)
     return other
 
 
@@ -386,29 +355,27 @@ async def press_start(hass: HomeAssistant, entry: MockConfigEntry, socket_id: in
 
 
 async def test_tap_outcome_reads_this_accounts_last_command(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """Two accounts: the outcome comes from the tapped socket's account, not the other's."""
-    live = stations_from_fixture("stations_by_ids.json")
     sent = await setup_blueprint(hass, mock_config_entry, [11243])
     other = await add_other_account(hass)
     await press_start(hass, other, 11244)  # the other account's own last command
     await run_by_hand(hass)
-    mock_client.find_stations_by_ids.return_value = busy(live, 11243, status="PREPARING")
+    portal.await_cable(11243)
     after = await tap_start(hass, sent)
     assert after[-1]["title"] == "Plug in"
 
 
 async def test_another_accounts_start_is_not_your_own(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """Two accounts: a start by the other one still moves your offer on."""
-    live = stations_from_fixture("stations_by_ids.json")
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
     other = await add_other_account(hass)
     await run_by_hand(hass)
     await press_start(hass, other, 11243)  # the other account takes Left
-    mock_client.find_stations_by_ids.return_value = busy(live, 11243)
+    portal.take(11243)
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert sent[-1]["data"]["actions"][0]["title"] == "Start Right"
@@ -417,8 +384,7 @@ async def test_another_accounts_start_is_not_your_own(
 async def test_your_actions_run_when_charging_starts_on_a_chosen_socket(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket,
+    portal: FakePortal,
 ) -> None:
     hooked: list[ServiceCall] = []
 
@@ -433,7 +399,7 @@ async def test_your_actions_run_when_charging_starts_on_a_chosen_socket(
         [11242],
         when_charging=[{"action": "test.charging_hook"}],
     )
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert len(hooked) == 1
@@ -443,8 +409,7 @@ async def test_your_actions_run_when_charging_starts_on_a_chosen_socket(
 async def test_your_actions_skip_a_charge_on_another_socket(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket,
+    portal: FakePortal,
 ) -> None:
     hooked: list[ServiceCall] = []
 
@@ -458,7 +423,7 @@ async def test_your_actions_skip_a_charge_on_another_socket(
         [11243],
         when_charging=[{"action": "test.charging_hook"}],
     )
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await mock_config_entry.runtime_data.async_refresh()
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))  # wait times out
     await hass.async_block_till_done()
@@ -466,26 +431,22 @@ async def test_your_actions_skip_a_charge_on_another_socket(
 
 
 async def stop_charging_on_charger_b_right(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket,
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> tuple[list[dict[str, Any]], Any]:
     """Charge on Charger B Right (11242), then stop; return what's sent and a poller."""
     sent = await setup_blueprint(hass, mock_config_entry, [11242, 11241, 11243, 11244])
     coordinator = mock_config_entry.runtime_data
 
-    async def poll(stations) -> None:
-        mock_client.find_stations_by_ids.return_value = stations
+    async def poll() -> None:
         await coordinator.async_refresh()
         await hass.async_block_till_done()
 
-    live = stations_from_fixture("stations_by_ids.json")  # B Left charging; the rest free
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
-    await poll(busy(live, 11242, status="CHARGING"))
-    mock_client.find_last_active_charge_socket.return_value = None
-    await poll(busy(live, 11242, status="FINISHING"))  # you stop
-    await poll(live)  # and unplug: Right is free
+    portal.charge(11242)
+    await poll()
+    portal.stop(11242)  # you stop
+    await poll()
+    portal.free(11242)  # and unplug: Right is free
+    await poll()
     sent.clear()
     return sent, poll
 
@@ -493,22 +454,19 @@ async def stop_charging_on_charger_b_right(
 async def test_after_you_stop_held_back_sockets_are_not_offered(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket,
+    portal: FakePortal,
 ) -> None:
     """Seen live on 2026-10-12: stopping to go home offered a charger already free.
 
     The sockets' `held_back` decides; its rules are tested on the session tracker.
     """
-    sent, poll = await stop_charging_on_charger_b_right(
-        hass, mock_config_entry, mock_client, charging_socket
-    )
-    live = stations_from_fixture("stations_by_ids.json")
+    sent, poll = await stop_charging_on_charger_b_right(hass, mock_config_entry, portal)
     await run_by_hand(hass)  # Charger A was already free; Right is the one you left
     assert [n["title"] for n in sent] == ["No Mer charger free"]
     sent.clear()
 
-    await poll(busy(live, 11241, status="AVAILABLE"))  # Charger B Left frees up: not held
+    portal.free(11241)  # Charger B Left frees up: not held back
+    await poll()
     (offer,) = sent
     assert offer["message"] == "Riverside - Bay 4 - Charger B"
     assert offer["data"]["actions"][0]["title"] == "Start Left"
@@ -517,24 +475,22 @@ async def test_after_you_stop_held_back_sockets_are_not_offered(
 async def test_a_held_back_socket_taken_changes_nothing(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket,
+    portal: FakePortal,
 ) -> None:
     """Never on offer, so taking it isn't news. `held_back` is read from before it was taken,
     which releases it (2026-10-15)."""
-    sent, poll = await stop_charging_on_charger_b_right(
-        hass, mock_config_entry, mock_client, charging_socket
-    )
-    live = stations_from_fixture("stations_by_ids.json")
-    await poll(busy(live, 11243, status="OCCUPIED"))  # one already free is taken
-    await poll(busy(live, 11243, 11242, status="OCCUPIED"))  # and someone takes yours
+    sent, poll = await stop_charging_on_charger_b_right(hass, mock_config_entry, portal)
+    portal.take(11243)  # one already free is taken
+    await poll()
+    portal.take(11242)  # and someone takes yours
+    await poll()
     assert sent == []
 
 
 async def test_your_conditions_gate_real_offers_but_not_a_preview(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     hass.states.async_set("input_boolean.car_needs_charge", "off")
@@ -578,18 +534,18 @@ def android_tap(offer: dict[str, Any]) -> dict[str, Any]:
 
 
 async def test_android_tap_without_action_data_starts_the_offered_socket(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
     await run_by_hand(hass)
     hass.bus.async_fire("mobile_app_notification_action", android_tap(sent[0]))
     await hass.async_block_till_done()
-    mock_client.start_charge.assert_awaited_once_with(11243)
+    assert portal.calls["start_charge"] == [(11243,)]
     assert sent[1]["title"] == "Starting Riverside - Bay 3 - Charger A Left"
 
 
 async def test_repeat_taps_press_once(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """One tap reported by both the car and the phone, then impatient taps: one start."""
     sent = await setup_blueprint(hass, mock_config_entry, [11243])
@@ -597,71 +553,63 @@ async def test_repeat_taps_press_once(
     for _ in range(3):
         hass.bus.async_fire("mobile_app_notification_action", android_tap(sent[0]))
     await hass.async_block_till_done()
-    mock_client.start_charge.assert_awaited_once_with(11243)
+    assert portal.calls["start_charge"] == [(11243,)]
 
 
 async def test_android_tap_on_an_outdated_offer_says_too_late(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """The notification showed Left, but Left has gone: don't start Right instead."""
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
     await run_by_hand(hass)
     tap = android_tap(sent[0])
-    mock_client.find_stations_by_ids.return_value = busy(
-        stations_from_fixture("stations_by_ids.json"), 11243
-    )
+    portal.take(11243)
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     hass.bus.async_fire("mobile_app_notification_action", tap)
     await hass.async_block_till_done()
-    mock_client.start_charge.assert_not_awaited()
+    assert portal.calls["start_charge"] == []
     assert sent[-1]["title"] == "Too late"
     assert sent[-1]["message"] == "Riverside - Bay 3 - Charger A Left is no longer free."
 
 
 async def test_tap_on_another_automations_notification_is_ignored(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     sent = await setup_blueprint(hass, mock_config_entry, [11243])
     await run_by_hand(hass)
     tap = {**android_tap(sent[0]), "tag": "mer_free_charger_automation.someone_else"}
     hass.bus.async_fire("mobile_app_notification_action", tap)
     await hass.async_block_till_done()
-    mock_client.start_charge.assert_not_awaited()
+    assert portal.calls["start_charge"] == []
 
 
 async def test_a_less_preferred_socket_freeing_up_does_not_alert_again(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """Charger A Left is on offer; Right freeing up leaves the offer as it is."""
-    live = stations_from_fixture("stations_by_ids.json")
-    mock_client.find_stations_by_ids.return_value = busy(live, 11244)
+    portal.take(11244)
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
     await run_by_hand(hass)
     assert len(sent) == 1
-    mock_client.find_stations_by_ids.return_value = live  # Right frees up
+    portal.free(11244)  # Right frees up
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert len(sent) == 1
 
 
-async def start_session(mock_client: MagicMock, coordinator, socket) -> None:
-    mock_client.find_last_active_charge_socket.return_value = socket
-    await coordinator.async_refresh()
-
-
 async def test_offer_while_charging_offers_on_arrival_during_a_charge(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
-    charging_socket,
 ) -> None:
     """A second car, a friend, or a shared account charging elsewhere."""
     # Watching the session's socket (11242) too, so "When charging starts" doesn't wait
     # for it on the frozen clock.
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11242], offer_while_charging=True)
-    await start_session(mock_client, mock_config_entry.runtime_data, charging_socket)
+    portal.charge(11242)
+    await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     await leave_and_arrive(hass, freezer)
     assert sent[-1]["title"] == "Mer charger free"
@@ -671,12 +619,12 @@ async def test_offer_while_charging_offers_on_arrival_during_a_charge(
 async def test_without_the_option_no_offer_while_charging(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
-    charging_socket,
 ) -> None:
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11242])
-    await start_session(mock_client, mock_config_entry.runtime_data, charging_socket)
+    portal.charge(11242)
+    await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     sent.clear()
     await leave_and_arrive(hass, freezer)
@@ -686,12 +634,12 @@ async def test_without_the_option_no_offer_while_charging(
 async def test_offer_while_charging_moves_the_offer_on_when_a_charge_starts(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket,
+    portal: FakePortal,
 ) -> None:
     """Instead of clearing, the notification quietly offers the next free socket."""
     sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244], offer_while_charging=True)
-    await start_session(mock_client, mock_config_entry.runtime_data, charging_socket)
+    portal.charge(11242)
+    await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     update = sent[-1]
     assert update["title"] == "Mer charger free"
@@ -702,14 +650,15 @@ async def test_offer_while_charging_moves_the_offer_on_when_a_charge_starts(
 async def test_offer_while_charging_offers_already_free_sockets_after_a_stop(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket,
+    portal: FakePortal,
 ) -> None:
     """Swapping cars: what was already free, and the socket just left, stay on offer."""
     sent = await setup_blueprint(hass, mock_config_entry, [11242, 11243], offer_while_charging=True)
     coordinator = mock_config_entry.runtime_data
-    await start_session(mock_client, coordinator, charging_socket)
-    await start_session(mock_client, coordinator, None)  # stopped
+    portal.charge(11242)
+    await coordinator.async_refresh()
+    portal.free(11242)  # stopped and unplugged
+    await coordinator.async_refresh()
     await hass.async_block_till_done()
     sent.clear()
     await run_by_hand(hass)
@@ -720,7 +669,7 @@ async def test_offer_while_charging_offers_already_free_sockets_after_a_stop(
 async def test_bouncing_back_into_the_zone_is_not_an_arrival(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     """Seen live on 2026-11-02: leaving after a stop, the location bounced back into the

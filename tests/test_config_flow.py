@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
@@ -25,6 +23,7 @@ from custom_components.mer.const import (
 )
 from custom_components.mer.driivz.exceptions import AuthError, DriivzConnectionError
 from tests.conftest import SITE_NAME, make_config_entry
+from tests.fake_portal import FakePortal
 from tests.helpers import setup_integration
 
 CREDS = {CONF_USERNAME: "user@example.com", CONF_PASSWORD: "secret"}
@@ -80,7 +79,7 @@ async def _pick_riverside(hass: HomeAssistant, entry: MockConfigEntry):
 # ----- initial setup: credentials only -------------------------------------
 
 
-async def test_user_flow_creates_account_entry(hass: HomeAssistant, mock_client: MagicMock) -> None:
+async def test_user_flow_creates_account_entry(hass: HomeAssistant, portal: FakePortal) -> None:
     result = await _start(hass)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
@@ -94,26 +93,26 @@ async def test_user_flow_creates_account_entry(hass: HomeAssistant, mock_client:
     entry = result["result"]
     assert entry.unique_id == "user@example.com"
     assert entry.subentries == {}
-    mock_client.login.assert_awaited()
+    assert portal.calls["login"]
     # No chargers yet: the entry loads and polls only the account.
     assert entry.state is config_entries.ConfigEntryState.LOADED
-    mock_client.find_stations_by_ids.assert_not_awaited()
+    assert portal.calls["find_stations_by_ids"] == []
 
 
-async def test_invalid_auth_and_cannot_connect(hass: HomeAssistant, mock_client: MagicMock) -> None:
+async def test_invalid_auth_and_cannot_connect(hass: HomeAssistant, portal: FakePortal) -> None:
     result = await _start(hass)
-    mock_client.login.side_effect = AuthError("BAD_CREDENTIALS")
+    portal.fail("login", AuthError("BAD_CREDENTIALS"))
     result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDS)
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "invalid_auth"}
 
-    mock_client.login.side_effect = DriivzConnectionError("boom")
+    portal.fail("login", DriivzConnectionError("boom"))
     result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDS)
     assert result["errors"] == {"base": "cannot_connect"}
 
 
 async def test_duplicate_account_aborts(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     mock_config_entry.add_to_hass(hass)
     result = await _start(hass)
@@ -123,19 +122,19 @@ async def test_duplicate_account_aborts(
 
 
 async def test_reauth_updates_password(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     result = await mock_config_entry.start_reauth_flow(hass)
     assert result["step_id"] == "reauth_confirm"
 
-    mock_client.login.side_effect = AuthError("BAD_CREDENTIALS")
+    portal.fail("login", AuthError("BAD_CREDENTIALS"))
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_PASSWORD: "wrong"}
     )
     assert result["errors"] == {"base": "invalid_auth"}
 
-    mock_client.login.side_effect = None
+    portal.clear("login")
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_PASSWORD: "new-secret"}
     )
@@ -148,7 +147,7 @@ async def test_reauth_updates_password(
 
 
 async def test_options_interval(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
@@ -167,7 +166,7 @@ async def test_options_interval(
 
 
 async def test_add_chargers_creates_one_site_subentry(
-    hass: HomeAssistant, mock_client: MagicMock
+    hass: HomeAssistant, portal: FakePortal
 ) -> None:
     entry = make_config_entry([])
     await setup_integration(hass, entry)
@@ -222,7 +221,7 @@ async def test_add_chargers_creates_one_site_subentry(
 
 
 async def test_add_charger_at_existing_site_joins_its_subentry(
-    hass: HomeAssistant, mock_client: MagicMock
+    hass: HomeAssistant, portal: FakePortal
 ) -> None:
     entry = make_config_entry([6042])
     await setup_integration(hass, entry)
@@ -241,7 +240,7 @@ async def test_add_charger_at_existing_site_joins_its_subentry(
 
 
 async def test_change_chargers_unticks_one_and_removes_its_device(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     registry = dr.async_get(hass)
@@ -271,7 +270,7 @@ async def test_change_chargers_unticks_one_and_removes_its_device(
     assert registry.async_get_device_by_identifier((DOMAIN, "station_6042"), entry_id)
 
 
-async def test_add_charger_hides_already_added(hass: HomeAssistant, mock_client: MagicMock) -> None:
+async def test_add_charger_hides_already_added(hass: HomeAssistant, portal: FakePortal) -> None:
     entry = make_config_entry([6042])
     await setup_integration(hass, entry)
     result = await _start_add_charger(hass, entry)
@@ -293,7 +292,7 @@ async def test_add_charger_hides_already_added(hass: HomeAssistant, mock_client:
 
 
 async def test_add_charger_aborts_when_all_added(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     result = await _start_add_charger(hass, mock_config_entry)
@@ -308,7 +307,7 @@ async def test_add_charger_aborts_when_all_added(
 
 
 async def test_add_charger_no_site_match_and_login_failures(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     result = await _start_add_charger(hass, mock_config_entry)
@@ -318,19 +317,19 @@ async def test_add_charger_no_site_match_and_login_failures(
     assert result["step_id"] == "user"
     assert result["errors"] == {"base": "no_sites"}
 
-    mock_client.login.side_effect = AuthError("BAD_CREDENTIALS")
+    portal.fail("login", AuthError("BAD_CREDENTIALS"))
     result = await _start_add_charger(hass, mock_config_entry)
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "invalid_auth"
 
-    mock_client.login.side_effect = DriivzConnectionError("boom")
+    portal.fail("login", DriivzConnectionError("boom"))
     result = await _start_add_charger(hass, mock_config_entry)
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "cannot_connect"
 
 
 async def test_delete_site_removes_its_chargers(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     registry = dr.async_get(hass)
@@ -350,7 +349,7 @@ async def test_delete_site_removes_its_chargers(
     assert registry.async_get_device_by_identifier((DOMAIN, f"account_{entry_id}"), entry_id)
 
 
-async def test_add_charger_can_go_back_a_step(hass: HomeAssistant, mock_client: MagicMock) -> None:
+async def test_add_charger_can_go_back_a_step(hass: HomeAssistant, portal: FakePortal) -> None:
     """Flows have no back button, so each step offers its own way back."""
     entry = make_config_entry([])
     await setup_integration(hass, entry)
