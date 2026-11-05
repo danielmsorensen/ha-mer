@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import timedelta
-from unittest.mock import MagicMock
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.const import STATE_UNAVAILABLE
@@ -15,7 +14,8 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mer.const import DOMAIN
-from custom_components.mer.driivz.models import Socket, SocketPrice
+from custom_components.mer.driivz.models import Socket, SocketPrice, Station
+from tests.fake_portal import FakePortal
 from tests.helpers import setup_integration, station_from_fixture
 
 
@@ -28,7 +28,7 @@ def state_by_unique_id(hass: HomeAssistant, platform: str, unique_id: str):
 
 
 async def test_station_and_socket_sensors(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
@@ -57,11 +57,10 @@ async def test_station_and_socket_sensors(
 
 
 async def test_unknown_status_maps_to_unknown_option(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
-    stations = mock_client.find_stations_by_ids.return_value
-    weird = stations[0]
-    stations[0] = type(weird).from_dict(
+    weird = portal.stations[6042]
+    portal.stations[6042] = Station.from_dict(
         {
             "id": weird.id,
             "caption": weird.caption,
@@ -76,13 +75,11 @@ async def test_unknown_status_maps_to_unknown_option(
 
 
 async def test_station_missing_from_poll_is_unavailable(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    mock_client.find_stations_by_ids.return_value = [
-        s for s in mock_client.find_stations_by_ids.return_value if s.id != 6042
-    ]
+    del portal.stations[6042]  # the portal stops reporting Charger A
     coordinator = mock_config_entry.runtime_data
     await coordinator.async_refresh()
     await hass.async_block_till_done()
@@ -136,7 +133,7 @@ def test_socket_price_unit_follows_tariff_currency() -> None:
 
 
 async def test_aggregate_count_sensors(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
@@ -148,7 +145,7 @@ async def test_aggregate_count_sensors(
 
 
 async def test_account_sensors_idle(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
@@ -189,11 +186,10 @@ async def test_account_sensors_idle(
 async def test_account_sensors_charging(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     now = dt_util.utcnow()
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
@@ -237,7 +233,7 @@ async def test_account_sensors_charging(
 
 
 async def test_price_from_tariff_without_kwh_component(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """The live portal now sends flat-rate tariffs as fixPrice with no kwhPrice at all.
 
@@ -257,10 +253,7 @@ async def test_price_from_tariff_without_kwh_component(
             replace(sock, prices=(SocketPrice.from_dict(live_price),)) for sock in detail.sockets
         ),
     )
-    original = mock_client.find_station_by_id.side_effect
-    mock_client.find_station_by_id.side_effect = lambda station_id, billing_plan_id=None: (
-        live_detail if station_id == 6042 else original(station_id)
-    )
+    portal.details[6042] = live_detail
     await setup_integration(hass, mock_config_entry)
     price = state_by_unique_id(hass, "sensor", f"{mock_config_entry.entry_id}_socket_11243_price")
     assert price.state == "0.0"
@@ -270,7 +263,7 @@ async def test_price_from_tariff_without_kwh_component(
 
 
 async def test_every_entity_has_an_icon(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """No entity may fall back to the frontend's generic eye icon.
 
@@ -298,7 +291,7 @@ async def test_every_entity_has_an_icon(
 
 
 async def test_poll_diagnostics(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """Last poll and requests remaining, and both stay visible when a poll fails."""
     from custom_components.mer.driivz.exceptions import DriivzConnectionError
@@ -319,7 +312,7 @@ async def test_poll_diagnostics(
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_requests_remaining").state == "9"
 
     good = last_poll.state
-    mock_client.find_stations_by_ids.side_effect = DriivzConnectionError("portal down")
+    portal.fail("find_stations_by_ids", DriivzConnectionError("portal down"))
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     last_poll = state_by_unique_id(hass, "sensor", f"{eid}_account_last_poll")
@@ -335,10 +328,9 @@ async def test_poll_diagnostics(
 async def test_active_session_price_on_own_charger(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
 ) -> None:
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     price = state_by_unique_id(hass, "sensor", f"{eid}_account_active_price")
@@ -348,19 +340,10 @@ async def test_active_session_price_on_own_charger(
 
 
 async def test_session_on_charger_not_added(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """A public charger has no device, but the account's session sensors still work."""
-    public = Socket.from_dict(
-        {
-            "id": 15028,
-            "stationId": 17886,
-            "name": "CCS",
-            "socketStatusId": "CHARGING",
-            "stationCaption": "(MER-FS-EX00003) Riverside Business Park - Overflow Car Park",
-        }
-    )
-    mock_client.find_last_active_charge_socket.return_value = public
+    portal.charge(15028)
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     session = state_by_unique_id(hass, "sensor", f"{eid}_account_active_session")
@@ -370,16 +353,16 @@ async def test_session_on_charger_not_added(
     # The price came from that charger's detail, fetched once for the session.
     price = state_by_unique_id(hass, "sensor", f"{eid}_account_active_price")
     assert price.state not in ("unknown", "unavailable")
-    fetched = [c.args[0] for c in mock_client.find_station_by_id.await_args_list]
+    fetched = [c[0] for c in portal.calls["find_station_by_id"]]
     assert fetched.count(17886) == 1
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
-    fetched = [c.args[0] for c in mock_client.find_station_by_id.await_args_list]
+    fetched = [c[0] for c in portal.calls["find_station_by_id"]]
     assert fetched.count(17886) == 1  # cached for the session
 
 
 async def test_status_picks_up_its_start_button_once_registered(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """The status can be written before its button exists (platforms set up in parallel)."""
     await setup_integration(hass, mock_config_entry)
@@ -393,7 +376,7 @@ async def test_status_picks_up_its_start_button_once_registered(
 
 
 async def test_requests_remaining_is_disabled_by_default(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     entry = er.async_get(hass).async_get(

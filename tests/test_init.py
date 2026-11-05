@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import MagicMock
-
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentryData
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -17,17 +14,18 @@ from custom_components.mer.const import (
 )
 from custom_components.mer.driivz.exceptions import AuthError, DriivzConnectionError
 from tests.conftest import SITE_ID, SITE_NAME, make_config_entry
+from tests.fake_portal import FakePortal
 from tests.helpers import setup_integration
 from tests.test_sensor import state_by_unique_id
 
 
 async def test_setup_and_unload(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     assert mock_config_entry.state is ConfigEntryState.LOADED
-    mock_client.login.assert_awaited_once()
-    mock_client.find_stations_by_ids.assert_awaited_with([6042, 6041])
+    assert len(portal.calls["login"]) == 1
+    assert portal.calls["find_stations_by_ids"][-1] == ([6042, 6041],)
     coordinator = mock_config_entry.runtime_data
     assert set(coordinator.data.stations) == {6042, 6041}
     assert coordinator.data.details[6042].sockets[0].name == "Left"
@@ -39,13 +37,13 @@ async def test_setup_and_unload(
 
 
 async def test_setup_without_chargers_polls_account_only(
-    hass: HomeAssistant, mock_client: MagicMock
+    hass: HomeAssistant, portal: FakePortal
 ) -> None:
     entry = make_config_entry([])
     await setup_integration(hass, entry)
     assert entry.state is ConfigEntryState.LOADED
-    mock_client.find_stations_by_ids.assert_not_awaited()
-    mock_client.find_station_by_id.assert_not_awaited()
+    assert portal.calls["find_stations_by_ids"] == []
+    assert portal.calls["find_station_by_id"] == []
     eid = entry.entry_id
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_wallet_balance").state == "12.5"
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_available_sockets").state == "0"
@@ -55,9 +53,9 @@ async def test_setup_without_chargers_polls_account_only(
 
 
 async def test_setup_auth_error_triggers_reauth(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
-    mock_client.login.side_effect = AuthError("BAD_CREDENTIALS")
+    portal.fail("login", AuthError("BAD_CREDENTIALS"))
     await setup_integration(hass, mock_config_entry)
     assert mock_config_entry.state is ConfigEntryState.SETUP_ERROR
     flows = hass.config_entries.flow.async_progress()
@@ -65,15 +63,15 @@ async def test_setup_auth_error_triggers_reauth(
 
 
 async def test_setup_connection_error_retries(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
-    mock_client.login.side_effect = DriivzConnectionError("boom")
+    portal.fail("login", DriivzConnectionError("boom"))
     await setup_integration(hass, mock_config_entry)
     assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
 
 
 async def test_devices_hang_off_the_account(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     registry = dr.async_get(hass)
@@ -91,7 +89,7 @@ async def test_devices_hang_off_the_account(
 
 
 async def test_subentry_added_during_setup_is_picked_up(
-    hass: HomeAssistant, mock_client: MagicMock
+    hass: HomeAssistant, portal: FakePortal
 ) -> None:
     """A subentry change that lands while setup is running must still be picked up.
 
@@ -101,24 +99,16 @@ async def test_subentry_added_during_setup_is_picked_up(
     """
     entry = make_config_entry([6042])
     entry.add_to_hass(hass)
-    setup_started = asyncio.Event()
-    release = asyncio.Event()
-
-    async def slow_wallet():
-        setup_started.set()
-        await release.wait()
-        return mock_client.find_wallet.return_value
-
-    mock_client.find_wallet.side_effect = slow_wallet
+    held = portal.hold("find_wallet")
 
     setup_task = hass.async_create_task(hass.config_entries.async_setup(entry.entry_id))
-    await setup_started.wait()
+    await held.reached.wait()
     # Setup is mid-way through its first refresh, having already read the subentries.
     (site,) = entry.subentries.values()
     hass.config_entries.async_update_subentry(
         entry, site, data={**site.data, CONF_STATION_IDS: [6042, 6041]}
     )
-    release.set()
+    held.release()
     await setup_task
     await hass.async_block_till_done()
 
@@ -132,7 +122,7 @@ async def test_subentry_added_during_setup_is_picked_up(
 
 
 async def test_migrates_per_charger_subentries_to_one_per_site(
-    hass: HomeAssistant, mock_client: MagicMock
+    hass: HomeAssistant, portal: FakePortal
 ) -> None:
     """Version 2 had a subentry per charger; they merge into one for their site."""
     legacy = [

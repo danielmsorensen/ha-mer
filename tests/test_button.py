@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from unittest.mock import MagicMock
-
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
 from homeassistant.components.button import SERVICE_PRESS
@@ -19,8 +16,8 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.mer.const import DOMAIN
 from custom_components.mer.driivz.exceptions import ApiError
-from custom_components.mer.driivz.models import Socket, Station
-from tests.helpers import fast_commands, setup_integration, stations_from_fixture
+from tests.fake_portal import FakePortal
+from tests.helpers import fast_commands, setup_integration
 from tests.test_sensor import state_by_unique_id
 
 
@@ -36,24 +33,12 @@ async def press(hass: HomeAssistant, entity_id: str) -> None:
     )
 
 
-def with_socket_status(stations: list[Station], socket_id: int, status: str) -> list[Station]:
-    """The live-status stations with one socket's status changed."""
-    out = []
-    for station in stations:
-        sockets = tuple(
-            replace(sock, status=status) if sock.id == socket_id else sock
-            for sock in station.sockets
-        )
-        out.append(replace(station, sockets=sockets))
-    return out
-
-
 async def test_a_rejected_press_fails_with_the_portals_reason(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    mock_client.start_charge.side_effect = ApiError("NOT_AUTHORIZED")
+    portal.fail("start_charge", ApiError("NOT_AUTHORIZED"))
     with pytest.raises(HomeAssistantError) as excinfo:
         await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
     assert excinfo.value.translation_key == "command_failed"
@@ -61,7 +46,7 @@ async def test_a_rejected_press_fails_with_the_portals_reason(
 
 
 async def test_an_unconfirmed_press_fails_saying_how_long_it_waited(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     fast_commands(mock_config_entry, interval_seconds=0.01, max_polls=2)
@@ -75,20 +60,19 @@ async def test_an_unconfirmed_press_fails_saying_how_long_it_waited(
 async def test_account_stop_stops_your_sessions_socket(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
 ) -> None:
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await setup_integration(hass, mock_config_entry)
     fast_commands(mock_config_entry)
     eid = mock_config_entry.entry_id
-    mock_client.find_last_active_charge_socket.return_value = None
+    portal.free(11242)  # the charger stops at once; the next poll sees it
     await press(hass, entity_id_for(hass, f"{eid}_account_stop_charge"))
-    mock_client.stop_charge.assert_awaited_once_with(11242)
+    assert portal.calls["stop_charge"] == [(11242,)]
 
 
 async def test_stop_charge_without_session_is_unavailable(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """No session: the button is unavailable, and the press service skips it."""
     await setup_integration(hass, mock_config_entry)
@@ -96,45 +80,43 @@ async def test_stop_charge_without_session_is_unavailable(
     entity_id = entity_id_for(hass, f"{eid}_account_stop_charge")
     assert hass.states.get(entity_id).state == "unavailable"
     await press(hass, entity_id)
-    mock_client.stop_charge.assert_not_awaited()
+    assert portal.calls["stop_charge"] == []
 
 
 async def test_station_stop_charge_button_on_correct_station(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     """Charger 6041's stop button stops the session, because it is running there."""
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await setup_integration(hass, mock_config_entry)
     fast_commands(mock_config_entry)
     eid = mock_config_entry.entry_id
-    mock_client.find_last_active_charge_socket.return_value = None
+    portal.free(11242)  # the charger stops at once; the next poll sees it
     await press(hass, entity_id_for(hass, f"{eid}_station_6041_stop_charge"))
-    mock_client.stop_charge.assert_awaited_once_with(11242)
+    assert portal.calls["stop_charge"] == [(11242,)]
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").state == "stopped"
 
 
 async def test_station_stop_charge_button_on_wrong_station_unavailable(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
 ) -> None:
     """Charger 6042's stop button is unavailable: the session is on 6041, not here."""
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     entity_id = entity_id_for(hass, f"{eid}_station_6042_stop_charge")
     assert hass.states.get(entity_id).state == "unavailable"
     await press(hass, entity_id)
-    mock_client.stop_charge.assert_not_awaited()
+    assert portal.calls["stop_charge"] == []
 
 
 async def test_station_stop_charge_button_without_session_unavailable(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """No active session anywhere: the station button is unavailable too."""
     await setup_integration(hass, mock_config_entry)
@@ -142,21 +124,19 @@ async def test_station_stop_charge_button_without_session_unavailable(
     entity_id = entity_id_for(hass, f"{eid}_station_6041_stop_charge")
     assert hass.states.get(entity_id).state == "unavailable"
     await press(hass, entity_id)
-    mock_client.stop_charge.assert_not_awaited()
+    assert portal.calls["stop_charge"] == []
 
 
 async def test_buttons_unavailable_when_pressing_would_do_nothing(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
 ) -> None:
     """Buttons grey out rather than offer a press the portal would reject.
 
-    Session on 6041's socket 11242; in the live-status fixture 11241 is in use and
-    11243/11244 are free.
+    Session on 6041's socket 11242; 11241 is in use by someone else and 11243/11244 are free.
     """
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
 
@@ -170,7 +150,7 @@ async def test_buttons_unavailable_when_pressing_would_do_nothing(
     assert state(f"{eid}_socket_11241_start_charge") == "unavailable"  # in use
 
     # Session ends: every stop button greys out.
-    mock_client.find_last_active_charge_socket.return_value = None
+    portal.free(11242)
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert state(f"{eid}_account_stop_charge") == "unavailable"
@@ -178,18 +158,18 @@ async def test_buttons_unavailable_when_pressing_would_do_nothing(
 
 
 async def test_refresh_now_polls_immediately(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    polls = mock_client.find_stations_by_ids.await_count
+    polls = len(portal.calls["find_stations_by_ids"])
     await press(hass, entity_id_for(hass, f"{eid}_account_refresh"))
     await hass.async_block_till_done()
-    assert mock_client.find_stations_by_ids.await_count == polls + 1
+    assert len(portal.calls["find_stations_by_ids"]) == polls + 1
 
 
 async def test_command_and_poll_entities_are_diagnostic(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     registry = er.async_get(hass)
@@ -212,10 +192,10 @@ def caps(allowed: set[str], denied: dict[str, str] | None = None):
 
 
 async def test_start_button_availability_follows_capabilities(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """Read at setup and after a status change; a free socket with no start allowed greys out."""
-    mock_client.find_socket_capabilities.return_value = {
+    portal.capabilities = {
         11243: caps(set(), {"START_CHARGE_NOW": "INVALID_CARD"}),
         11244: caps({"START_CHARGE_FROM_SERVER"}),
     }
@@ -223,20 +203,20 @@ async def test_start_button_availability_follows_capabilities(
     await hass.async_block_till_done()
     eid = mock_config_entry.entry_id
     state = lambda uid: hass.states.get(entity_id_for(hass, uid)).state  # noqa: E731
-    assert mock_client.find_socket_capabilities.await_count >= 1
+    assert len(portal.calls["find_socket_capabilities"]) >= 1
     assert state(f"{eid}_socket_11243_start_charge") == "unavailable"  # free, but not for you
     assert state(f"{eid}_socket_11244_start_charge") != "unavailable"
 
 
 async def test_start_button_follows_status_over_a_stale_state_denial(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """Capabilities read while the socket was still busy must not grey out a free socket.
 
     The portal can still deny a start for the socket's state a few seconds after the
     socket shows free; that answer would otherwise stick until the socket changes again.
     """
-    mock_client.find_socket_capabilities.return_value = {
+    portal.capabilities = {
         11243: caps(
             set(),
             {
@@ -251,18 +231,16 @@ async def test_start_button_follows_status_over_a_stale_state_denial(
     uid = f"{eid}_socket_11243_start_charge"
     assert hass.states.get(entity_id_for(hass, uid)).state != "unavailable"  # free: AVAILABLE
 
-    mock_client.find_stations_by_ids.return_value = with_socket_status(
-        stations_from_fixture("stations_by_ids.json"), 11243, "CHARGING"
-    )
+    portal.take(11243, status="CHARGING")
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert hass.states.get(entity_id_for(hass, uid)).state == "unavailable"
 
 
 async def test_refresh_now_rereads_start_capabilities(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
-    mock_client.find_socket_capabilities.return_value = {
+    portal.capabilities = {
         11244: caps(set(), {"START_CHARGE_FROM_SERVER": "NO_PERMISSION"}),
     }
     await setup_integration(hass, mock_config_entry)
@@ -271,7 +249,7 @@ async def test_refresh_now_rereads_start_capabilities(
     uid = f"{eid}_socket_11244_start_charge"
     assert hass.states.get(entity_id_for(hass, uid)).state == "unavailable"
 
-    mock_client.find_socket_capabilities.return_value = {
+    portal.capabilities = {
         11244: caps({"START_CHARGE_FROM_SERVER"}),
     }
     await press(hass, entity_id_for(hass, f"{eid}_account_refresh"))

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections import deque
-from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.mer.commands import Cadence, Commands, View
 from custom_components.mer.driivz.exceptions import (
@@ -14,6 +13,7 @@ from custom_components.mer.driivz.exceptions import (
     RateLimitError,
 )
 from custom_components.mer.driivz.models import Socket, SocketCapabilities, Station
+from tests.fake_portal import FakePortal
 
 STATION = 6042
 SOCKET = 11243
@@ -52,17 +52,13 @@ class FakeChanges:
         return result
 
 
-def make_client(remaining: int | None = 9) -> MagicMock:
-    client = MagicMock()
+def make_client(remaining: int | None = 9) -> FakePortal:
+    client = FakePortal()
     client.rate_limit_remaining = remaining
-    client.start_charge = AsyncMock()
-    client.start_charge_now = AsyncMock()
-    client.stop_charge = AsyncMock()
-    client.find_socket_capabilities = AsyncMock(return_value={})
     return client
 
 
-def commands(client: MagicMock, changes: FakeChanges, max_polls: int = 3) -> Commands:
+def commands(client: FakePortal, changes: FakeChanges, max_polls: int = 3) -> Commands:
     return Commands(client, changes, Cadence(interval_seconds=0, max_polls=max_polls))
 
 
@@ -72,7 +68,7 @@ async def test_stop_waits_until_the_session_is_gone() -> None:
 
     outcome = await commands(client, changes).stop(STATION, SOCKET)
 
-    client.stop_charge.assert_awaited_once_with(SOCKET)
+    assert client.calls["stop_charge"] == [(SOCKET,)]
     assert outcome.result == "stopped"
     assert changes.polled == 2
 
@@ -126,7 +122,7 @@ async def test_a_failed_poll_waits_for_the_next() -> None:
 async def test_a_refused_stop_is_rejected_without_waiting() -> None:
     client = make_client()
     refusal = ApiError("STOP_FAILED")
-    client.stop_charge.side_effect = refusal
+    client.fail("stop_charge", refusal)
     changes = FakeChanges()
 
     outcome = await commands(client, changes).stop(STATION, SOCKET)
@@ -143,7 +139,7 @@ async def test_start_waits_for_charging() -> None:
 
     outcome = await commands(client, changes).start(STATION, SOCKET, "PREPARING")
 
-    client.start_charge.assert_awaited_once_with(SOCKET)
+    assert client.calls["start_charge"] == [(SOCKET,)]
     assert outcome.result == "charging"
     assert outcome.method == "start"
     assert changes.polled == 2
@@ -181,38 +177,38 @@ def caps(allowed: set[str], denied: dict[str, str] | None = None) -> SocketCapab
 async def test_start_reads_the_capabilities_for_the_last_seen_status() -> None:
     client = make_client()
     read = {SOCKET: caps({"START_CHARGE_FROM_SERVER"}), 11244: caps(set())}
-    client.find_socket_capabilities.return_value = read
+    client.capabilities = read
     changes = FakeChanges(polls=[view("CHARGING")])
 
     outcome = await commands(client, changes).start(STATION, SOCKET, None)
 
-    client.find_socket_capabilities.assert_awaited_once_with(STATION, SOCKET, "UNKNOWN")
-    client.start_charge.assert_awaited_once_with(SOCKET)
+    assert client.calls["find_socket_capabilities"] == [(STATION, SOCKET, "UNKNOWN")]
+    assert client.calls["start_charge"] == [(SOCKET,)]
     assert outcome.method == "start"
     assert outcome.capabilities == read
 
 
 async def test_start_uses_charge_now_when_only_that_is_allowed() -> None:
     client = make_client()
-    client.find_socket_capabilities.return_value = {SOCKET: caps({"START_CHARGE_NOW"})}
+    client.capabilities = {SOCKET: caps({"START_CHARGE_NOW"})}
     changes = FakeChanges(polls=[view("CHARGING")])
 
     outcome = await commands(client, changes).start(STATION, SOCKET, "PREPARING")
 
-    client.start_charge_now.assert_awaited_once_with(SOCKET)
-    client.start_charge.assert_not_awaited()
+    assert client.calls["start_charge_now"] == [(SOCKET,)]
+    assert client.calls["start_charge"] == []
     assert (outcome.result, outcome.method) == ("charging", "charge_now")
 
 
 async def test_start_refused_up_front_with_the_portals_reason() -> None:
     client = make_client()
     read = {SOCKET: caps(set(), {"START_CHARGE_FROM_SERVER": "INVALID_CARD"})}
-    client.find_socket_capabilities.return_value = read
+    client.capabilities = read
 
     outcome = await commands(client, FakeChanges()).start(STATION, SOCKET, "AVAILABLE")
 
-    client.start_charge.assert_not_awaited()
-    client.start_charge_now.assert_not_awaited()
+    assert client.calls["start_charge"] == []
+    assert client.calls["start_charge_now"] == []
     assert outcome.result == "rejected"
     assert outcome.message == "START_NOT_ALLOWED: INVALID_CARD"
     assert outcome.method is None
@@ -221,31 +217,31 @@ async def test_start_refused_up_front_with_the_portals_reason() -> None:
 
 async def test_start_sends_the_normal_start_when_capabilities_are_unreadable() -> None:
     client = make_client()
-    client.find_socket_capabilities.side_effect = DriivzConnectionError("down")
+    client.fail("find_socket_capabilities", DriivzConnectionError("down"))
     changes = FakeChanges(polls=[view("CHARGING")])
 
     outcome = await commands(client, changes).start(STATION, SOCKET, "PREPARING")
 
-    client.start_charge.assert_awaited_once_with(SOCKET)
+    assert client.calls["start_charge"] == [(SOCKET,)]
     assert (outcome.result, outcome.method) == ("charging", "start")
 
 
 async def test_start_rejected_when_capabilities_fail_on_auth_or_rate_limit() -> None:
     for error in (AuthError(), RateLimitError("slow down")):
         client = make_client()
-        client.find_socket_capabilities.side_effect = error
+        client.fail("find_socket_capabilities", error)
 
         outcome = await commands(client, FakeChanges()).start(STATION, SOCKET, "AVAILABLE")
 
-        client.start_charge.assert_not_awaited()
+        assert client.calls["start_charge"] == []
         assert outcome.result == "rejected"
         assert outcome.error is error
 
 
 async def test_a_refused_start_keeps_its_method() -> None:
     client = make_client()
-    client.find_socket_capabilities.return_value = {SOCKET: caps({"START_CHARGE_NOW"})}
-    client.start_charge_now.side_effect = ApiError("NOT_AUTHORIZED")
+    client.capabilities = {SOCKET: caps({"START_CHARGE_NOW"})}
+    client.fail("start_charge_now", ApiError("NOT_AUTHORIZED"))
 
     outcome = await commands(client, FakeChanges()).start(STATION, SOCKET, "AVAILABLE")
 

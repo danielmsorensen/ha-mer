@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from datetime import timedelta
-from unittest.mock import MagicMock
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
@@ -24,14 +23,15 @@ from custom_components.mer.driivz.exceptions import (
     DriivzConnectionError,
     RateLimitError,
 )
-from custom_components.mer.driivz.models import Socket, SocketCapabilities
-from tests.helpers import fast_commands, setup_integration, stations_from_fixture
-from tests.test_button import entity_id_for, press, with_socket_status
+from custom_components.mer.driivz.models import SocketCapabilities
+from tests.fake_portal import FakePortal
+from tests.helpers import fast_commands, setup_integration
+from tests.test_button import entity_id_for, press
 from tests.test_sensor import state_by_unique_id
 
 # Stamped onto a station detail by a test so it can tell a committed refresh from a
-# discarded one; the conftest hands back the same Station object every call, so identity
-# comparison would not show the difference.
+# discarded one; the portal hands back equal Station objects every call, so comparison
+# would not show the difference.
 _COMMIT_MARKER = "committed by _refresh_station"
 
 
@@ -44,29 +44,29 @@ async def _tick(hass: HomeAssistant, freezer: FrozenDateTimeFactory, seconds: in
 async def test_idle_cycle_request_budget(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     mock_config_entry.runtime_data.async_add_listener(lambda: None)
     # first refresh: stations, active, wallet+history, 2 details
-    assert mock_client.find_stations_by_ids.await_count == 1
-    assert mock_client.find_last_active_charge_socket.await_count == 1
-    assert mock_client.find_wallet.await_count == 1
-    assert mock_client.find_transactions.await_count == 1
-    assert mock_client.find_station_by_id.await_count == 2
-    assert mock_client.find_current_transaction_estimate.await_count == 0
+    assert len(portal.calls["find_stations_by_ids"]) == 1
+    assert len(portal.calls["find_last_active_charge_socket"]) == 1
+    assert len(portal.calls["find_wallet"]) == 1
+    assert len(portal.calls["find_transactions"]) == 1
+    assert len(portal.calls["find_station_by_id"]) == 2
+    assert len(portal.calls["find_current_transaction_estimate"]) == 0
 
     await _tick(hass, freezer, 61)
-    assert mock_client.find_stations_by_ids.await_count == 2
-    assert mock_client.find_last_active_charge_socket.await_count == 2
-    assert mock_client.find_wallet.await_count == 1  # not due yet
-    assert mock_client.find_station_by_id.await_count == 2  # not due yet
+    assert len(portal.calls["find_stations_by_ids"]) == 2
+    assert len(portal.calls["find_last_active_charge_socket"]) == 2
+    assert len(portal.calls["find_wallet"]) == 1  # not due yet
+    assert len(portal.calls["find_station_by_id"]) == 2  # not due yet
 
     await _tick(hass, freezer, 15 * 60)
-    assert mock_client.find_wallet.await_count == 2
-    assert mock_client.find_transactions.await_count == 2
-    assert mock_client.find_station_by_id.await_count == 2
+    assert len(portal.calls["find_wallet"]) == 2
+    assert len(portal.calls["find_transactions"]) == 2
+    assert len(portal.calls["find_station_by_id"]) == 2
 
     # The hourly per-charger work is staggered: both chargers are due again after an hour,
     # but only one is refreshed in this tick, and the other in the next one. This test used
@@ -74,12 +74,12 @@ async def test_idle_cycle_request_budget(
     # the behaviour that made the worst-case burst 6 + 2N calls and grow without bound with
     # the number of selected chargers.
     await _tick(hass, freezer, 60 * 60)
-    assert mock_client.find_station_by_id.await_count == 3
-    assert mock_client.is_subscribed_to_availability.await_count == 3
+    assert len(portal.calls["find_station_by_id"]) == 3
+    assert len(portal.calls["is_subscribed_to_availability"]) == 3
     await _tick(hass, freezer, 61)
-    assert mock_client.find_station_by_id.await_count == 4
-    assert mock_client.is_subscribed_to_availability.await_count == 4
-    assert [c.args[0] for c in mock_client.find_station_by_id.await_args_list] == [
+    assert len(portal.calls["find_station_by_id"]) == 4
+    assert len(portal.calls["is_subscribed_to_availability"]) == 4
+    assert [c[0] for c in portal.calls["find_station_by_id"]] == [
         6042,
         6041,
         6042,
@@ -87,13 +87,13 @@ async def test_idle_cycle_request_budget(
     ]
     # ...and with both freshly refreshed, the next cycle does no detail work at all.
     await _tick(hass, freezer, 61)
-    assert mock_client.find_station_by_id.await_count == 4
+    assert len(portal.calls["find_station_by_id"]) == 4
 
 
 async def test_optional_refresh_failure_does_not_fail_the_cycle(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     """A persistently broken optional endpoint must not blank every entity, or hot-loop.
@@ -107,17 +107,15 @@ async def test_optional_refresh_failure_does_not_fail_the_cycle(
     await setup_integration(hass, mock_config_entry)
     coordinator = mock_config_entry.runtime_data
     coordinator.async_add_listener(lambda: None)
-    calls_after_setup = mock_client.is_subscribed_to_availability.await_count
+    calls_after_setup = len(portal.calls["is_subscribed_to_availability"])
 
-    # Tag every detail the client hands back from here on, so we can see exactly when a
+    # Tag every detail the portal hands back from here on, so we can see exactly when a
     # `_refresh_station` committed one.
-    unstaged = mock_client.find_station_by_id.side_effect
-    mock_client.find_station_by_id.side_effect = lambda station_id, billing_plan_id=None: replace(
-        unstaged(station_id), model_name=_COMMIT_MARKER
-    )
+    for station_id, detail in portal.details.items():
+        portal.details[station_id] = replace(detail, model_name=_COMMIT_MARKER)
     # Break the notify-me check, then let the hourly window come round. The stagger means
     # 6042 is refreshed in this cycle and 6041 in the next one; both will fail.
-    mock_client.is_subscribed_to_availability.side_effect = DriivzConnectionError("notify down")
+    portal.fail("is_subscribed_to_availability", DriivzConnectionError("notify down"))
     await _tick(hass, freezer, 60 * 60)
 
     # The cycle still succeeded, and the live station data the integration exists to
@@ -128,29 +126,29 @@ async def test_optional_refresh_failure_does_not_fail_the_cycle(
     # And nothing from the failed refresh was committed: `find_station_by_id` succeeded,
     # but its result is discarded rather than left ahead of the published notify state.
     assert coordinator.data.details[6042].model_name != _COMMIT_MARKER
-    assert mock_client.find_station_by_id.await_count == 3
-    assert mock_client.is_subscribed_to_availability.await_count == calls_after_setup + 1
+    assert len(portal.calls["find_station_by_id"]) == 3
+    assert len(portal.calls["is_subscribed_to_availability"]) == calls_after_setup + 1
 
     await _tick(hass, freezer, 61)  # 6041's turn, also fails
-    assert mock_client.is_subscribed_to_availability.await_count == calls_after_setup + 2
+    assert len(portal.calls["is_subscribed_to_availability"]) == calls_after_setup + 2
     assert coordinator.data.details[6041].model_name != _COMMIT_MARKER
 
     # Both failures are stamped anyway, so the work backs off to its next window instead of
     # retrying every single cycle.
     await _tick(hass, freezer, 61)
-    assert mock_client.is_subscribed_to_availability.await_count == calls_after_setup + 2
-    assert mock_client.find_stations_by_ids.await_count == 4  # the poll kept running
+    assert len(portal.calls["is_subscribed_to_availability"]) == calls_after_setup + 2
+    assert len(portal.calls["find_stations_by_ids"]) == 4  # the poll kept running
     assert coordinator.last_update_success is True
 
     # When it recovers at its next window, both halves commit together as normal.
-    mock_client.is_subscribed_to_availability.side_effect = lambda station_id: station_id == 6042
+    portal.clear("is_subscribed_to_availability")
     await _tick(hass, freezer, 60 * 60)
     assert coordinator.data.details[6042].model_name == _COMMIT_MARKER
     assert coordinator.data.notify_subscriptions[6042] is True
 
 
 async def test_first_cycle_does_not_come_up_half_populated(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """The very first cycle still fails hard, so setup retries instead of degrading.
 
@@ -160,7 +158,7 @@ async def test_first_cycle_does_not_come_up_half_populated(
     a charger's detail would bake "Socket 11241" in as a socket's name for the lifetime of
     the config entry. `ConfigEntryNotReady` and a normal setup retry is the better outcome.
     """
-    mock_client.is_subscribed_to_availability.side_effect = DriivzConnectionError("notify down")
+    portal.fail("is_subscribed_to_availability", DriivzConnectionError("notify down"))
     await setup_integration(hass, mock_config_entry)
     assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
 
@@ -168,7 +166,7 @@ async def test_first_cycle_does_not_come_up_half_populated(
 async def test_optional_refresh_still_reports_auth_and_rate_limit(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     """AuthError and RateLimitError from the optional work must reach their handlers."""
@@ -176,12 +174,12 @@ async def test_optional_refresh_still_reports_auth_and_rate_limit(
     coordinator = mock_config_entry.runtime_data
     coordinator.async_add_listener(lambda: None)
 
-    mock_client.find_wallet.side_effect = RateLimitError("429")
+    portal.fail("find_wallet", RateLimitError("429"))
     await _tick(hass, freezer, 15 * 60)  # wallet is due again
     assert coordinator.last_update_success is False
     assert coordinator._skip_next is True
 
-    mock_client.find_wallet.side_effect = AuthError("SESSION_EXPIRED")
+    portal.fail("find_wallet", AuthError("SESSION_EXPIRED"))
     await _tick(hass, freezer, 61)  # skipped cycle, no portal contact
     await _tick(hass, freezer, 61)
     assert any(
@@ -192,10 +190,9 @@ async def test_optional_refresh_still_reports_auth_and_rate_limit(
 async def test_charging_cycle_fetches_session(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
+    portal: FakePortal,
 ) -> None:
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
+    portal.charge(11242)
     await setup_integration(hass, mock_config_entry)
     coordinator = mock_config_entry.runtime_data
     active = coordinator.data.active
@@ -210,44 +207,44 @@ async def test_charging_cycle_fetches_session(
     assert active.started_at is not None
     assert active.started_at < dt_util.utcnow()
     assert active.duration == timedelta(milliseconds=953825)
-    mock_client.find_current_transaction.assert_awaited_once_with(11242)
-    mock_client.find_current_transaction_estimate.assert_awaited_once_with(11242)
+    assert portal.calls["find_current_transaction"] == [(11242,)]
+    assert portal.calls["find_current_transaction_estimate"] == [(11242,)]
 
 
 async def test_rate_limit_low_skips_next_cycle(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     mock_config_entry.runtime_data.async_add_listener(lambda: None)
-    mock_client.rate_limit_remaining = 1
+    portal.rate_limit_remaining = 1
     await _tick(hass, freezer, 61)  # this cycle runs and observes remaining=1
-    assert mock_client.find_stations_by_ids.await_count == 2
+    assert len(portal.calls["find_stations_by_ids"]) == 2
     await _tick(hass, freezer, 61)  # skipped
-    assert mock_client.find_stations_by_ids.await_count == 2
-    mock_client.rate_limit_remaining = 9
+    assert len(portal.calls["find_stations_by_ids"]) == 2
+    portal.rate_limit_remaining = 9
     await _tick(hass, freezer, 61)  # resumes
-    assert mock_client.find_stations_by_ids.await_count == 3
+    assert len(portal.calls["find_stations_by_ids"]) == 3
     assert mock_config_entry.runtime_data.last_update_success is True
 
 
 async def test_rate_limit_error_marks_failed_then_skips(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     mock_config_entry.runtime_data.async_add_listener(lambda: None)
-    mock_client.find_stations_by_ids.side_effect = RateLimitError("429")
+    portal.fail("find_stations_by_ids", RateLimitError("429"))
     await _tick(hass, freezer, 61)
     coordinator = mock_config_entry.runtime_data
     assert coordinator.last_update_success is False
-    mock_client.find_stations_by_ids.side_effect = None
+    portal.clear("find_stations_by_ids")
     await _tick(hass, freezer, 61)  # skipped cycle: republishes cached data, no client call
-    assert mock_client.find_stations_by_ids.await_count == 2
+    assert len(portal.calls["find_stations_by_ids"]) == 2
     # A skipped cycle republishes the last known good data without contacting the portal,
     # which the coordinator framework treats as a successful update.
     assert coordinator.last_update_success is True
@@ -258,12 +255,12 @@ async def test_rate_limit_error_marks_failed_then_skips(
 async def test_connection_error_is_update_failed(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     mock_config_entry.runtime_data.async_add_listener(lambda: None)
-    mock_client.find_stations_by_ids.side_effect = DriivzConnectionError("boom")
+    portal.fail("find_stations_by_ids", DriivzConnectionError("boom"))
     await _tick(hass, freezer, 61)
     assert mock_config_entry.runtime_data.last_update_success is False
 
@@ -271,12 +268,12 @@ async def test_connection_error_is_update_failed(
 async def test_auth_error_during_poll_starts_reauth(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     await setup_integration(hass, mock_config_entry)
     mock_config_entry.runtime_data.async_add_listener(lambda: None)
-    mock_client.find_stations_by_ids.side_effect = AuthError("SESSION_EXPIRED")
+    portal.fail("find_stations_by_ids", AuthError("SESSION_EXPIRED"))
     await _tick(hass, freezer, 61)
     assert mock_config_entry.state is ConfigEntryState.LOADED
     flows = hass.config_entries.flow.async_progress()
@@ -286,7 +283,7 @@ async def test_auth_error_during_poll_starts_reauth(
 async def test_toggle_during_refresh_is_not_clobbered(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
+    portal: FakePortal,
     freezer: FrozenDateTimeFactory,
 ) -> None:
     """A toggle that lands mid-refresh must win, not be overwritten by the refresh's commit.
@@ -308,31 +305,19 @@ async def test_toggle_during_refresh_is_not_clobbered(
     coordinator = mock_config_entry.runtime_data
     assert coordinator.data.notify_subscriptions[6042] is True  # the now-stale answer
 
-    parked = asyncio.Event()
-    release = asyncio.Event()
-    blocked_once = False
-
-    async def blocking_is_subscribed(station_id: int) -> bool:
-        nonlocal blocked_once
-        if not blocked_once and station_id == 6042:
-            blocked_once = True
-            parked.set()
-            await release.wait()
-        return station_id == 6042
-
-    mock_client.is_subscribed_to_availability.side_effect = blocking_is_subscribed
+    held = portal.hold("is_subscribed_to_availability")
 
     refresh_task = asyncio.create_task(coordinator._refresh_station(6042))
-    await parked.wait()  # the refresh is now parked inside the fetch for 6042
+    await held.reached.wait()  # the refresh is now parked inside the fetch for 6042
 
     toggle_task = asyncio.create_task(coordinator.async_set_availability_subscription(6042, False))
     await asyncio.sleep(0)  # let the toggle task run up to its lock-acquire attempt
 
-    release.set()
+    held.release()
     await refresh_task
     await toggle_task
 
-    mock_client.unsubscribe_from_availability.assert_awaited_once_with(6042)
+    assert portal.calls["unsubscribe_from_availability"] == [(6042,)]
     assert coordinator._notify[6042] is False
     assert coordinator.data.notify_subscriptions[6042] is False
 
@@ -344,15 +329,14 @@ def capture_events(hass: HomeAssistant) -> list:
 
 
 async def test_a_command_is_recorded_published_and_fired(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """While the press waits, each poll is published; the outcome lands on Last command."""
-    live = stations_from_fixture("stations_by_ids.json")
     await setup_integration(hass, mock_config_entry)
     fast_commands(mock_config_entry, max_polls=3)
     eid = mock_config_entry.entry_id
     events = capture_events(hass)
-    mock_client.find_stations_by_ids.return_value = with_socket_status(live, 11243, "CHARGING")
+    portal.charge(11243)  # the charger starts at once; the next poll sees it
 
     await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
     await hass.async_block_till_done()
@@ -370,13 +354,13 @@ async def test_a_command_is_recorded_published_and_fired(
 
 
 async def test_a_refused_start_is_recorded_and_its_capabilities_kept(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:
     """The capabilities read at the press grey the button out without waiting for a re-read."""
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
     events = capture_events(hass)
-    mock_client.find_socket_capabilities.return_value = {
+    portal.capabilities = {
         11243: SocketCapabilities(frozenset(), {"START_CHARGE_FROM_SERVER": "INVALID_CARD"})
     }
     button = entity_id_for(hass, f"{eid}_socket_11243_start_charge")
@@ -384,7 +368,7 @@ async def test_a_refused_start_is_recorded_and_its_capabilities_kept(
     with pytest.raises(HomeAssistantError):
         await press(hass, button)
 
-    mock_client.start_charge.assert_not_awaited()
+    assert portal.calls["start_charge"] == []
     last = state_by_unique_id(hass, "sensor", f"{eid}_account_last_command")
     assert last.state == "rejected"
     assert last.attributes["message"] == "START_NOT_ALLOWED: INVALID_CARD"
