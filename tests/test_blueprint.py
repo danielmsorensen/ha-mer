@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -12,6 +13,7 @@ from unittest.mock import MagicMock, patch
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.automation import DOMAIN as AUTOMATION_DOMAIN
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
@@ -20,6 +22,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.mer.const import DOMAIN
+from tests.conftest import make_config_entry
 from tests.helpers import setup_integration, stations_from_fixture
 
 BLUEPRINT = (
@@ -364,6 +367,51 @@ async def test_your_own_start_does_not_rewrite_the_notification(
     await mock_config_entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert sent[-1]["title"] == "Plug in"  # not an offer for Right
+
+
+async def add_other_account(hass: HomeAssistant) -> MockConfigEntry:
+    """A second Mer account; added last, its entities come first in expand()."""
+    other = make_config_entry([6042, 6041], username="other@example.com")
+    await setup_integration(hass, other)
+    return other
+
+
+async def press_start(hass: HomeAssistant, entry: MockConfigEntry, socket_id: int) -> None:
+    button = er.async_get(hass).async_get_entity_id(
+        "button", DOMAIN, f"{entry.entry_id}_socket_{socket_id}_start_charge"
+    )
+    with suppress(HomeAssistantError):  # unconfirmed by the charger, but recorded
+        await hass.services.async_call("button", "press", {"entity_id": button}, blocking=True)
+    await hass.async_block_till_done()
+
+
+async def test_tap_outcome_reads_this_accounts_last_command(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Two accounts: the outcome comes from the tapped socket's account, not the other's."""
+    live = stations_from_fixture("stations_by_ids.json")
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    other = await add_other_account(hass)
+    await press_start(hass, other, 11244)  # the other account's own last command
+    await run_by_hand(hass)
+    mock_client.find_stations_by_ids.return_value = busy(live, 11243, status="PREPARING")
+    after = await tap_start(hass, sent)
+    assert after[-1]["title"] == "Plug in"
+
+
+async def test_another_accounts_start_is_not_your_own(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Two accounts: a start by the other one still moves your offer on."""
+    live = stations_from_fixture("stations_by_ids.json")
+    sent = await setup_blueprint(hass, mock_config_entry, [11243, 11244])
+    other = await add_other_account(hass)
+    await run_by_hand(hass)
+    await press_start(hass, other, 11243)  # the other account takes Left
+    mock_client.find_stations_by_ids.return_value = busy(live, 11243)
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert sent[-1]["data"]["actions"][0]["title"] == "Start Right"
 
 
 async def test_your_actions_run_when_charging_starts_on_a_chosen_socket(

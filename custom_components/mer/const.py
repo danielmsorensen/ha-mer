@@ -38,7 +38,6 @@ PLATFORMS: list[Platform] = [
 WALLET_REFRESH = timedelta(minutes=15)
 DETAIL_REFRESH = timedelta(hours=1)
 HISTORY_LOOKBACK = timedelta(days=30)
-REFRESH_AFTER_COMMAND_SECONDS = 5
 # After a start/stop is acknowledged, the press stays open while the charger is
 # polled at this cadence until the outcome is visible, or this long has passed.
 COMMAND_POLL_INTERVAL_SECONDS = 5
