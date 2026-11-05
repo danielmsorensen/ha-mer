@@ -118,7 +118,7 @@ async def test_optional_refresh_failure_does_not_fail_the_cycle(
     # The cycle still succeeded, and the live station data the integration exists to
     # publish is there -- including the source of the socket availability sensors.
     assert coordinator.last_update_success is True
-    assert coordinator.get_station(6042) is not None
+    assert coordinator.data.station(6042) is not None
     assert coordinator.data.stations.keys() == {6042, 6041}
     # And nothing from the failed refresh was committed: `find_station_by_id` succeeded,
     # but its result is discarded rather than left ahead of the published notify state.
@@ -338,19 +338,3 @@ async def test_toggle_during_refresh_is_not_clobbered(
     freezer.tick(timedelta(seconds=11))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
-
-
-async def test_get_station_merges_detail_and_live(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    await setup_integration(hass, mock_config_entry)
-    coordinator = mock_config_entry.runtime_data
-    station = coordinator.get_station(6041)
-    assert station is not None
-    assert station.model_name == "Eve Double Pro-line"
-    assert station.status == "CHARGING"
-    socket = coordinator.get_socket(6041, 11241)
-    assert socket is not None and socket.name == "Left" and socket.status == "CHARGING"
-    assert coordinator.get_socket(6041, 1) is None
-    assert coordinator.get_station(999) is None
-    assert [s.id for s in coordinator.configured_stations()] == [6042, 6041]

@@ -69,7 +69,7 @@ async def async_get_config_entry_diagnostics(
         ),
         "rate_limit_remaining": coordinator.client.rate_limit_remaining,
         "last_update_success": coordinator.last_update_success,
-        "push_connected": coordinator.push_connected,
+        "push_connected": data.push_connected,
         # Only the start-related parts; the full lists run to dozens of operations.
         "start_capabilities": {
             str(socket_id): {
@@ -84,7 +84,7 @@ async def async_get_config_entry_diagnostics(
                     if op in ("START_CHARGE_FROM_SERVER", "START_CHARGE_NOW")
                 },
             }
-            for socket_id, caps in coordinator.capabilities.items()
+            for socket_id, caps in data.capabilities.items()
         },
         "last_push_at": (
             coordinator.last_push_at.isoformat() if coordinator.last_push_at else None

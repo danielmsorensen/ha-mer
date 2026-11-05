@@ -507,3 +507,30 @@ after the stop, outside the after-stop rules, and offered the charger just unplu
 - The blueprint ignores a re-entry within 2 minutes of leaving the zone. Real arrivals come
   from further away; the bounce seen was 10 s.
 
+
+## 2026-11-05: entities read one snapshot; views composed once
+
+**Decision.**
+- `MerData` is the only state entities read, frozen. It now also holds capabilities, live-status
+  connection, last poll and configured order, plus the lookups (`station`, `socket`,
+  `configured_stations`, `start_allowed`).
+- The coordinator keeps one private field per item and builds `MerData` in `_snapshot()` only.
+  Every change is a field write then `_publish()`. No `replace(self.data, ...)`, no mirrors.
+- `socket_view` / `session_view` (entity.py) build the names/ids/start-button dicts. Socket
+  unique-id format defined once (`socket_unique_id`).
+- Toggling notify now publishes via `_publish`, not `async_set_updated_data`: no poll reschedule
+  (per 2026-09-24).
+- Stay off the snapshot: `last_session_end` (until the session-lifecycle rework), `last_push_at`
+  (diagnostics, no publish), HA's `last_update_success`/`last_exception`/`update_interval`, and
+  `client.rate_limit_remaining`. "Last poll" attributes and "Requests remaining" read the coordinator.
+
+**Why.** State was split between `MerData` and coordinator attributes, mirrored state was written
+twice, capability reads republished unchanged data, and the socket dict was built four ways.
+Attribute logic is now pure functions of a snapshot and tested without Home Assistant.
+
+**Rejected.** `MerData` as the only store (`replace(self.data, ...)` everywhere): a poll building
+its result from `self.data` could overwrite a notify toggle landing mid-poll, the race
+`_notify_lock` exists for.
+
+**Cost if wrong.** Entity ids, unique ids, attribute names and values unchanged; only the
+status sensor's attribute order moved. Reverting is internal.

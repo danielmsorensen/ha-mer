@@ -11,9 +11,9 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .const import COMMAND_TIMEOUT_SECONDS, DOMAIN
 from .coordinator import CommandUnconfirmed, MerConfigEntry, MerCoordinator
 from .driivz.exceptions import DriivzError
-from .entity import MerAccountEntity, MerSocketEntity, MerStationEntity
+from .entity import START_CHARGE_KEY, MerAccountEntity, MerSocketEntity, MerStationEntity
 
-START_CHARGE = ButtonEntityDescription(key="start_charge", translation_key="socket_start_charge")
+START_CHARGE = ButtonEntityDescription(key=START_CHARGE_KEY, translation_key="socket_start_charge")
 ACCOUNT_STOP_CHARGE = ButtonEntityDescription(
     key="stop_charge", translation_key="account_stop_charge"
 )
@@ -81,13 +81,13 @@ class MerStartChargeButton(MerSocketEntity, ButtonEntity):
         from the socket's capabilities, as the web app does. The status says whether the
         socket's state allows a start; the capabilities, re-read shortly after the charger's
         sockets change status and on Refresh now, rule out the rest (see
-        `MerCoordinator.start_allowed`). Home Assistant has no disabled state for a button,
+        `MerData.start_allowed`). Home Assistant has no disabled state for a button,
         so unavailable stands in: the UI greys it out and button.press skips it.
         """
         socket = self.socket
         if not super().available or socket is None:
             return False
-        return self.coordinator.start_allowed(socket)
+        return self.coordinator.data.start_allowed(socket)
 
     async def async_press(self) -> None:
         await _run(self.coordinator, "start", self.station_id, self.socket_id)

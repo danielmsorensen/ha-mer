@@ -120,36 +120,6 @@ async def test_available_sockets_lists_free_sockets_with_start_buttons(
     assert hass.states.get(free[0]["start_button"]) is not None
 
 
-async def test_socket_status_names_its_charger_socket_and_start_button(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    """Blueprints work from these attributes instead of parsing entity ids."""
-    await setup_integration(hass, mock_config_entry)
-    await mock_config_entry.runtime_data.async_refresh()  # buttons registered by now
-    await hass.async_block_till_done()
-    eid = mock_config_entry.entry_id
-    state = state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status")
-    assert state.attributes["charger"] == "Riverside - Bay 3 - Charger A"
-    assert state.attributes["socket"] == "Left"
-    assert state.attributes["start_button"] == "button.riverside_bay_3_charger_a_left_start_charge"
-
-
-async def test_session_here_names_the_socket(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_client: MagicMock,
-    charging_socket: Socket,
-) -> None:
-    mock_client.find_last_active_charge_socket.return_value = charging_socket
-    await setup_integration(hass, mock_config_entry)
-    eid = mock_config_entry.entry_id
-    here = state_by_unique_id(hass, "binary_sensor", f"{eid}_station_6041_session_here")
-    assert here.state == "on"
-    assert here.attributes["socket"] == "Right"
-    elsewhere = state_by_unique_id(hass, "binary_sensor", f"{eid}_station_6042_session_here")
-    assert elsewhere.attributes["socket"] is None
-
-
 async def test_charger_available_sockets_count(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
