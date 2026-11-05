@@ -443,43 +443,57 @@ async def test_public_charger_session_start_and_end_by_push(
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == "off"
 
 
-async def test_socket_starting_to_charge_polls_for_your_session(
+async def test_poll_now_finds_the_session(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
     fake_ws: FakeWebSocket,
     charging_socket: Socket,
 ) -> None:
-    """A start that waited for the cable: the session is picked up at once, not at the next poll.
+    """A socket starting to charge polls at once (2026-10-07), not at the next poll.
 
-    Seen live on 2026-10-07: the socket went to charging and the session was only
-    recognised at the next 5-minute poll, nearly 5 minutes later.
+    Which pushes ask for a poll is in test_session_tracker.
     """
     await setup_integration(hass, mock_config_entry)
     await _settle(hass)
     eid = mock_config_entry.entry_id
+    # Past the refresh debounce, so the requested poll runs at once, inside the handler.
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))
+    await _settle(hass)
     mock_client.find_last_active_charge_socket.return_value = charging_socket  # on 11242
     fake_ws.push(status_push(6041, 11242, "CHARGING"))
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))  # refresh debounce
     await _settle(hass)
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == "on"
 
 
-async def test_your_start_is_followed_until_the_portal_reports_the_session(
+async def test_watch_for_session_runs_after_your_start(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
     fake_ws: FakeWebSocket,
     charging_socket: Socket,
 ) -> None:
-    """Seen live on 2026-10-12: the socket went to "paused" 4 s before the portal reported
-    the session, so one poll found nothing and the session appeared 5 minutes later."""
+    """Your start waits for the cable, then charges: the portal is asked until it reports it.
+
+    Seen live on 2026-10-12. When the tracker asks for a watch is in test_session_tracker.
+    """
     await setup_integration(hass, mock_config_entry)
     await _settle(hass)
     eid = mock_config_entry.entry_id
-    coordinator = mock_config_entry.runtime_data
-    # Your start went through and the charger is waiting for the cable.
-    coordinator._record_command("start", "awaiting_cable", 6041, 11242, dt_util.utcnow())
+    with (
+        patch("custom_components.mer.coordinator.COMMAND_POLL_INTERVAL_SECONDS", 2),
+        patch("custom_components.mer.coordinator.COMMAND_MAX_POLLS", 2),
+    ):
+        pressing = hass.async_create_task(
+            press(hass, entity_id_for(hass, f"{eid}_socket_11242_start_charge"))
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        fake_ws.push(status_push(6041, 11242, "PREPARING"))
+        await asyncio.wait_for(pressing, timeout=5)
+    assert state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").state == (
+        "awaiting_cable"
+    )
 
     checks = 0
 
@@ -489,7 +503,7 @@ async def test_your_start_is_followed_until_the_portal_reports_the_session(
         return charging_socket if checks >= 3 else None
 
     mock_client.find_last_active_charge_socket.side_effect = portal_catches_up
-    with patch("custom_components.mer.coordinator.SESSION_WATCH_DELAYS_SECONDS", (0, 0, 0, 0)):
+    with patch("custom_components.mer.session_tracker.SESSION_WATCH_DELAYS_SECONDS", (0, 0, 0, 0)):
         fake_ws.push(status_push(6041, 11242, "PAUSED"))
         await _settle(hass)
         async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))  # debounce

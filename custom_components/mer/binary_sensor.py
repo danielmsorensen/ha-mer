@@ -15,15 +15,14 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .coordinator import EndedSession, MerConfigEntry, MerCoordinator, MerData
+from .coordinator import MerConfigEntry, MerCoordinator, MerData
 from .entity import MerAccountEntity, MerStationEntity, session_view, socket_label
 
 
 @dataclass(frozen=True, kw_only=True)
 class MerAccountBinaryDescription(BinarySensorEntityDescription):
     is_on_fn: Callable[[MerData], bool]
-    # `EndedSession` is kept on the coordinator, outside the snapshot, for now.
-    attributes_fn: Callable[[MerData, EndedSession | None], dict[str, Any]] | None = None
+    attributes_fn: Callable[[MerData], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -32,7 +31,7 @@ class MerStationBinaryDescription(BinarySensorEntityDescription):
     attributes_fn: Callable[[MerData, int], dict[str, Any]] | None = None
 
 
-def _charging_attributes(data: MerData, ended: EndedSession | None) -> dict[str, Any]:
+def _charging_attributes(data: MerData) -> dict[str, Any]:
     """Where your session is running; once it ends, where it ran and when it ended.
 
     `socket_reused_at` says when someone else started using the socket you left after
@@ -46,6 +45,7 @@ def _charging_attributes(data: MerData, ended: EndedSession | None) -> dict[str,
             "ended_at": None,
             "socket_reused_at": None,
         }
+    ended = data.last_session_end
     if ended is not None:
         return {
             **session_view(data, ended.session),
@@ -89,7 +89,7 @@ ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
         is_on_fn=lambda data: data.push_connected,
-        attributes_fn=lambda data, _ended: {
+        attributes_fn=lambda data: {
             "connected_since": (
                 data.push_connected_since.isoformat() if data.push_connected_since else None
             ),
@@ -133,9 +133,7 @@ class MerAccountBinarySensor(MerAccountEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         if self.entity_description.attributes_fn is None:
             return None
-        return self.entity_description.attributes_fn(
-            self.coordinator.data, self.coordinator.last_session_end
-        )
+        return self.entity_description.attributes_fn(self.coordinator.data)
 
 
 class MerStationBinarySensor(MerStationEntity, BinarySensorEntity):

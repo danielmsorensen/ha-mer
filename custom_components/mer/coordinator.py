@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Coroutine, Mapping
 import contextlib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import json
 import logging
@@ -31,28 +31,21 @@ from .const import (
     DOMAIN,
     EVENT_COMMAND_RESULT,
     HISTORY_LOOKBACK,
-    OWN_START_WINDOW,
     PUSH_POLL_INTERVAL_SECONDS,
     PUSH_RECONNECT_MAX_SECONDS,
     PUSH_RECONNECT_MIN_SECONDS,
     PUSH_SILENCE_TIMEOUT_SECONDS,
-    PUSHED_END_TRUST,
     RATE_LIMIT_SKIP_THRESHOLD,
     RATE_LIMIT_WARN_INTERVAL,
-    SESSION_WATCH_DELAYS_SECONDS,
     SUBENTRY_TYPE_SITE,
     WALLET_REFRESH,
 )
 from .driivz.client import DriivzDriverClient
 from .driivz.const import (
     DENIED_FOR_SOCKET_STATE,
-    IN_USE_STATUSES,
     OP_START_CHARGE,
     OP_START_CHARGE_NOW,
     STATUS_AVAILABLE,
-    STATUS_CHARGING,
-    STATUS_DISCHARGING,
-    STATUS_PAUSED,
     STATUS_PREPARING,
 )
 from .driivz.exceptions import ApiError, AuthError, DriivzError, RateLimitError
@@ -67,9 +60,22 @@ from .driivz.models import (
     Wallet,
     parse_push,
 )
-
-# Socket statuses that mean a charge is in progress.
-_CHARGING_STATUSES = frozenset({STATUS_CHARGING, STATUS_DISCHARGING, STATUS_PAUSED})
+from .session_tracker import (
+    CHARGING_STATUSES,
+    ActiveSession,
+    CommandFinished,
+    CommandStarted,
+    EndedSession,
+    EstimatePushed,
+    Intent,
+    Observation,
+    Polled,
+    PollNow,
+    RereadHistory,
+    SessionTracker,
+    StatusPushed,
+    WatchForSession,
+)
 
 # Outcomes of a start/stop command, also the states of the "Last command" sensor.
 RESULT_CHARGING = "charging"
@@ -86,43 +92,6 @@ COMMAND_RESULTS: tuple[str, ...] = (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class ActiveSession:
-    """The customer's running charge, if any."""
-
-    socket_id: int
-    station_id: int | None
-    socket_name: str | None
-    station_caption: str | None
-    transaction_id: int | None
-    started_at: datetime | None
-    duration: timedelta | None
-    energy_kwh: float | None
-    cost: float | None
-    currency: str | None
-    # The portal's "estimated rate", kW at the charger. Refreshed with each meter reading
-    # (every few minutes), not live; see docs/api.md.
-    rate_kw: float | None = None
-    # The tariff on the socket in use. The price comes from the charger's detail (for a
-    # charger you have not added, fetched once per session); plan name and summary come
-    # from the estimates.
-    price: SocketPrice | None = None
-    billing_plan: str | None = None
-    tariff: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class EndedSession:
-    """Your most recent session once it has ended, and when the integration saw it end."""
-
-    session: ActiveSession
-    ended_at: datetime
-    # The socket you left: whether it has been free since, and when someone else then
-    # started using it.
-    freed: bool = False
-    reused_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +147,8 @@ class MerData:
     last_transaction: Transaction | None = None
     customer_id: int | None = None
     last_command: CommandResult | None = None
+    # Your last session after it ended; see SessionTracker.
+    last_session_end: EndedSession | None = None
     push_connected: bool = False
     push_connected_since: datetime | None = None
     # Last successful poll (skipped cycles do not count).
@@ -274,7 +245,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._notify: dict[int, bool] = {}
         # Re-read shortly after a charger's sockets change status.
         self._capabilities: dict[int, SocketCapabilities] = {}
-        self._active: ActiveSession | None = None
+        # Your session: fed every poll, push and command; owns `active` and `last_session_end`.
+        self._tracker = SessionTracker()
         self._wallet: Wallet | None = None
         self._last_transaction: Transaction | None = None
         self._customer_id: int | None = None
@@ -291,13 +263,6 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         # staggered so at most one charger is refreshed per cycle. See `_stations_due`.
         self._station_refreshed: dict[int, datetime] = {}
         self._wallet_refreshed: datetime | None = None
-        # Your last session after it ended, until the next one starts. Kept in memory
-        # only; after a restart the Charging sensor falls back to the charge history.
-        self.last_session_end: EndedSession | None = None
-        # Start/stop commands waiting for their outcome; they poll for it themselves.
-        self._commands_running = 0
-        # A session a push has just ended: its socket and when. See `_unless_pushed_end`.
-        self._pushed_end: tuple[int, datetime] | None = None
         # Looking for the session of your own start, once its socket is charging.
         self._session_watch: asyncio.Task[None] | None = None
         self._skip_next = False
@@ -333,8 +298,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             if self.station_ids:
                 found = await self.client.find_stations_by_ids(self.station_ids)
                 stations = {s.id: s for s in found}
-            active = self._unless_pushed_end(await self._fetch_active())
-            self._note_session_end(self._active, active)
+            # Observed before the account refresh, so an end re-reads the history this cycle.
+            self._execute(self._observe(Polled(await self._fetch_active(), stations)))
             if self._due(self._wallet_refreshed, WALLET_REFRESH, now):
                 await self._refresh_optional("account", self._refresh_account(now))
                 self._wallet_refreshed = now
@@ -356,9 +321,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             previous = self._stations.get(station_id)
             if previous is None or _socket_statuses(previous) != _socket_statuses(station):
                 self._schedule_capabilities(station_id)
-        self._follow_left_socket(stations)
         self._stations = stations
-        self._active = active
         return self._snapshot()
 
     def _snapshot(self) -> MerData:
@@ -369,11 +332,12 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             details=self._details,
             notify_subscriptions=self._notify,
             capabilities=self._capabilities,
-            active=self._active,
+            active=self._tracker.active,
             wallet=self._wallet,
             last_transaction=self._last_transaction,
             customer_id=self._customer_id,
             last_command=self._last_command,
+            last_session_end=self._tracker.last_end,
             push_connected=self._push_connected,
             push_connected_since=self._push_connected_since,
             last_poll_at=self._last_poll_at,
@@ -613,7 +577,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
 
         def done(station: Station | None, active_socket_id: int | None) -> str | None:
             socket = _socket_of(station, socket_id)
-            if active_socket_id == socket_id or (socket and socket.status in _CHARGING_STATUSES):
+            if active_socket_id == socket_id or (socket and socket.status in CHARGING_STATUSES):
                 return RESULT_CHARGING
             if expect_cable and socket and socket.status == STATUS_PREPARING:
                 return RESULT_AWAITING_CABLE
@@ -708,7 +672,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
 
         def done(station: Station | None, active_socket_id: int | None) -> str | None:
             socket = _socket_of(station, socket_id)
-            still_charging = socket is not None and socket.status in _CHARGING_STATUSES
+            still_charging = socket is not None and socket.status in CHARGING_STATUSES
             if active_socket_id != socket_id and not still_charging:
                 return RESULT_STOPPED
             return None
@@ -727,11 +691,13 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         method_of: Callable[[], str | None] = lambda: None,
     ) -> CommandResult:
         requested_at = dt_util.utcnow()
-        self._commands_running += 1
+        self._observe(CommandStarted())
+        rejected = False
         try:
             try:
                 await send()
             except DriivzError as err:
+                rejected = True
                 self._record_command(
                     command,
                     RESULT_REJECTED,
@@ -744,7 +710,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 raise
             result = await self._await_outcome(station_id, socket_id, done)
         finally:
-            self._commands_running -= 1
+            self._observe(CommandFinished(command, socket_id, rejected, requested_at))
         record = self._record_command(
             command, result, station_id, socket_id, requested_at, method=method_of()
         )
@@ -772,7 +738,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             woken_by_push = await self._wait_for_push(COMMAND_POLL_INTERVAL_SECONDS)
             if woken_by_push and self._push_connected:
                 merged = self._snapshot().station(station_id) if station_id is not None else None
-                active = self._active
+                active = self._tracker.active
                 if (result := done(merged, active.socket_id if active else None)) is not None:
                     return result
                 continue
@@ -785,15 +751,17 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 if station_id is not None:
                     found = await self.client.find_stations_by_ids([station_id])
                     station = found[0] if found else None
-                active = self._unless_pushed_end(await self._fetch_active())
+                polled = await self._fetch_active()
             except DriivzError as err:
                 _LOGGER.debug("Command polling failed (%s); waiting for the next poll", err)
                 continue
             if station is not None:
                 self._stations = {**self._stations, station.id: station}
-            self._active = active
+            intents = self._observe(Polled(polled, self._stations))
             self._publish()
+            self._execute(intents)
             merged = self._snapshot().station(station_id) if station_id is not None else None
+            active = self._tracker.active
             if (result := done(merged, active.socket_id if active else None)) is not None:
                 return result
         return RESULT_UNCONFIRMED
@@ -820,55 +788,26 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         """
         if self.data is None:
             return
-        self._note_session_end(self.data.active, self._active)
-        self._follow_left_socket(self._stations)
         self.data = self._snapshot()
         self.async_update_listeners()
 
-    def _unless_pushed_end(self, active: ActiveSession | None) -> ActiveSession | None:
-        """A polled session, unless a push has just ended it.
+    def _observe(self, observation: Observation) -> tuple[Intent, ...]:
+        return self._tracker.observe(observation, dt_util.utcnow())
 
-        The push says the socket stopped charging; the portal's session lookup can lag
-        behind it, and bringing the session back counted as a new charge starting.
+    def _execute(self, intents: tuple[Intent, ...]) -> None:
+        """Carry out the tracker's intents. Push paths call this only after publishing.
+
+        A poll requested from a push handler can complete before the handler returns (mocked
+        requests do), and the handler's publish would then overwrite what it found.
         """
-        ended = self._pushed_end
-        if active is None or ended is None:
-            return active
-        socket_id, at = ended
-        if dt_util.utcnow() - at >= PUSHED_END_TRUST:
-            self._pushed_end = None
-            return active
-        return None if active.socket_id == socket_id else active
-
-    def _note_session_end(self, before: ActiveSession | None, after: ActiveSession | None) -> None:
-        """Record a session that has just ended, and have the next poll re-read the history.
-
-        A poll that finds the end re-reads it in the same cycle. A pushed end does not poll
-        at once: the portal can still report the session for a while after the charger has
-        finished, and that poll would bring it back.
-        """
-        if before is None or (after is not None and after.socket_id == before.socket_id):
-            return
-        self.last_session_end = EndedSession(before, dt_util.utcnow())
-        self._wallet_refreshed = None
-
-    def _follow_left_socket(self, stations: dict[int, Station]) -> None:
-        """Note when the socket you left frees up, and then when someone else uses it.
-
-        Lets an automation leave the socket you unplugged from out of offers until it has
-        been taken and freed again by someone else.
-        """
-        ended = self.last_session_end
-        if ended is None or ended.reused_at or ended.session.station_id is None:
-            return
-        socket = _socket_of(stations.get(ended.session.station_id), ended.session.socket_id)
-        if socket is None:
-            return
-        if socket.status == STATUS_AVAILABLE:
-            if not ended.freed:
-                self.last_session_end = replace(ended, freed=True)
-        elif ended.freed and socket.status in IN_USE_STATUSES:
-            self.last_session_end = replace(ended, reused_at=dt_util.utcnow())
+        for intent in intents:
+            match intent:
+                case RereadHistory():
+                    self._wallet_refreshed = None
+                case PollNow():
+                    self.hass.async_create_task(self.async_request_refresh(), "mer session poll")
+                case WatchForSession(delays):
+                    self._watch_for_session(delays)
 
     def _record_command(
         self,
@@ -1007,77 +946,31 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             self._apply_estimate_push(push)
 
     def _apply_status_push(self, push: StatusPush) -> None:
-        active = self._active
+        active = self._tracker.active
         on_active_socket = active is not None and push.socket_id == active.socket_id
         if push.station_id not in self._stations and not on_active_socket:
             return  # the broadcast covers every charger on the network
         stations = dict(self._stations)
-        poll_for_session = False
-        if push.station_id in stations:
-            before = stations[push.station_id]
+        before = stations.get(push.station_id)
+        if before is not None:
             stations[push.station_id] = before.with_push(push)
             if _socket_statuses(before) != _socket_statuses(stations[push.station_id]):
                 self._schedule_capabilities(push.station_id)
-            # A socket on your chargers has just started charging and no session of yours
-            # is known: it may be yours (a start that waited for the cable, or one from the
-            # app). Poll now rather than at the next poll, up to 5 minutes away; seen live
-            # on 2026-10-07. Charges by others cost one extra poll each. A running start
-            # command polls for itself.
-            was = _socket_of(before, push.socket_id) if push.socket_id is not None else None
-            poll_for_session = (
-                active is None
-                and not self._commands_running
-                and push.socket_status in _CHARGING_STATUSES
-                and (was is None or was.status not in _CHARGING_STATUSES)
-            )
-        # A session whose socket left the charging states is over; the next poll fills
-        # in the history, but the entities should not claim you are charging meanwhile.
-        if (
-            active is not None
-            and push.socket_id == active.socket_id
-            and push.socket_status is not None
-            and push.socket_status not in _CHARGING_STATUSES
-        ):
-            active = None
-            self._pushed_end = (push.socket_id, dt_util.utcnow())
-        elif (
-            self._pushed_end is not None
-            and push.socket_id == self._pushed_end[0]
-            and push.socket_status in _CHARGING_STATUSES
-        ):
-            self._pushed_end = None  # charging again: a poll may report it
+        intents = self._observe(StatusPushed(push, before, stations))
         self._stations = stations
-        self._active = active
         self._publish()
         self._push_event.set()
-        if poll_for_session:
-            # Only after publishing: the poll can finish before this returns, and
-            # publishing afterwards would overwrite what it found.
-            if push.socket_id is not None and self._own_recent_start(push.socket_id):
-                self._watch_for_session()
-            else:
-                self.hass.async_create_task(self.async_request_refresh(), "mer charge started")
+        self._execute(intents)
 
-    def _own_recent_start(self, socket_id: int) -> bool:
-        """Whether your last command was a start on this socket, recently, that went through."""
-        last = self._last_command
-        return (
-            last is not None
-            and last.command == "start"
-            and last.socket_id == socket_id
-            and last.result != RESULT_REJECTED
-            and dt_util.utcnow() - last.requested_at < OWN_START_WINDOW
-        )
-
-    def _watch_for_session(self) -> None:
+    def _watch_for_session(self, delays: tuple[int, ...]) -> None:
         """Look for your session until it appears, after your own start began charging."""
         if self._session_watch is None or self._session_watch.done():
             # Tied to the entry, so unloading it cancels the watch.
             self._session_watch = self.config_entry.async_create_background_task(
-                self.hass, self._look_for_session(), "mer session watch"
+                self.hass, self._look_for_session(delays), "mer session watch"
             )
 
-    async def _look_for_session(self) -> None:
+    async def _look_for_session(self, delays: tuple[int, ...]) -> None:
         """Ask the portal for the active session at growing intervals; poll once it has one.
 
         One request per check, and only after a start of yours, so a portal that is slow
@@ -1085,10 +978,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         wait. Stops once any poll has found the session.
         """
         waited = 0
-        for delay in SESSION_WATCH_DELAYS_SECONDS:
+        for delay in delays:
             await asyncio.sleep(delay - waited)
             waited = delay
-            if self._active is not None:
+            if self._tracker.active is not None:
                 return
             remaining = self.client.rate_limit_remaining
             if remaining is not None and remaining <= COMMAND_RATE_LIMIT_FLOOR:
@@ -1104,29 +997,12 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         _LOGGER.debug("No session reported %s s after your start began charging", waited)
 
     def _apply_estimate_push(self, push: EstimatePush) -> None:
-        active = self._active
-        if active is None:
-            # A session we do not know about yet (started at the charger, by the app, or
-            # on a charger you have not added): estimates only ever arrive for this
-            # account's sessions, so fetch it properly rather than guess at it.
-            self.hass.async_create_task(self.async_request_refresh())
-            return
-        if active.socket_id != push.socket_id:
-            # A second session on the same account. The portal only reports one active
-            # session ("last active"), so a poll would not tell us more, and polling on
-            # every one of its estimates would burn the rate limit. Ignore it.
-            return
-        self._active = replace(
-            active,
-            energy_kwh=push.energy_kwh if push.energy_kwh is not None else active.energy_kwh,
-            cost=push.cost if push.cost is not None else active.cost,
-            currency=push.currency or active.currency,
-            rate_kw=push.rate_kw if push.rate_kw is not None else active.rate_kw,
-            billing_plan=push.billing_plan or active.billing_plan,
-            tariff=push.tariff or active.tariff,
-        )
-        self._publish()
-        self._push_event.set()
+        before = self._tracker.active
+        intents = self._observe(EstimatePushed(push))
+        if self._tracker.active is not before:
+            self._publish()
+            self._push_event.set()
+        self._execute(intents)
 
 
 def _socket_statuses(station: Station) -> tuple[tuple[int, str], ...]:

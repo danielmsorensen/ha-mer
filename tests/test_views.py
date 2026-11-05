@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from custom_components.mer.binary_sensor import ACCOUNT_BINARY_SENSORS, STATION_BINARY_SENSORS
-from custom_components.mer.coordinator import ActiveSession, EndedSession, MerData
+from custom_components.mer.coordinator import MerData
 from custom_components.mer.driivz.const import (
     DENIED_FOR_SOCKET_STATE,
     OP_START_CHARGE,
@@ -23,6 +23,7 @@ from custom_components.mer.entity import (
     socket_view,
 )
 from custom_components.mer.sensor import ACCOUNT_SENSORS, AGGREGATE_SENSORS, SOCKET_SENSORS
+from custom_components.mer.session_tracker import ActiveSession, EndedSession
 from tests.helpers import load_json_fixture, station_from_fixture, stations_from_fixture
 
 ENDED_AT = datetime(2026, 10, 1, tzinfo=UTC)
@@ -212,12 +213,12 @@ def test_active_session_name_and_attributes() -> None:
 # ----- binary sensors ----------------------------------------------------
 
 
-def charging_attributes(data: MerData, ended: EndedSession | None) -> dict[str, Any]:
-    return described(ACCOUNT_BINARY_SENSORS, "charging").attributes_fn(data, ended)
+def charging_attributes(data: MerData) -> dict[str, Any]:
+    return described(ACCOUNT_BINARY_SENSORS, "charging").attributes_fn(data)
 
 
 def test_charging_attributes_while_charging() -> None:
-    assert charging_attributes(snapshot(active=session()), None) == {
+    assert charging_attributes(snapshot(active=session())) == {
         "charger": "Riverside - Bay 4 - Charger B",
         "socket": "Right",
         "station_id": 6041,
@@ -230,7 +231,7 @@ def test_charging_attributes_while_charging() -> None:
 def test_charging_attributes_after_an_end_seen() -> None:
     reused = ENDED_AT + timedelta(minutes=30)
     ended = EndedSession(session(), ENDED_AT, freed=True, reused_at=reused)
-    assert charging_attributes(snapshot(), ended) == {
+    assert charging_attributes(snapshot(last_session_end=ended)) == {
         "charger": "Riverside - Bay 4 - Charger B",
         "socket": "Right",
         "station_id": 6041,
@@ -243,7 +244,7 @@ def test_charging_attributes_after_an_end_seen() -> None:
 def test_charging_attributes_fall_back_to_history() -> None:
     data = snapshot()
     assert data.last_transaction is not None and data.last_transaction.stopped_at is not None
-    assert charging_attributes(data, None) == {
+    assert charging_attributes(data) == {
         "charger": "Riverside - Bay 4 - Charger B",
         "socket": None,
         "station_id": 6041,
@@ -251,7 +252,7 @@ def test_charging_attributes_fall_back_to_history() -> None:
         "ended_at": data.last_transaction.stopped_at.isoformat(),
         "socket_reused_at": None,
     }
-    assert charging_attributes(snapshot(last_transaction=None), None)["charger"] is None
+    assert charging_attributes(snapshot(last_transaction=None))["charger"] is None
 
 
 def test_live_status_from_snapshot() -> None:
@@ -259,9 +260,9 @@ def test_live_status_from_snapshot() -> None:
     description = described(ACCOUNT_BINARY_SENSORS, "live_status")
     connected = snapshot(push_connected=True, push_connected_since=since)
     assert description.is_on_fn(connected) is True
-    assert description.attributes_fn(connected, None) == {"connected_since": since.isoformat()}
+    assert description.attributes_fn(connected) == {"connected_since": since.isoformat()}
     assert description.is_on_fn(snapshot()) is False
-    assert description.attributes_fn(snapshot(), None) == {"connected_since": None}
+    assert description.attributes_fn(snapshot()) == {"connected_since": None}
 
 
 def test_session_here() -> None:

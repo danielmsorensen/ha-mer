@@ -508,6 +508,30 @@ after the stop, outside the after-stop rules, and offered the charger just unplu
   from further away; the bounce seen was 10 s.
 
 
+## 2026-11-05: one session tracker owns "your session"
+
+**Decision.** `session_tracker.SessionTracker`, pure and with no Home Assistant imports, owns
+whether your session runs, when it ended (left socket freed and reused), the pushed-end trust,
+and the own-start window. The coordinator feeds it every poll, status push, estimate push and
+command with `now`. It publishes the tracker's `active` and `last_session_end` (now on
+`MerData`), and carries out the intents it returns: `PollNow`, `WatchForSession(delays)`,
+`RereadHistory`. The windows moved from `const.py` into the tracker. Behaviour from 2026-10-07,
+10-12, 10-15 and 11-02 is unchanged; terms are in CONTEXT.md.
+
+**Why.** The rules were spread over six coordinator fields and eight methods, with unwritten
+caller rules: filter every session fetch, note the end before assigning, follow the left
+socket on every publish. Tests had to drive the websocket and call private methods. They are
+now table tests of the tracker; a few coordinator tests prove the intents run.
+
+**Consequences.**
+- A poll that fails after fetching the session keeps what the tracker saw. The end is recorded
+  once, at first sight, instead of again at the next good poll.
+- A start/stop cancelled mid-wait counts as finished and not rejected, so its socket's
+  charging is treated as your own start.
+- A publish takes the session from the tracker. A push handler's publish therefore cannot undo
+  a session found by a poll it triggered. Intents still run after publishing, so stations
+  aren't overwritten either.
+
 ## 2026-11-05: entities read one snapshot; views composed once
 
 **Decision.**
@@ -518,8 +542,8 @@ after the stop, outside the after-stop rules, and offered the charger just unplu
   Every change is a field write then `_publish()`. No `replace(self.data, ...)`, no mirrors.
 - `socket_view` / `session_view` (entity.py) build the names/ids/start-button dicts. Socket
   unique-id format defined once (`socket_unique_id`).
-- Stay off the snapshot: `last_session_end` (until the session-lifecycle rework), `last_push_at`
-  (diagnostics, no publish), HA's `last_update_success`/`last_exception`/`update_interval`, and
+- `active` and `last_session_end` come from the session tracker (entry above) via `_snapshot()`.
+- Stay off the snapshot: `last_push_at` (diagnostics, no publish), HA's `last_update_success`/`last_exception`/`update_interval`, and
   `client.rate_limit_remaining`. "Last poll" attributes and "Requests remaining" read the coordinator.
 
 **Why.** State was split between `MerData` and coordinator attributes, mirrored state was written
