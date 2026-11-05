@@ -585,3 +585,32 @@ outcomes are now table tests of the module, buttons test only the error mapping.
   refused start's are kept at once, as before.
 
 **Cost if wrong.** Internal only; reverting restores the closures in the coordinator.
+
+## 2026-11-05: tests run against one fake portal
+
+**Decision.**
+- `tests/fake_portal.FakePortal` replaces the conftest `MagicMock` client, `charging_socket`,
+  blueprint `busy()`, button `with_socket_status()` and `test_commands`' `make_client`. One
+  `portal` fixture; every client the integration creates is that portal.
+- State: chargers, details, capabilities, subscriptions, wallet, history, your session.
+  Verbs `charge`, `await_cable`, `stop`, `free`, `take` change sockets and your session
+  together, and push the status while live (`go_live()`).
+- `calls[name]` records arguments; `fail(name, error, times)` / `clear(name)` inject errors;
+  `hold(name)` parks one call. Start/stop only record: the test scripts the charger.
+- No lag knobs. The tracker's table tests own the lags; the few integration tests that need
+  one desync state explicitly, with a comment.
+- `test_fake_portal` checks every public client coroutine has a fake with the same
+  parameters. Production code unchanged; client tests stay on `AiohttpClientMocker`.
+
+**Why.** Two mocks (session, chargers) were set separately, so states contradicted
+themselves: the default session ran on 11242 while the chargers showed it free. Pushes came
+from a websocket fake that knew nothing of either.
+
+**Rejected.**
+- Lag knobs and named incident scenarios: duplicate the session tracker's table tests.
+- `AsyncMock(wraps=...)` around the fake: keeps `await_count`, but `return_value` could
+  still bypass the state.
+- A `Portal` Protocol in production: nothing type-checks it; the parity test does.
+
+**Cost if wrong.** Tests only. The fake can drift from portal behaviour it assumes (a
+charger's status follows the socket last changed); fix the fake, not each test.
