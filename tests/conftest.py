@@ -62,15 +62,17 @@ def site_subentry(station_ids: list[int]) -> ConfigSubentryData:
     )
 
 
-def make_config_entry(station_ids: list[int]) -> MockConfigEntry:
+def make_config_entry(
+    station_ids: list[int], username: str = "user@example.com"
+) -> MockConfigEntry:
     """An account entry; the Riverside site subentry is present when station ids are given."""
     return MockConfigEntry(
         domain=DOMAIN,
         version=3,
-        title="user@example.com",
-        unique_id="user@example.com",
+        title=username,
+        unique_id=username,
         data={
-            CONF_USERNAME: "user@example.com",
+            CONF_USERNAME: username,
             CONF_PASSWORD: "secret",
             CONF_BASE_URL: DEFAULT_BASE_URL,
         },

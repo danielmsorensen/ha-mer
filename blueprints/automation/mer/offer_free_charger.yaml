@@ -345,16 +345,21 @@ actions:
               - variables:
                   tapped_at: "{{ as_timestamp(now()) }}"
               # Holds until the charger shows the outcome, up to a minute; the outcome
-              # lands on the account's "Last command" sensor.
+              # lands on the "Last command" sensor of the button's account.
               - action: button.press
                 target:
                   entity_id: "{{ start_button }}"
                 continue_on_error: true
               - variables:
                   outcome: >-
-                    {% set last = expand(integration_entities('mer'))
+                    {% set account = config_entry_id(start_button) %}
+                    {% set ns = namespace(last=none) %}
+                    {% for s in expand(integration_entities('mer'))
                          | selectattr('attributes.requested_at', 'defined')
-                         | list | first | default(none) %}
+                         if ns.last is none and config_entry_id(s.entity_id) == account %}
+                      {% set ns.last = s %}
+                    {% endfor %}
+                    {% set last = ns.last %}
                     {% if last is not none
                           and as_timestamp(last.attributes.requested_at) >= tapped_at - 5 %}
                       {{ {'result': last.state, 'message': last.attributes.message} }}
@@ -458,12 +463,19 @@ actions:
                    and (not mine or (reused_at is not none and freed > reused_at))) }}
           - "{{ best is none or sockets.index(trigger.entity_id) < sockets.index(best) }}"
           # Not taken by your own start from Home Assistant: its start button was not
-          # pressed, and the last command was not a start there, in the last 5 minutes.
+          # pressed, and the socket's account's last command was not a start there, in
+          # the last 5 minutes.
           - >-
             {% set recent = now() - timedelta(minutes=5) %}
             {% set pressed = as_datetime(states(state_attr(trigger.entity_id, 'start_button')), none) %}
-            {% set last = expand(integration_entities('mer'))
-                 | selectattr('attributes.requested_at', 'defined') | list | first | default(none) %}
+            {% set account = config_entry_id(trigger.entity_id) %}
+            {% set ns = namespace(last=none) %}
+            {% for s in expand(integration_entities('mer'))
+                 | selectattr('attributes.requested_at', 'defined')
+                 if ns.last is none and config_entry_id(s.entity_id) == account %}
+              {% set ns.last = s %}
+            {% endfor %}
+            {% set last = ns.last %}
             {% set started_here = last is not none
                  and last.attributes.command == 'start'
                  and last.attributes.charger == state_attr(trigger.entity_id, 'charger')
