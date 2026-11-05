@@ -60,3 +60,23 @@ Repeatedly asking the portal for your session after an own start begins charging
 
 **Session tracker**:
 The integration's one view of your session: running, just ended, and what to look for next.
+
+### What entities read
+
+**Snapshot**:
+Everything the entities show, as one immutable whole at a moment in time.
+_Avoid_: state, data (too vague)
+
+**Publish**:
+Handing a new snapshot to the entities.
+_Avoid_: update, push (that's the websocket)
+
+**Socket view**:
+A socket as automations see it: charger and socket names, their ids, and its start button.
+
+**Session view**:
+Where a session runs: charger and socket names and their ids.
+_Avoid_: session place
+
+**Start button**:
+The one button per socket that starts a charge there, picking the start method itself.

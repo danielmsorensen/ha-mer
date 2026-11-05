@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Mapping
 import contextlib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import json
 import logging
@@ -80,13 +80,19 @@ from .session_tracker import (
 _LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class MerData:
-    """Everything the entities read."""
+    """Snapshot of everything the entities read. Built only by `MerCoordinator._snapshot`."""
 
-    stations: dict[int, Station] = field(default_factory=dict)
-    details: dict[int, Station] = field(default_factory=dict)
-    notify_subscriptions: dict[int, bool] = field(default_factory=dict)
+    # Configured chargers, in configured order.
+    station_ids: tuple[int, ...] = ()
+    # Live statuses, per station id.
+    stations: Mapping[int, Station] = field(default_factory=dict)
+    # Hourly detail (names, model, prices), per station id.
+    details: Mapping[int, Station] = field(default_factory=dict)
+    notify_subscriptions: Mapping[int, bool] = field(default_factory=dict)
+    # What this account may do on each socket, per socket id. Empty until read.
+    capabilities: Mapping[int, SocketCapabilities] = field(default_factory=dict)
     active: ActiveSession | None = None
     wallet: Wallet | None = None
     last_transaction: Transaction | None = None
@@ -94,6 +100,36 @@ class MerData:
     last_command: CommandResult | None = None
     # Your last session after it ended; see SessionTracker.
     last_session_end: EndedSession | None = None
+    push_connected: bool = False
+    push_connected_since: datetime | None = None
+    # Last successful poll (skipped cycles do not count).
+    last_poll_at: datetime | None = None
+
+    def station(self, station_id: int) -> Station | None:
+        """The station with detail fields and live statuses merged."""
+        live = self.stations.get(station_id)
+        if live is None:
+            return None
+        detail = self.details.get(station_id)
+        return detail.with_live(live) if detail else live
+
+    def socket(self, station_id: int, socket_id: int) -> Socket | None:
+        return _socket_of(self.station(station_id), socket_id)
+
+    def configured_stations(self) -> list[Station]:
+        """Configured stations present in this snapshot, in configured order."""
+        stations = (self.station(sid) for sid in self.station_ids)
+        return [s for s in stations if s is not None]
+
+    def start_allowed(self, socket: Socket) -> bool:
+        """Whether a start of either kind could be accepted on the socket now.
+
+        The socket's status decides what its state allows; the capabilities only rule out
+        the rest (`SocketCapabilities.refuses_start_whatever_the_state`). Unknown
+        capabilities leave it to the status.
+        """
+        caps = self.capabilities.get(socket.id)
+        return socket.can_start and not (caps and caps.refuses_start_whatever_the_state)
 
     # Session lookups. Everything per charger or per socket goes through these rather
     # than reading `active` directly, so supporting several simultaneous sessions later
@@ -128,14 +164,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         )
         self.client = client
         self._poll_interval = timedelta(seconds=interval)
-        # Push channel state. `_push_event` wakes the command waiter on every pushed
-        # change for one of our chargers.
-        self.push_connected = False
+        # `_push_event` wakes the command waiter on every pushed change for one of our chargers.
         self._push_event = asyncio.Event()
+        # Diagnostics only; changes on every message without a publish.
         self.last_push_at: datetime | None = None
-        self.push_connected_since: datetime | None = None
-        # When the portal was last polled successfully (skipped cycles do not count).
-        self.last_poll_at: datetime | None = None
         # One subentry per charging site, listing its monitored chargers. Any change
         # reloads the entry (see __init__), so these are fixed for the coordinator's life.
         self.site_subentries: list[ConfigSubentry] = [
@@ -149,16 +181,23 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             for station_id in subentry.data[CONF_STATION_IDS]
         }
         self.station_ids: list[int] = list(self._station_subentry)
+        # The published state: the only copy of what `_snapshot` builds MerData from. Each
+        # is replaced wholesale, never mutated, and every change is published.
+        self._stations: dict[int, Station] = {}
         self._details: dict[int, Station] = {}
         self._notify: dict[int, bool] = {}
-        self._notify_lock = asyncio.Lock()
+        # Re-read shortly after a charger's sockets change status.
+        self._capabilities: dict[int, SocketCapabilities] = {}
+        # Your session: fed every poll, push and command; owns `active` and `last_session_end`.
+        self._tracker = SessionTracker()
         self._wallet: Wallet | None = None
         self._last_transaction: Transaction | None = None
         self._customer_id: int | None = None
         self._last_command: CommandResult | None = None
-        # What this account may do on each socket, per socket id; re-read shortly after
-        # a charger's sockets change status. Empty until first read, or if reading fails.
-        self.capabilities: dict[int, SocketCapabilities] = {}
+        self._push_connected = False
+        self._push_connected_since: datetime | None = None
+        self._last_poll_at: datetime | None = None
+        self._notify_lock = asyncio.Lock()
         self._capabilities_pending: set[int] = set()
         # Detail of chargers you have not added but have a session on (public chargers),
         # fetched once so the session's price is known. Keyed by station id.
@@ -167,9 +206,6 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         # staggered so at most one charger is refreshed per cycle. See `_stations_due`.
         self._station_refreshed: dict[int, datetime] = {}
         self._wallet_refreshed: datetime | None = None
-        # Your session: fed every poll, push and command; `active` and `last_session_end`
-        # are published from it.
-        self._tracker = SessionTracker()
         # Looking for the session of your own start, once its socket is charging.
         self._session_watch: asyncio.Task[None] | None = None
         self._skip_next = False
@@ -225,21 +261,31 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         except DriivzError as err:
             raise UpdateFailed(str(err)) from err
         self._check_rate_limit(now)
-        self.last_poll_at = now
+        self._last_poll_at = now
         for station_id, station in stations.items():
-            previous = self.data.stations.get(station_id) if self.data else None
+            previous = self._stations.get(station_id)
             if previous is None or _socket_statuses(previous) != _socket_statuses(station):
                 self._schedule_capabilities(station_id)
+        self._stations = stations
+        return self._snapshot()
+
+    def _snapshot(self) -> MerData:
+        """The one place MerData is built."""
         return MerData(
-            stations=stations,
-            details=dict(self._details),
-            notify_subscriptions=dict(self._notify),
+            station_ids=tuple(self.station_ids),
+            stations=self._stations,
+            details=self._details,
+            notify_subscriptions=self._notify,
+            capabilities=self._capabilities,
             active=self._tracker.active,
             wallet=self._wallet,
             last_transaction=self._last_transaction,
             customer_id=self._customer_id,
             last_command=self._last_command,
             last_session_end=self._tracker.last_end,
+            push_connected=self._push_connected,
+            push_connected_since=self._push_connected_since,
+            last_poll_at=self._last_poll_at,
         )
 
     @staticmethod
@@ -415,27 +461,6 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
 
     # ----- accessors -----------------------------------------------------
 
-    def get_station(self, station_id: int) -> Station | None:
-        """Return the station with detail fields and live statuses merged."""
-        if self.data is None:
-            return None
-        live = self.data.stations.get(station_id)
-        detail = self.data.details.get(station_id)
-        if live is None:
-            return None
-        return detail.with_live(live) if detail else live
-
-    def get_socket(self, station_id: int, socket_id: int) -> Socket | None:
-        station = self.get_station(station_id)
-        if station is None:
-            return None
-        return next((s for s in station.sockets if s.id == socket_id), None)
-
-    def configured_stations(self) -> list[Station]:
-        """Configured stations that are present in the latest data."""
-        stations = (self.get_station(sid) for sid in self.station_ids)
-        return [s for s in stations if s is not None]
-
     def charger_stations(self) -> list[tuple[ConfigSubentry, Station]]:
         """Each monitored station with its site's subentry, skipping any the portal did not return.
 
@@ -443,8 +468,9 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         integration page groups them by site and deleting a site removes its chargers.
         """
         pairs: list[tuple[ConfigSubentry, Station]] = []
+        data = self._snapshot()
         for station_id, subentry in self._station_subentry.items():
-            station = self.get_station(station_id)
+            station = data.station(station_id)
             if station is None:
                 _LOGGER.warning(
                     "Mer charger %s at %s was not returned by the portal; skipping its entities",
@@ -461,10 +487,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         The client call happens first and is not retried or reverted here: if it raises
         `DriivzError`, it propagates to the caller (the switch entity) before anything is
         touched, so the cache and published data are left exactly as they were. Only once
-        the portal has confirmed the change do we update `self._notify` and publish a
-        fresh `MerData` via `_publish`, so the switch reflects the confirmed value
-        immediately rather than waiting up to an hour for the next detail refresh, and
-        the poll schedule is left alone.
+        the portal has confirmed the change do we update `self._notify` and publish via
+        `_publish`, so the switch reflects the confirmed value immediately rather than
+        waiting up to an hour for the next detail refresh, and the poll schedule is left
+        alone.
 
         Both the client call and the cache write happen under `_notify_lock`, the same
         lock `_refresh_station` holds across its subscription fetch and commit. That
@@ -477,11 +503,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 await self.client.subscribe_to_availability(station_id)
             else:
                 await self.client.unsubscribe_from_availability(station_id)
-            self._notify[station_id] = subscribed
-        if self.data is not None:
-            notify = dict(self.data.notify_subscriptions)
-            notify[station_id] = subscribed
-            self._publish(replace(self.data, notify_subscriptions=notify))
+            self._notify = {**self._notify, station_id: subscribed}
+        self._publish()
 
     # ----- start / stop with confirmation ---------------------------------
 
@@ -492,21 +515,11 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         if it accepted it but nothing visible happened in time. Either way the outcome is
         recorded as the last command and fired as an event.
         """
-        socket = self.get_socket(station_id, socket_id)
+        socket = self._snapshot().socket(station_id, socket_id)
         status = socket.status if socket else None
         return await self._command(
             COMMAND_START, station_id, socket_id, self.commands.start(station_id, socket_id, status)
         )
-
-    def start_allowed(self, socket: Socket) -> bool:
-        """Whether a start of either kind could be accepted on the socket now.
-
-        The socket's status decides what its state allows; the capabilities only rule out
-        the rest (`SocketCapabilities.refuses_start_whatever_the_state`). Unknown
-        capabilities leave it to the status.
-        """
-        caps = self.capabilities.get(socket.id)
-        return socket.can_start and not (caps and caps.refuses_start_whatever_the_state)
 
     async def async_refresh_now(self) -> None:
         """Poll now and re-read every charger's start capabilities (Refresh now)."""
@@ -534,7 +547,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         remaining = self.client.rate_limit_remaining
         if remaining is not None and remaining <= RATE_LIMIT_FLOOR:
             return
-        station = self.get_station(station_id)
+        station = self._snapshot().station(station_id)
         if station is None or not station.sockets:
             return
         first = station.sockets[0]
@@ -543,9 +556,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         except DriivzError as err:
             _LOGGER.debug("Could not read capabilities for charger %s: %s", station_id, err)
             return
-        self.capabilities = {**self.capabilities, **caps}
-        if self.data is not None:
-            self._publish(self.data)
+        self._capabilities = {**self._capabilities, **caps}
+        self._publish()
 
     async def async_stop_charge(self, station_id: int | None, socket_id: int) -> CommandResult:
         """Stop the charge on a socket and wait until the session is gone."""
@@ -570,7 +582,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         finally:
             self._observe(CommandFinished(command, socket_id, rejected, requested_at))
         if outcome.capabilities:
-            self.capabilities = {**self.capabilities, **outcome.capabilities}
+            self._capabilities = {**self._capabilities, **outcome.capabilities}
         record = self._record_command(command, outcome, station_id, socket_id, requested_at)
         if outcome.error is not None:
             raise outcome.error
@@ -587,22 +599,25 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._push_event.clear()
         return True
 
-    def _command_view(self, station_id: int | None, active: ActiveSession | None) -> View:
-        station = self.get_station(station_id) if station_id is not None else None
+    def _command_view(self, station_id: int | None) -> View:
+        station = self._snapshot().station(station_id) if station_id is not None else None
+        active = self._tracker.active
         return View(station, active.socket_id if active else None)
 
-    def _publish(self, data: MerData) -> None:
-        """Hand new data, with your session as tracked, to the entities.
+    def _publish(self) -> None:
+        """Hand a fresh snapshot to the entities without disturbing the poll schedule.
 
-        Does not disturb the poll schedule: `async_set_updated_data` would also push the next
-        scheduled poll back by a full interval. With the push channel delivering an estimate
-        every 45 s or so, that starved the 5-minute poll completely: energy kept updating
-        from pushes while everything only a poll provides (session duration, wallet, history)
-        froze. Seen live on 2026-09-24.
+        Before the first poll there are no entities; the state is published with it.
+
+        `async_set_updated_data` would also push the next scheduled poll back by a full
+        interval. With the push channel delivering an estimate every 45 s or so, that
+        starved the 5-minute poll completely: energy kept updating from pushes while
+        everything only a poll provides (session duration, wallet, history) froze.
+        Seen live on 2026-09-24.
         """
-        self.data = replace(
-            data, active=self._tracker.active, last_session_end=self._tracker.last_end
-        )
+        if self.data is None:
+            return
+        self.data = self._snapshot()
         self.async_update_listeners()
 
     def _observe(self, observation: Observation) -> tuple[Intent, ...]:
@@ -623,16 +638,6 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 case WatchForSession(delays):
                     self._watch_for_session(delays)
 
-    def _publish_poll(self, station: Station | None, active: ActiveSession | None) -> None:
-        if self.data is None:
-            return
-        stations = dict(self.data.stations)
-        if station is not None:
-            stations[station.id] = station
-        intents = self._observe(Polled(active, stations))
-        self._publish(replace(self.data, stations=stations))
-        self._execute(intents)
-
     def _record_command(
         self,
         command: str,
@@ -641,7 +646,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         socket_id: int,
         requested_at: datetime,
     ) -> CommandResult:
-        station = self.get_station(station_id) if station_id is not None else None
+        station = self._snapshot().station(station_id) if station_id is not None else None
         socket = _socket_of(station, socket_id)
         record = CommandResult(
             command=command,
@@ -656,8 +661,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             method=outcome.method,
         )
         self._last_command = record
-        if self.data is not None:
-            self._publish(replace(self.data, last_command=record))
+        self._publish()
         self.hass.bus.async_fire(EVENT_COMMAND_RESULT, record.as_event_data())
         return record
 
@@ -736,10 +740,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             await asyncio.sleep(backoff)
 
     def _set_push_connected(self, connected: bool) -> None:
-        if connected == self.push_connected:
+        if connected == self._push_connected:
             return
-        self.push_connected = connected
-        self.push_connected_since = dt_util.utcnow() if connected else None
+        self._push_connected = connected
+        self._push_connected_since = dt_util.utcnow() if connected else None
         self.update_interval = (
             timedelta(seconds=PUSH_POLL_INTERVAL_SECONDS) if connected else self._poll_interval
         )
@@ -751,7 +755,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         if self.data is not None:
             # Re-publishing applies the new interval to the next scheduled poll and lets
             # the "Live status" sensor follow the connection state.
-            self.async_set_updated_data(self.data)
+            self.async_set_updated_data(self._snapshot())
         if not connected:
             # Whatever changed while the channel was down is caught up now, not in 5 min.
             self.hass.async_create_task(self.async_request_refresh())
@@ -769,19 +773,19 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             self._apply_estimate_push(push)
 
     def _apply_status_push(self, push: StatusPush) -> None:
-        assert self.data is not None
         active = self._tracker.active
         on_active_socket = active is not None and push.socket_id == active.socket_id
-        if push.station_id not in self.data.stations and not on_active_socket:
+        if push.station_id not in self._stations and not on_active_socket:
             return  # the broadcast covers every charger on the network
-        stations = dict(self.data.stations)
+        stations = dict(self._stations)
         before = stations.get(push.station_id)
         if before is not None:
             stations[push.station_id] = before.with_push(push)
             if _socket_statuses(before) != _socket_statuses(stations[push.station_id]):
                 self._schedule_capabilities(push.station_id)
         intents = self._observe(StatusPushed(push, before, stations))
-        self._publish(replace(self.data, stations=stations))
+        self._stations = stations
+        self._publish()
         self._push_event.set()
         self._execute(intents)
 
@@ -820,11 +824,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         _LOGGER.debug("No session reported %s s after your start began charging", waited)
 
     def _apply_estimate_push(self, push: EstimatePush) -> None:
-        assert self.data is not None
         before = self._tracker.active
         intents = self._observe(EstimatePushed(push))
         if self._tracker.active is not before:
-            self._publish(self.data)
+            self._publish()
             self._push_event.set()
         self._execute(intents)
 
@@ -847,10 +850,10 @@ class _CommandChanges:
 
     async def pushed(self, station_id: int | None, timeout: float) -> View | None:
         c = self._coordinator
-        if not await c._wait_for_push(timeout) or not c.push_connected:
+        if not await c._wait_for_push(timeout) or not c._push_connected:
             return None
-        # The push handler has already published what it changed.
-        return c._command_view(station_id, c.data.active if c.data else None)
+        # The push handler has already applied and published what it changed.
+        return c._command_view(station_id)
 
     async def poll(self, station_id: int | None) -> View:
         """Poll the charger and your session and publish them, so entities update live."""
@@ -859,8 +862,13 @@ class _CommandChanges:
         if station_id is not None:
             found = await c.client.find_stations_by_ids([station_id])
             station = found[0] if found else None
-        c._publish_poll(station, await c._fetch_active())
-        return c._command_view(station_id, c._tracker.active)
+        polled = await c._fetch_active()
+        if station is not None:
+            c._stations = {**c._stations, station.id: station}
+        intents = c._observe(Polled(polled, c._stations))
+        c._publish()
+        c._execute(intents)
+        return c._command_view(station_id)
 
 
 type MerConfigEntry = ConfigEntry[MerCoordinator]

@@ -114,7 +114,7 @@ async def test_connected_channel_slows_polling_and_reports_live(
     await setup_integration(hass, mock_config_entry)
     await _settle(hass)
     coordinator = mock_config_entry.runtime_data
-    assert coordinator.push_connected is True
+    assert coordinator.data.push_connected is True
     assert coordinator.update_interval == timedelta(seconds=PUSH_POLL_INTERVAL_SECONDS)
     eid = mock_config_entry.entry_id
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_status").state == "on"
@@ -215,7 +215,7 @@ async def test_disconnect_restores_polling_and_catches_up(
     mock_client.connect_push.side_effect = DriivzConnectionError("down")
     fake_ws.disconnect()
     await _settle(hass)
-    assert coordinator.push_connected is False
+    assert coordinator.data.push_connected is False
     assert coordinator.update_interval == timedelta(seconds=60)
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_status").state == "off"
     assert mock_client.find_stations_by_ids.await_count == polls + 1  # the catch-up poll
@@ -258,14 +258,14 @@ async def test_channel_recovers_after_failed_reconnect(
         await _settle(hass)
         coordinator = mock_config_entry.runtime_data
         eid = mock_config_entry.entry_id
-        assert coordinator.push_connected is True
+        assert coordinator.data.push_connected is True
 
         fake_ws.disconnect()
         for _ in range(10):
             await asyncio.sleep(0)
         await hass.async_block_till_done()
 
-    assert coordinator.push_connected is True
+    assert coordinator.data.push_connected is True
     assert mock_client.connect_push.await_count == 3  # first, failed retry, recovery
     assert coordinator.update_interval == timedelta(seconds=PUSH_POLL_INTERVAL_SECONDS)
     assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_live_status").state == "on"
@@ -293,7 +293,7 @@ async def test_silent_channel_is_dropped_and_reopened_with_fresh_login(
         await _settle(hass)
         logins_before = mock_client.login.await_count
         coordinator = mock_config_entry.runtime_data
-        assert coordinator.push_connected is True
+        assert coordinator.data.push_connected is True
 
         # A push just inside the timeout keeps the channel: the watchdog is re-armed.
         freezer.tick(timedelta(seconds=PUSH_SILENCE_TIMEOUT_SECONDS - 5))
@@ -314,7 +314,7 @@ async def test_silent_channel_is_dropped_and_reopened_with_fresh_login(
         assert fake_ws.closed is True
         assert mock_client.login.await_count == logins_before + 1
         assert mock_client.connect_push.await_count == 2
-        assert coordinator.push_connected is True
+        assert coordinator.data.push_connected is True
 
         second_ws.push(status_push(6042, 11244, "OCCUPIED"))
         await _settle(hass)
