@@ -653,3 +653,16 @@ the update that has the socket taken. `trigger.from_state` holds the value befor
 
 **Cost if wrong.** A socket freed, or a charge started, while Home Assistant is down isn't
 announced until its next change.
+
+## 2026-11-05: a fault is not a pushed end
+
+**What happened.** Read from a live instance. Mid-session the socket flapped between paused
+and charging, then was pushed `FAULTED` for 4 minutes. That counted as a pushed end: Charging
+went off. The portal kept the session; after the 2-minute trust a poll brought it back, and
+that "on" ran the blueprint's "When charging starts" actions. The user's stop then ended it.
+
+**Decision.** A push of `FAULTED`, `UNAVAILABLE` or `UNKNOWN` on your socket doesn't end the
+session (`NOT_AN_END`). Polls, and a later `FINISHING`/`AVAILABLE` push, still do.
+
+**Cost if wrong.** A session that a fault really ends shows as charging until the next poll
+(up to the poll interval).

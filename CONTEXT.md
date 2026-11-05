@@ -40,6 +40,7 @@ _Avoid_: stop (that's the command)
 
 **Pushed end**:
 A session end seen by push. Trusted over polls still reporting the session for a short while.
+A pushed fault, out of service or unknown is not one.
 
 **Left socket**:
 The socket your last session ran on, after it ended.

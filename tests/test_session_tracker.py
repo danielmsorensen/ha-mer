@@ -183,6 +183,28 @@ CASES: list[tuple[str, list[Step], tuple[object, ...], int | None]] = [
         RIGHT_B,
     ),
     (
+        "a fault does not end it: the portal keeps the session (2026-11-05)",
+        [Step(Polled(session(), CHARGING_B)), Step(pushed(RIGHT_B, "FAULTED", CHARGING_B), 6)],
+        (),
+        RIGHT_B,
+    ),
+    (
+        "out of service does not end it",
+        [Step(Polled(session(), CHARGING_B)), Step(pushed(RIGHT_B, "UNAVAILABLE", CHARGING_B), 6)],
+        (),
+        RIGHT_B,
+    ),
+    (
+        "after a fault, finishing ends it",
+        [
+            Step(Polled(session(), CHARGING_B)),
+            Step(pushed(RIGHT_B, "FAULTED", CHARGING_B), 6),
+            Step(pushed(RIGHT_B, "FINISHING", chargers(RIGHT_B="FAULTED")), 250),
+        ],
+        (RereadHistory(),),
+        None,
+    ),
+    (
         "a push without a status does not end it",
         [Step(Polled(session(), CHARGING_B)), Step(pushed(RIGHT_B, None, CHARGING_B), 6)],  # type: ignore[arg-type]
         (),

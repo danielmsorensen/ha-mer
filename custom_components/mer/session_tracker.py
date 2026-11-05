@@ -15,7 +15,10 @@ from .driivz.const import (
     STATUS_AVAILABLE,
     STATUS_CHARGING,
     STATUS_DISCHARGING,
+    STATUS_FAULTED,
     STATUS_PAUSED,
+    STATUS_UNAVAILABLE,
+    STATUS_UNKNOWN,
 )
 from .driivz.models import EstimatePush, Socket, SocketPrice, Station, StatusPush
 
@@ -30,6 +33,9 @@ OWN_START_WINDOW = timedelta(minutes=10)
 SESSION_WATCH_DELAYS_SECONDS: tuple[int, ...] = (10, 20, 30, 60, 120)
 
 CHARGING_STATUSES = frozenset({STATUS_CHARGING, STATUS_DISCHARGING, STATUS_PAUSED})
+# Pushed mid-session, these don't end it: on 2026-11-05 a socket faulted for 4 minutes while
+# the portal kept the session, until it was stopped. A poll still ends it.
+NOT_AN_END = frozenset({STATUS_FAULTED, STATUS_UNAVAILABLE, STATUS_UNKNOWN})
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,7 +194,7 @@ class SessionTracker:
             active is not None
             and push.socket_id == active.socket_id
             and push.socket_status is not None
-            and push.socket_status not in CHARGING_STATUSES
+            and push.socket_status not in CHARGING_STATUSES | NOT_AN_END
         ):
             self._pushed_end = (active.socket_id, now)
             active = None
