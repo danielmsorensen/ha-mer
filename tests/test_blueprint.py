@@ -490,7 +490,7 @@ async def stop_charging_on_charger_b_right(
     return sent, poll
 
 
-async def test_after_you_stop_only_sockets_freed_later_are_offered(
+async def test_after_you_stop_held_back_sockets_are_not_offered(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
@@ -498,8 +498,7 @@ async def test_after_you_stop_only_sockets_freed_later_are_offered(
 ) -> None:
     """Seen live on 2026-10-12: stopping to go home offered a charger already free.
 
-    After your charge ends, sockets already free are not offered, nor is the socket you
-    left until someone else has used it.
+    The sockets' `held_back` decides; its rules are tested on the session tracker.
     """
     sent, poll = await stop_charging_on_charger_b_right(
         hass, mock_config_entry, mock_client, charging_socket
@@ -509,31 +508,27 @@ async def test_after_you_stop_only_sockets_freed_later_are_offered(
     assert [n["title"] for n in sent] == ["No Mer charger free"]
     sent.clear()
 
-    await poll(busy(live, 11243, status="OCCUPIED"))  # one already free is taken
-    await poll(busy(live, 11243, 11242, status="OCCUPIED"))  # and someone takes yours
-    assert sent == []
-
-    await poll(busy(live, 11243, status="OCCUPIED"))  # they finish: yours frees again
+    await poll(busy(live, 11241, status="AVAILABLE"))  # Charger B Left frees up: not held
     (offer,) = sent
     assert offer["message"] == "Riverside - Bay 4 - Charger B"
-    assert offer["data"]["actions"][0]["title"] == "Start Right"
+    assert offer["data"]["actions"][0]["title"] == "Start Left"
 
 
-async def test_after_you_stop_another_socket_freeing_up_is_offered(
+async def test_a_held_back_socket_taken_changes_nothing(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
     charging_socket,
 ) -> None:
-    """Stopping early for someone else: you can top up when another socket frees."""
+    """Never on offer, so taking it isn't news. `held_back` is read from before it was taken,
+    which releases it (2026-10-15)."""
     sent, poll = await stop_charging_on_charger_b_right(
         hass, mock_config_entry, mock_client, charging_socket
     )
     live = stations_from_fixture("stations_by_ids.json")
-    await poll(busy(live, 11241, status="AVAILABLE"))  # Charger B Left frees up
-    (offer,) = sent
-    assert offer["message"] == "Riverside - Bay 4 - Charger B"
-    assert offer["data"]["actions"][0]["title"] == "Start Left"
+    await poll(busy(live, 11243, status="OCCUPIED"))  # one already free is taken
+    await poll(busy(live, 11243, 11242, status="OCCUPIED"))  # and someone takes yours
+    assert sent == []
 
 
 async def test_your_conditions_gate_real_offers_but_not_a_preview(

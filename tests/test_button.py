@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from freezegun.api import FrozenDateTimeFactory
@@ -100,6 +101,7 @@ async def test_start_on_free_socket_waits_for_charging(
     assert last.attributes["command"] == "start"
     assert last.attributes["charger"] == "Riverside - Bay 3 - Charger A"
     assert last.attributes["socket"] == "Left"
+    assert (last.attributes["station_id"], last.attributes["socket_id"]) == (6042, 11243)
     assert [e["result"] for e in events] == ["charging"]
 
 
@@ -445,3 +447,27 @@ async def test_refresh_now_rereads_start_capabilities(
     await press(hass, entity_id_for(hass, f"{eid}_account_refresh"))
     await hass.async_block_till_done()
     assert hass.states.get(entity_id_for(hass, uid)).state != "unavailable"
+
+
+async def test_socket_status_says_your_own_start(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A start of yours there, running or in the last 10 minutes: its charging is yours."""
+    live = stations_from_fixture("stations_by_ids.json")
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    status = lambda s: state_by_unique_id(hass, "sensor", f"{eid}_socket_{s}_status")  # noqa: E731
+    assert status(11243).attributes["own_start"] is False
+    mock_client.find_stations_by_ids.return_value = with_socket_status(live, 11243, "CHARGING")
+    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
+    await hass.async_block_till_done()
+    assert status(11243).attributes["own_start"] is True
+    assert status(11244).attributes["own_start"] is False
+
+    freezer.tick(timedelta(minutes=10))
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert status(11243).attributes["own_start"] is False

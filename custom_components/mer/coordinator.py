@@ -143,6 +143,13 @@ class MerData:
     last_command: CommandResult | None = None
     # Your last session after it ended; see SessionTracker.
     last_session_end: EndedSession | None = None
+    # Sockets with an own start, as of this snapshot.
+    own_starts: frozenset[int] = frozenset()
+
+    def held_back(self, socket_id: int) -> bool:
+        """Free, but held back since your last session ended; never while a session runs."""
+        ended = self.last_session_end
+        return self.active is None and ended is not None and socket_id in ended.held_back
 
     # Session lookups. Everything per charger or per socket goes through these rather
     # than reading `active` directly, so supporting several simultaneous sessions later
@@ -287,6 +294,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             customer_id=self._customer_id,
             last_command=self._last_command,
             last_session_end=self._tracker.last_end,
+            own_starts=self._tracker.own_starts(now),
         )
 
     @staticmethod
@@ -678,7 +686,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         method_of: Callable[[], str | None] = lambda: None,
     ) -> CommandResult:
         requested_at = dt_util.utcnow()
-        self._observe(CommandStarted())
+        self._observe(CommandStarted(command, socket_id, requested_at))
         rejected = False
         try:
             try:
@@ -768,7 +776,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         froze. Seen live on 2026-09-24.
         """
         self.data = replace(
-            data, active=self._tracker.active, last_session_end=self._tracker.last_end
+            data,
+            active=self._tracker.active,
+            last_session_end=self._tracker.last_end,
+            own_starts=self._tracker.own_starts(dt_util.utcnow()),
         )
         self.async_update_listeners()
 

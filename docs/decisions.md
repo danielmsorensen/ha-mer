@@ -433,6 +433,8 @@ to the config entry, so it is cancelled on unload.
 
 ## 2026-10-15: after you stop, only sockets that free up later are offered
 
+*The rules stand; the timestamp gave way to a flag on 2026-11-05.*
+
 **What happened.** Read from a live instance. The user stopped charging on Charger A to go
 home. Once its socket had been free for 30 s, the blueprint offered Charger B, which had
 been free all along. Charger A was correctly left out as the charger just left. The "Only
@@ -531,3 +533,26 @@ now table tests of the tracker; a few coordinator tests prove the intents run.
 - A publish takes the session from the tracker. A push handler's publish therefore cannot undo
   a session found by a poll it triggered. Intents still run after publishing, so stations
   aren't overwritten either.
+
+## 2026-11-05: socket status sensors say what the blueprint used to work out
+
+**Decision.** Socket status sensors gain `held_back` and `own_start` (terms in CONTEXT.md), from
+the session tracker. The blueprint's free list drops held-back sockets once a charge of yours
+ended since arrival. Its "taken" branch reads `held_back` from `trigger.from_state` and
+`own_start` from `trigger.to_state`, instead of recomputing from the Charging sensor and finding
+Last command. Charging loses `socket_reused_at`. Last command gains `station_id`, `socket_id`.
+
+**Why.** The blueprint re-derived what the tracker knows, the offerable rule twice. It matched
+Last command by display names, scanning every Mer entity. Its own-start window (5 min)
+disagreed with the tracker's (10 min). Rules now sit in table tests on the tracker; blueprint
+tests only check the wiring.
+
+**Flag over timestamp, reversing 2026-10-15.** That entry rejected a flag because it flips in
+the update that has the socket taken. `trigger.from_state` holds the value before that update.
+
+**Consequences.**
+- Own start: 10 min, as the tracker; a running start counts (a dashboard press is taken
+  mid-command); a rejected one doesn't.
+- "Already free" is tracked by the integration: free in the snapshot before the end and since.
+  A socket's sensor going unavailable no longer restarts its free spell.
+- After a restart nothing is held back; the blueprint's `last_changed` comparison did the same.

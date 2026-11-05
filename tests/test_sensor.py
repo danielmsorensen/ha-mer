@@ -16,7 +16,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mer.const import DOMAIN
 from custom_components.mer.driivz.models import Socket, SocketPrice
-from tests.helpers import setup_integration, station_from_fixture
+from tests.helpers import setup_integration, station_from_fixture, stations_from_fixture
 
 
 def state_by_unique_id(hass: HomeAssistant, platform: str, unique_id: str):
@@ -253,6 +253,49 @@ async def test_socket_status_marks_my_session(
     assert mine.attributes["my_session"] is True
     other = state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status")
     assert other.attributes["my_session"] is False
+
+
+def with_status(stations, **statuses: str):
+    """Stations with sockets set by id, e.g. with_status(live, s11242="CHARGING")."""
+    status = {int(k[1:]): v for k, v in statuses.items()}
+    return [
+        replace(
+            st, sockets=tuple(replace(s, status=status.get(s.id, s.status)) for s in st.sockets)
+        )
+        for st in stations
+    ]
+
+
+async def test_socket_status_says_what_is_held_back_after_your_session(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    charging_socket: Socket,
+) -> None:
+    """Free since before your session ended, or the socket you left: held back (2026-11-05)."""
+    live = stations_from_fixture("stations_by_ids.json")  # B Left charging; the rest free
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    coordinator = mock_config_entry.runtime_data
+    held = lambda s: state_by_unique_id(hass, "sensor", f"{eid}_socket_{s}_status").attributes[  # noqa: E731
+        "held_back"
+    ]
+
+    async def poll(stations, active: Socket | None) -> None:
+        mock_client.find_stations_by_ids.return_value = stations
+        mock_client.find_last_active_charge_socket.return_value = active
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    await poll(with_status(live, s11242="CHARGING"), charging_socket)
+    assert [held(s) for s in (11243, 11244, 11241, 11242)] == [False] * 4  # charging
+    await poll(with_status(live, s11242="FINISHING"), None)  # you stop
+    assert [held(s) for s in (11243, 11244, 11241, 11242)] == [True, True, False, False]
+    await poll(live, None)  # and unplug
+    assert held(11242) is True
+    await poll(with_status(live, s11242="PREPARING", s11243="OCCUPIED"), None)  # both taken
+    await poll(live, None)  # and freed again
+    assert [held(s) for s in (11243, 11244, 11242)] == [False, True, False]
 
 
 async def test_price_from_tariff_without_kwh_component(

@@ -61,16 +61,20 @@ def _socket_status_attributes(entity: MerSocketSensor, socket: Socket) -> dict[s
 
     The status alone says "charging" for anyone's car; `my_session` says it is yours.
     `charger`, `socket` and `start_button` let an automation or blueprint work from this
-    sensor alone, without knowing how entities are named.
+    sensor alone, without knowing how entities are named. `held_back` and `own_start` are
+    what the free charger blueprint needs from your session; see CONTEXT.md.
     """
     station = entity.station
+    data = entity.coordinator.data
     return {
         "charger": station.display_name if station else None,
         "socket": socket_label(socket),
         "start_button": er.async_get(entity.hass).async_get_entity_id(
             "button", DOMAIN, f"{entity.entry_id}_socket_{socket.id}_start_charge"
         ),
-        "my_session": entity.coordinator.data.session_on_socket(socket.id) is not None,
+        "my_session": data.session_on_socket(socket.id) is not None,
+        "held_back": data.held_back(socket.id),
+        "own_start": socket.id in data.own_starts,
         "station_id": entity.station_id,
         "socket_id": socket.id,
         "max_power_kw": socket.max_power_kw,
@@ -394,6 +398,8 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
                 "method": data.last_command.method,
                 "charger": data.last_command.station_name,
                 "socket": data.last_command.socket_name,
+                "station_id": data.last_command.station_id,
+                "socket_id": data.last_command.socket_id,
                 "requested_at": data.last_command.requested_at.isoformat(),
                 "finished_at": data.last_command.finished_at.isoformat(),
                 "message": data.last_command.message,
