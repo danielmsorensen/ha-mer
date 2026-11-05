@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
@@ -17,10 +17,10 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
 )
 
-from custom_components.mer.const import DOMAIN, EVENT_COMMAND_RESULT
+from custom_components.mer.const import DOMAIN
 from custom_components.mer.driivz.exceptions import ApiError
 from custom_components.mer.driivz.models import Socket, Station
-from tests.helpers import setup_integration, stations_from_fixture
+from tests.helpers import fast_commands, setup_integration, stations_from_fixture
 from tests.test_sensor import state_by_unique_id
 
 
@@ -36,16 +36,6 @@ async def press(hass: HomeAssistant, entity_id: str) -> None:
     )
 
 
-@pytest.fixture(autouse=True)
-def fast_command_polling():
-    """Poll instantly and give up after three polls, so tests need no real waiting."""
-    with (
-        patch("custom_components.mer.coordinator.COMMAND_POLL_INTERVAL_SECONDS", 0),
-        patch("custom_components.mer.coordinator.COMMAND_MAX_POLLS", 3),
-    ):
-        yield
-
-
 def with_socket_status(stations: list[Station], socket_id: int, status: str) -> list[Station]:
     """The live-status stations with one socket's status changed."""
     out = []
@@ -58,112 +48,31 @@ def with_socket_status(stations: list[Station], socket_id: int, status: str) -> 
     return out
 
 
-def after_first_call(first, then):
-    """Side effect returning `first` on the first call and `then` afterwards."""
-    calls = {"n": 0}
-
-    async def _side_effect(*_args, **_kwargs):
-        calls["n"] += 1
-        return first if calls["n"] == 1 else then
-
-    return _side_effect
-
-
-def capture_events(hass: HomeAssistant) -> list:
-    events: list = []
-    hass.bus.async_listen(EVENT_COMMAND_RESULT, lambda e: events.append(e.data))
-    return events
-
-
-async def test_start_on_free_socket_waits_for_charging(
+async def test_a_rejected_press_fails_with_the_portals_reason(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
-    """The press stays open, publishes each poll, and resolves once the socket charges."""
-    live = stations_from_fixture("stations_by_ids.json")
     await setup_integration(hass, mock_config_entry)
     eid = mock_config_entry.entry_id
-    events = capture_events(hass)
-    mock_client.find_stations_by_ids.side_effect = after_first_call(
-        live, with_socket_status(live, 11243, "CHARGING")
-    )
-    polls_before = mock_client.find_stations_by_ids.await_count
-
-    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
-    await hass.async_block_till_done()
-
-    mock_client.start_charge.assert_awaited_once_with(11243)
-    # first poll still available, second poll charging -> resolved on the second
-    assert mock_client.find_stations_by_ids.await_count == polls_before + 2
-    assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status").state == "charging"
-    last = state_by_unique_id(hass, "sensor", f"{eid}_account_last_command")
-    assert last.state == "charging"
-    assert last.attributes["command"] == "start"
-    assert last.attributes["charger"] == "Riverside - Bay 3 - Charger A"
-    assert last.attributes["socket"] == "Left"
-    assert [e["result"] for e in events] == ["charging"]
-
-
-async def test_start_on_free_socket_ready_for_cable(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    """Free socket goes to preparing: the charger is waiting for the cable, a positive outcome."""
-    live = stations_from_fixture("stations_by_ids.json")
-    await setup_integration(hass, mock_config_entry)
-    eid = mock_config_entry.entry_id
-    mock_client.find_stations_by_ids.return_value = with_socket_status(live, 11243, "PREPARING")
-    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
-    await hass.async_block_till_done()
-    assert (
-        state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").state == "awaiting_cable"
-    )
-
-
-async def test_start_unconfirmed_raises_and_records(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    """Nothing changes within the timeout: the press fails with a clear message."""
-    await setup_integration(hass, mock_config_entry)
-    eid = mock_config_entry.entry_id
-    events = capture_events(hass)
+    mock_client.start_charge.side_effect = ApiError("NOT_AUTHORIZED")
     with pytest.raises(HomeAssistantError) as excinfo:
         await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
-    assert "did not confirm" in str(excinfo.value)
-    mock_client.start_charge.assert_awaited_once_with(11243)
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").state == "unconfirmed"
-    assert [e["result"] for e in events] == ["unconfirmed"]
+    assert excinfo.value.translation_key == "command_failed"
+    assert excinfo.value.translation_placeholders == {"error": "NOT_AUTHORIZED"}
 
 
-async def test_start_polling_stops_when_rate_limit_low(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    """Low headroom: give up polling early instead of exhausting the portal's limit."""
-    await setup_integration(hass, mock_config_entry)
-    eid = mock_config_entry.entry_id
-    polls_before = mock_client.find_stations_by_ids.await_count
-    mock_client.rate_limit_remaining = 2
-    with pytest.raises(HomeAssistantError):
-        await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
-    assert mock_client.find_stations_by_ids.await_count == polls_before
-
-
-async def test_start_charge_rejected_raises_and_records(
+async def test_an_unconfirmed_press_fails_saying_how_long_it_waited(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
     await setup_integration(hass, mock_config_entry)
+    fast_commands(mock_config_entry, interval_seconds=0.01, max_polls=2)
     eid = mock_config_entry.entry_id
-    events = capture_events(hass)
-    mock_client.start_charge.side_effect = ApiError("OPERATION_NOT_ALLOWED_IN_CURRENT_SOCKET_STATE")
     with pytest.raises(HomeAssistantError) as excinfo:
         await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
-    assert "OPERATION_NOT_ALLOWED_IN_CURRENT_SOCKET_STATE" in str(excinfo.value)
-    last = state_by_unique_id(hass, "sensor", f"{eid}_account_last_command")
-    assert last.state == "rejected"
-    assert "OPERATION_NOT_ALLOWED" in last.attributes["message"]
-    assert [e["result"] for e in events] == ["rejected"]
-    mock_client.find_stations_by_ids.assert_awaited_once()  # no follow-up polling
+    assert excinfo.value.translation_key == "command_unconfirmed"
+    assert excinfo.value.translation_placeholders == {"seconds": "0.02"}
 
 
-async def test_stop_charge_button_waits_for_session_to_end(
+async def test_account_stop_stops_your_sessions_socket(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_client: MagicMock,
@@ -171,18 +80,11 @@ async def test_stop_charge_button_waits_for_session_to_end(
 ) -> None:
     mock_client.find_last_active_charge_socket.return_value = charging_socket
     await setup_integration(hass, mock_config_entry)
+    fast_commands(mock_config_entry)
     eid = mock_config_entry.entry_id
-    events = capture_events(hass)
-    # The session disappears on the second poll after the stop.
-    mock_client.find_last_active_charge_socket.side_effect = after_first_call(charging_socket, None)
-
+    mock_client.find_last_active_charge_socket.return_value = None
     await press(hass, entity_id_for(hass, f"{eid}_account_stop_charge"))
-    await hass.async_block_till_done()
-
     mock_client.stop_charge.assert_awaited_once_with(11242)
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").state == "stopped"
-    assert state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state == "off"
-    assert [e["result"] for e in events] == ["stopped"]
 
 
 async def test_stop_charge_without_session_is_unavailable(
@@ -207,6 +109,7 @@ async def test_station_stop_charge_button_on_correct_station(
     """Charger 6041's stop button stops the session, because it is running there."""
     mock_client.find_last_active_charge_socket.return_value = charging_socket
     await setup_integration(hass, mock_config_entry)
+    fast_commands(mock_config_entry)
     eid = mock_config_entry.entry_id
     mock_client.find_last_active_charge_socket.return_value = None
     await press(hass, entity_id_for(hass, f"{eid}_station_6041_stop_charge"))
@@ -306,77 +209,6 @@ def caps(allowed: set[str], denied: dict[str, str] | None = None):
     from custom_components.mer.driivz.models import SocketCapabilities
 
     return SocketCapabilities(allowed=frozenset(allowed), denied=denied or {})
-
-
-async def test_start_uses_normal_start_when_allowed(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    await setup_integration(hass, mock_config_entry)
-    eid = mock_config_entry.entry_id
-    mock_client.find_socket_capabilities.return_value = {
-        11243: caps({"START_CHARGE_FROM_SERVER"}, {"START_CHARGE_NOW": "INVALID_CARD"})
-    }
-    mock_client.find_stations_by_ids.return_value = with_socket_status(
-        stations_from_fixture("stations_by_ids.json"), 11243, "CHARGING"
-    )
-    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
-    await hass.async_block_till_done()
-    mock_client.start_charge.assert_awaited_once_with(11243)
-    mock_client.start_charge_now.assert_not_awaited()
-    last = state_by_unique_id(hass, "sensor", f"{eid}_account_last_command")
-    assert last.attributes["method"] == "start"
-
-
-async def test_start_uses_charge_now_when_only_that_is_allowed(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    await setup_integration(hass, mock_config_entry)
-    eid = mock_config_entry.entry_id
-    mock_client.find_socket_capabilities.return_value = {11243: caps({"START_CHARGE_NOW"})}
-    mock_client.find_stations_by_ids.return_value = with_socket_status(
-        stations_from_fixture("stations_by_ids.json"), 11243, "CHARGING"
-    )
-    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
-    await hass.async_block_till_done()
-    mock_client.start_charge_now.assert_awaited_once_with(11243)
-    mock_client.start_charge.assert_not_awaited()
-    assert (
-        state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").attributes["method"]
-        == "charge_now"
-    )
-
-
-async def test_start_refused_up_front_with_the_portals_reason(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    """Neither start allowed at press time: fail with the reason, send nothing."""
-    await setup_integration(hass, mock_config_entry)
-    eid = mock_config_entry.entry_id
-    mock_client.find_socket_capabilities.return_value = {
-        11243: caps(set(), {"START_CHARGE_NOW": "INVALID_CARD"})
-    }
-    with pytest.raises(HomeAssistantError) as excinfo:
-        await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
-    assert "START_NOT_ALLOWED" in str(excinfo.value) and "INVALID_CARD" in str(excinfo.value)
-    mock_client.start_charge.assert_not_awaited()
-    mock_client.start_charge_now.assert_not_awaited()
-    assert state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").state == "rejected"
-
-
-async def test_start_falls_back_to_normal_start_when_capabilities_unreadable(
-    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    from custom_components.mer.driivz.exceptions import DriivzConnectionError
-
-    await setup_integration(hass, mock_config_entry)
-    eid = mock_config_entry.entry_id
-    mock_client.find_socket_capabilities.side_effect = DriivzConnectionError("down")
-    mock_client.find_stations_by_ids.return_value = with_socket_status(
-        stations_from_fixture("stations_by_ids.json"), 11243, "CHARGING"
-    )
-    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
-    await hass.async_block_till_done()
-    mock_client.start_charge.assert_awaited_once_with(11243)
 
 
 async def test_start_button_availability_follows_capabilities(

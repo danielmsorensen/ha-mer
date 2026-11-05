@@ -9,9 +9,14 @@ import re
 from typing import Any, ClassVar
 
 from .const import (
+    DENIED_FOR_SOCKET_STATE,
     IN_USE_STATUSES,
+    OP_START_CHARGE,
+    OP_START_CHARGE_NOW,
     PUSH_CHARGING_ESTIMATE,
     PUSH_STATION_STATUS,
+    START_METHOD_CHARGE_NOW,
+    START_METHOD_NORMAL,
     STARTABLE_STATUSES,
     STATUS_AVAILABLE,
     STATUS_UNKNOWN,
@@ -343,6 +348,33 @@ class SocketCapabilities:
 
     allowed: frozenset[str]
     denied: Mapping[str, str]
+
+    @property
+    def start_method(self) -> str | None:
+        """The start the portal accepts, as the web app picks it: normal, else Charge now."""
+        if OP_START_CHARGE in self.allowed:
+            return START_METHOD_NORMAL
+        if OP_START_CHARGE_NOW in self.allowed:
+            return START_METHOD_CHARGE_NOW
+        return None
+
+    @property
+    def start_refusal(self) -> str | None:
+        """The portal's reason when neither start is allowed; None while one is."""
+        if self.start_method is not None:
+            return None
+        return self.denied.get(OP_START_CHARGE) or self.denied.get(OP_START_CHARGE_NOW)
+
+    @property
+    def refuses_start_whatever_the_state(self) -> bool:
+        """Both starts denied for a reason other than the socket's state, such as the card.
+
+        A state denial does not count: the socket's status is fresher (ADR 2026-10-05).
+        """
+        return not any(
+            op in self.allowed or self.denied.get(op) == DENIED_FOR_SOCKET_STATE
+            for op in (OP_START_CHARGE, OP_START_CHARGE_NOW)
+        )
 
     @staticmethod
     def parse(data: Any) -> dict[int, SocketCapabilities]:

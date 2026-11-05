@@ -8,7 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 import shutil
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.automation import DOMAIN as AUTOMATION_DOMAIN
@@ -18,27 +18,17 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.mer.const import DOMAIN
 from tests.conftest import make_config_entry
-from tests.helpers import setup_integration, stations_from_fixture
+from tests.helpers import fast_commands, setup_integration, stations_from_fixture
 
 BLUEPRINT = (
     Path(__file__).parent.parent / "blueprints" / "automation" / "mer" / "offer_free_charger.yaml"
 )
 WORK = {"latitude": 51.5, "longitude": -0.12}
 AWAY = {"latitude": 52.5, "longitude": -1.5}
-
-
-@pytest.fixture(autouse=True)
-def fast_command_polling():
-    with (
-        patch("custom_components.mer.coordinator.COMMAND_POLL_INTERVAL_SECONDS", 0),
-        patch("custom_components.mer.coordinator.COMMAND_MAX_POLLS", 1),
-    ):
-        yield
 
 
 def socket_status_entity(hass: HomeAssistant, entry_id: str, socket_id: int) -> str:
@@ -58,6 +48,7 @@ async def setup_blueprint(
 ) -> list[dict[str, Any]]:
     """Integration, a Work zone, a person, a phone, and an automation from the blueprint."""
     await setup_integration(hass, mock_config_entry)
+    fast_commands(mock_config_entry)
     eid = mock_config_entry.entry_id
 
     target = Path(hass.config.path("blueprints", "automation", "mer", "offer_free_charger.yaml"))
@@ -373,6 +364,7 @@ async def add_other_account(hass: HomeAssistant) -> MockConfigEntry:
     """A second Mer account; added last, its entities come first in expand()."""
     other = make_config_entry([6042, 6041], username="other@example.com")
     await setup_integration(hass, other)
+    fast_commands(other)
     return other
 
 

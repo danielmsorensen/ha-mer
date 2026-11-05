@@ -10,19 +10,24 @@ from unittest.mock import MagicMock
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
+import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
 )
 
+from custom_components.mer.const import EVENT_COMMAND_RESULT
 from custom_components.mer.driivz.exceptions import (
     AuthError,
     DriivzConnectionError,
     RateLimitError,
 )
-from custom_components.mer.driivz.models import Socket
-from tests.helpers import setup_integration
+from custom_components.mer.driivz.models import Socket, SocketCapabilities
+from tests.helpers import fast_commands, setup_integration, stations_from_fixture
+from tests.test_button import entity_id_for, press, with_socket_status
+from tests.test_sensor import state_by_unique_id
 
 # Stamped onto a station detail by a test so it can tell a committed refresh from a
 # discarded one; the conftest hands back the same Station object every call, so identity
@@ -346,3 +351,58 @@ async def test_get_station_merges_detail_and_live(
     assert coordinator.get_socket(6041, 1) is None
     assert coordinator.get_station(999) is None
     assert [s.id for s in coordinator.configured_stations()] == [6042, 6041]
+
+
+def capture_events(hass: HomeAssistant) -> list:
+    events: list = []
+    hass.bus.async_listen(EVENT_COMMAND_RESULT, lambda e: events.append(e.data))
+    return events
+
+
+async def test_a_command_is_recorded_published_and_fired(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """While the press waits, each poll is published; the outcome lands on Last command."""
+    live = stations_from_fixture("stations_by_ids.json")
+    await setup_integration(hass, mock_config_entry)
+    fast_commands(mock_config_entry, max_polls=3)
+    eid = mock_config_entry.entry_id
+    events = capture_events(hass)
+    mock_client.find_stations_by_ids.return_value = with_socket_status(live, 11243, "CHARGING")
+
+    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
+    await hass.async_block_till_done()
+
+    assert state_by_unique_id(hass, "sensor", f"{eid}_socket_11243_status").state == "charging"
+    last = state_by_unique_id(hass, "sensor", f"{eid}_account_last_command")
+    assert last.state == "charging"
+    assert last.attributes["command"] == "start"
+    assert last.attributes["method"] == "start"
+    assert last.attributes["charger"] == "Riverside - Bay 3 - Charger A"
+    assert last.attributes["socket"] == "Left"
+    assert [(e["command"], e["result"], e["method"]) for e in events] == [
+        ("start", "charging", "start")
+    ]
+
+
+async def test_a_refused_start_is_recorded_and_its_capabilities_kept(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """The capabilities read at the press grey the button out without waiting for a re-read."""
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    events = capture_events(hass)
+    mock_client.find_socket_capabilities.return_value = {
+        11243: SocketCapabilities(frozenset(), {"START_CHARGE_FROM_SERVER": "INVALID_CARD"})
+    }
+    button = entity_id_for(hass, f"{eid}_socket_11243_start_charge")
+
+    with pytest.raises(HomeAssistantError):
+        await press(hass, button)
+
+    mock_client.start_charge.assert_not_awaited()
+    last = state_by_unique_id(hass, "sensor", f"{eid}_account_last_command")
+    assert last.state == "rejected"
+    assert last.attributes["message"] == "START_NOT_ALLOWED: INVALID_CARD"
+    assert [e["result"] for e in events] == ["rejected"]
+    assert hass.states.get(button).state == "unavailable"

@@ -24,7 +24,7 @@ from custom_components.mer.const import (
 )
 from custom_components.mer.driivz.exceptions import DriivzConnectionError
 from custom_components.mer.driivz.models import Socket
-from tests.helpers import setup_integration
+from tests.helpers import fast_commands, setup_integration
 from tests.test_button import entity_id_for, press
 from tests.test_sensor import state_by_unique_id
 
@@ -231,17 +231,14 @@ async def test_start_press_resolves_on_push_without_polling(
     await _settle(hass)
     eid = mock_config_entry.entry_id
     polls = mock_client.find_stations_by_ids.await_count
-    with (
-        patch("custom_components.mer.coordinator.COMMAND_POLL_INTERVAL_SECONDS", 2),
-        patch("custom_components.mer.coordinator.COMMAND_MAX_POLLS", 2),
-    ):
-        pressing = hass.async_create_task(
-            press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
-        )
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        fake_ws.push(status_push(6042, 11243, "CHARGING"))
-        await asyncio.wait_for(pressing, timeout=5)
+    fast_commands(mock_config_entry, interval_seconds=2, max_polls=2)
+    pressing = hass.async_create_task(
+        press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
+    )
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    fake_ws.push(status_push(6042, 11243, "CHARGING"))
+    await asyncio.wait_for(pressing, timeout=5)
     mock_client.start_charge.assert_awaited_once_with(11243)
     assert mock_client.find_stations_by_ids.await_count == polls  # resolved by push alone
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").state == "charging"
@@ -480,17 +477,14 @@ async def test_watch_for_session_runs_after_your_start(
     await setup_integration(hass, mock_config_entry)
     await _settle(hass)
     eid = mock_config_entry.entry_id
-    with (
-        patch("custom_components.mer.coordinator.COMMAND_POLL_INTERVAL_SECONDS", 2),
-        patch("custom_components.mer.coordinator.COMMAND_MAX_POLLS", 2),
-    ):
-        pressing = hass.async_create_task(
-            press(hass, entity_id_for(hass, f"{eid}_socket_11242_start_charge"))
-        )
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        fake_ws.push(status_push(6041, 11242, "PREPARING"))
-        await asyncio.wait_for(pressing, timeout=5)
+    fast_commands(mock_config_entry, interval_seconds=2, max_polls=2)
+    pressing = hass.async_create_task(
+        press(hass, entity_id_for(hass, f"{eid}_socket_11242_start_charge"))
+    )
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    fake_ws.push(status_push(6041, 11242, "PREPARING"))
+    await asyncio.wait_for(pressing, timeout=5)
     assert state_by_unique_id(hass, "sensor", f"{eid}_account_last_command").state == (
         "awaiting_cable"
     )

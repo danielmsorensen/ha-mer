@@ -19,9 +19,9 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
+from .commands import COMMAND_RESULTS
 from .const import DOMAIN
 from .coordinator import (
-    COMMAND_RESULTS,
     ActiveSession,
     MerConfigEntry,
     MerCoordinator,
