@@ -331,14 +331,6 @@ async def test_toggle_during_refresh_is_not_clobbered(
     assert coordinator._notify[6042] is False
     assert coordinator.data.notify_subscriptions[6042] is False
 
-    # flush the scheduled refresh so no timer is left pending at teardown
-    freezer.tick(timedelta(seconds=6))
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done()
-    freezer.tick(timedelta(seconds=11))
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done()
-
 
 async def test_get_station_merges_detail_and_live(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_client: MagicMock

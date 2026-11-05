@@ -24,16 +24,6 @@ from tests.helpers import setup_integration
 from tests.test_sensor import state_by_unique_id
 
 
-async def _flush_scheduled_refresh(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
-    """Advance past the ~5s schedule_refresh delay and the ~10s debounce after it."""
-    freezer.tick(timedelta(seconds=6))
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done()
-    freezer.tick(timedelta(seconds=11))
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done()
-
-
 def entity_id_for(hass: HomeAssistant, unique_id: str) -> str:
     entity_id = er.async_get(hass).async_get_entity_id(SWITCH_DOMAIN, DOMAIN, unique_id)
     assert entity_id is not None
@@ -79,7 +69,6 @@ async def test_turn_on_subscribes_and_stays_on(
     await turn_on(hass, entity_id)
     mock_client.subscribe_to_availability.assert_awaited_once_with(6041)
     assert hass.states.get(entity_id).state == STATE_ON
-    await _flush_scheduled_refresh(hass, freezer)
 
 
 async def test_turn_off_unsubscribes(
@@ -94,7 +83,6 @@ async def test_turn_off_unsubscribes(
     await turn_off(hass, entity_id)
     mock_client.unsubscribe_from_availability.assert_awaited_once_with(6042)
     assert hass.states.get(entity_id).state == STATE_OFF
-    await _flush_scheduled_refresh(hass, freezer)
 
 
 async def test_subscribe_error_raises_command_failed(
@@ -123,3 +111,29 @@ async def test_unsubscribe_error_raises_command_failed(
     assert "STATION_NOT_FOUND" in str(excinfo.value)
     # the failed call must not have left the switch showing a change that never happened
     assert hass.states.get(entity_id).state == STATE_ON
+
+
+async def test_toggle_keeps_poll_schedule(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_client: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A toggle must neither push the next poll back nor trigger an extra one."""
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    entity_id = entity_id_for(hass, f"{eid}_station_6041_notify_available")
+    polls = mock_client.find_stations_by_ids.await_count
+
+    async def advance(seconds: int) -> None:
+        freezer.tick(timedelta(seconds=seconds))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+
+    await advance(40)
+    await turn_on(hass, entity_id)
+    await advance(6)  # past any follow-up refresh delay
+    await advance(12)  # 58 s after setup: the 60 s poll is not due yet
+    assert mock_client.find_stations_by_ids.await_count == polls, "toggle triggered a poll"
+    await advance(3)  # 61 s: the poll scheduled at setup has run
+    assert mock_client.find_stations_by_ids.await_count == polls + 1, "toggle delayed the poll"
