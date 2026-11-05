@@ -330,11 +330,3 @@ async def test_toggle_during_refresh_is_not_clobbered(
     mock_client.unsubscribe_from_availability.assert_awaited_once_with(6042)
     assert coordinator._notify[6042] is False
     assert coordinator.data.notify_subscriptions[6042] is False
-
-    # flush the scheduled refresh so no timer is left pending at teardown
-    freezer.tick(timedelta(seconds=6))
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done()
-    freezer.tick(timedelta(seconds=11))
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done()

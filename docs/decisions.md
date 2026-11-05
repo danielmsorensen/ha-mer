@@ -518,8 +518,6 @@ after the stop, outside the after-stop rules, and offered the charger just unplu
   Every change is a field write then `_publish()`. No `replace(self.data, ...)`, no mirrors.
 - `socket_view` / `session_view` (entity.py) build the names/ids/start-button dicts. Socket
   unique-id format defined once (`socket_unique_id`).
-- Toggling notify now publishes via `_publish`, not `async_set_updated_data`: no poll reschedule
-  (per 2026-09-24).
 - Stay off the snapshot: `last_session_end` (until the session-lifecycle rework), `last_push_at`
   (diagnostics, no publish), HA's `last_update_success`/`last_exception`/`update_interval`, and
   `client.rate_limit_remaining`. "Last poll" attributes and "Requests remaining" read the coordinator.

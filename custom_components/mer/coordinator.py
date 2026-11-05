@@ -39,7 +39,6 @@ from .const import (
     PUSHED_END_TRUST,
     RATE_LIMIT_SKIP_THRESHOLD,
     RATE_LIMIT_WARN_INTERVAL,
-    REFRESH_AFTER_COMMAND_SECONDS,
     SESSION_WATCH_DELAYS_SECONDS,
     SUBENTRY_TYPE_SITE,
     WALLET_REFRESH,
@@ -579,9 +578,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         The client call happens first and is not retried or reverted here: if it raises
         `DriivzError`, it propagates to the caller (the switch entity) before anything is
         touched, so the cache and published data are left exactly as they were. Only once
-        the portal has confirmed the change do we update `self._notify` and publish, so
-        the switch reflects the confirmed
-        value immediately rather than waiting up to an hour for the next detail refresh.
+        the portal has confirmed the change do we update `self._notify` and publish via
+        `_publish`, so the switch reflects the confirmed value immediately rather than
+        waiting up to an hour for the next detail refresh, and the poll schedule is left
+        alone.
 
         Both the client call and the cache write happen under `_notify_lock`, the same
         lock `_refresh_station` holds across its subscription fetch and commit. That
@@ -596,15 +596,6 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 await self.client.unsubscribe_from_availability(station_id)
             self._notify = {**self._notify, station_id: subscribed}
         self._publish()
-        self.schedule_refresh()
-
-    def schedule_refresh(self) -> None:
-        """Refresh shortly after a start/stop command."""
-
-        async def _refresh(_now: datetime) -> None:
-            await self.async_request_refresh()
-
-        async_call_later(self.hass, REFRESH_AFTER_COMMAND_SECONDS, _refresh)
 
     # ----- start / stop with confirmation ---------------------------------
 
