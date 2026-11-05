@@ -35,7 +35,7 @@ def ms_to_datetime(value: Any) -> datetime | None:
         return None
     try:
         return datetime.fromtimestamp(int(value) / 1000, tz=UTC)
-    except (TypeError, ValueError, OSError, OverflowError):
+    except TypeError, ValueError, OSError, OverflowError:
         return None
 
 
@@ -51,14 +51,14 @@ def _elapsed(data: Mapping[str, Any]) -> timedelta | None:
 def _int(value: Any) -> int | None:
     try:
         return int(value) if value is not None and not isinstance(value, bool) else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
 def _float(value: Any) -> float | None:
     try:
         return float(value) if value is not None and not isinstance(value, bool) else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -377,7 +377,7 @@ def parse_push(data: Any) -> StatusPush | EstimatePush | None:
             return StatusPush.from_dict(data)
         if kind == PUSH_CHARGING_ESTIMATE and data.get("stationSocketId") is not None:
             return EstimatePush.from_dict(data)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return None
 

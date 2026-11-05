@@ -366,7 +366,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         if detail is None:
             try:
                 detail = await self.client.find_station_by_id(station_id)
-            except (AuthError, RateLimitError):
+            except AuthError, RateLimitError:
                 raise
             except DriivzError as err:
                 _LOGGER.debug("Could not fetch charger %s for its tariff: %s", station_id, err)
@@ -399,7 +399,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         """
         try:
             await work
-        except (AuthError, RateLimitError):
+        except AuthError, RateLimitError:
             raise
         except DriivzError as err:
             if self.data is None:
@@ -621,7 +621,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             caps = await self.client.find_socket_capabilities(
                 station_id, socket_id, socket.status if socket else "UNKNOWN"
             )
-        except (AuthError, RateLimitError):
+        except AuthError, RateLimitError:
             raise
         except DriivzError as err:
             _LOGGER.debug("Could not read socket capabilities (%s); sending the normal start", err)

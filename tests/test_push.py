@@ -513,15 +513,18 @@ async def test_pushed_end_is_not_undone_by_a_lagging_poll(
     await setup_integration(hass, mock_config_entry)
     await _settle(hass)
     eid = mock_config_entry.entry_id
-    charging = lambda: state_by_unique_id(  # noqa: E731
-        hass, "binary_sensor", f"{eid}_account_charging"
-    ).state
+
+    def charging() -> str:
+        return state_by_unique_id(hass, "binary_sensor", f"{eid}_account_charging").state
+
     changes: list[str] = []
     hass.bus.async_listen(
         "state_changed",
-        lambda event: changes.append(event.data["new_state"].state)
-        if event.data["entity_id"].endswith("_charging")
-        else None,
+        lambda event: (
+            changes.append(event.data["new_state"].state)
+            if event.data["entity_id"].endswith("_charging")
+            else None
+        ),
     )
 
     fake_ws.push(status_push(6041, 11242, "FINISHING"))  # stopped

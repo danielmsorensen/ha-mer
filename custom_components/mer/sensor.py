@@ -379,9 +379,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         translation_key="last_started",
         device_class=SensorDeviceClass.TIMESTAMP,
         value_fn=lambda _c, data: _last(data).started_at if _last(data) else None,
-        attributes_fn=lambda _c, data: (
-            {"station": _last(data).display_name} if _last(data) else {}
-        ),
+        attributes_fn=lambda _c, data: {"station": _last(data).display_name} if _last(data) else {},
     ),
     MerAccountSensorDescription(
         key="last_command",

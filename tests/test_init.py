@@ -170,4 +170,4 @@ async def test_migrates_per_charger_subentries_to_one_per_site(
     registry = dr.async_get(hass)
     device = registry.async_get_device_by_identifier((DOMAIN, "station_6041"), entry.entry_id)
     assert device is not None
-    assert device.config_entries_subentries[entry.entry_id] == {site.subentry_id}
+    assert (device.config_entry_id, device.config_subentry_id) == (entry.entry_id, site.subentry_id)

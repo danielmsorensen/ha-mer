@@ -214,7 +214,10 @@ async def test_add_chargers_creates_one_site_subentry(
             (DOMAIN, f"station_{station_id}"), entry.entry_id
         )
         assert device is not None
-        assert device.config_entries_subentries[entry.entry_id] == {site.subentry_id}
+        assert (device.config_entry_id, device.config_subentry_id) == (
+            entry.entry_id,
+            site.subentry_id,
+        )
     assert entry.runtime_data.station_ids == [6042, 6041]
 
 
