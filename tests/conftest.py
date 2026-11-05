@@ -29,6 +29,7 @@ from custom_components.mer.driivz.models import (
     Transaction,
     Wallet,
 )
+from tests.fake_portal import FakePortal
 from tests.helpers import load_json_fixture, station_from_fixture, stations_from_fixture
 
 SITE_NAME = "Example Council - Riverside Business Park"
@@ -157,3 +158,11 @@ def mock_client() -> Generator[MagicMock]:
 def charging_socket() -> Socket:
     """The socket DTO returned while a charge is running."""
     return Socket.from_dict(load_json_fixture("last_active_charging.json")["data"])
+
+
+@pytest.fixture
+def portal() -> Generator[FakePortal]:
+    """The portal every client created in the test talks to."""
+    fake = FakePortal()
+    with patch("custom_components.mer.api.DriivzDriverClient", return_value=fake):
+        yield fake
