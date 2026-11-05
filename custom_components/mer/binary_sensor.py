@@ -44,7 +44,7 @@ def _charging_attributes(coordinator: MerCoordinator, data: MerData) -> dict[str
             "ended_at": None,
             "socket_reused_at": None,
         }
-    ended = coordinator.last_session_end
+    ended = data.last_session_end
     if ended is not None:
         return {
             **session_place(coordinator, ended.session),

@@ -507,3 +507,27 @@ after the stop, outside the after-stop rules, and offered the charger just unplu
 - The blueprint ignores a re-entry within 2 minutes of leaving the zone. Real arrivals come
   from further away; the bounce seen was 10 s.
 
+
+## 2026-11-05: one session tracker owns "your session"
+
+**Decision.** `session_tracker.SessionTracker`, pure and with no Home Assistant imports, owns
+whether your session runs, when it ended (left socket freed and reused), the pushed-end trust,
+and the own-start window. The coordinator feeds it every poll, status push, estimate push and
+command with `now`. It publishes the tracker's `active` and `last_session_end` (now on
+`MerData`), and carries out the intents it returns: `PollNow`, `WatchForSession(delays)`,
+`RereadHistory`. The windows moved from `const.py` into the tracker. Behaviour from 2026-10-07,
+10-12, 10-15 and 11-02 is unchanged; terms are in CONTEXT.md.
+
+**Why.** The rules were spread over six coordinator fields and eight methods, with unwritten
+caller rules: filter every session fetch, note the end before assigning, follow the left
+socket on every publish. Tests had to drive the websocket and call private methods. They are
+now table tests of the tracker; a few coordinator tests prove the intents run.
+
+**Consequences.**
+- A poll that fails after fetching the session keeps what the tracker saw. The end is recorded
+  once, at first sight, instead of again at the next good poll.
+- A start/stop cancelled mid-wait counts as finished and not rejected, so its socket's
+  charging is treated as your own start.
+- A publish takes the session from the tracker. A push handler's publish therefore cannot undo
+  a session found by a poll it triggered. Intents still run after publishing, so stations
+  aren't overwritten either.
