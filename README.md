@@ -1,6 +1,7 @@
 # Mer EV Charging for Home Assistant
 
-An unofficial [HACS](https://hacs.xyz) integration for Mer UK EV chargers. It shows
+An unofficial custom integration for Mer UK EV chargers, installed through the Home
+Assistant Marketplace (HACS before 2026.11). It shows
 whether each socket on the chargers you pick is free, occupied or charging, starts and
 stops charges, and reports your active session, last session and wallet balance.
 
@@ -11,11 +12,21 @@ stops charges, and reports your active session, last session and wallet balance.
 
 ## Installation
 
-1. In HACS, open **⋮ → Custom repositories** and add this repository with category
-   **Integration**.
-2. Install **Mer EV Charging (UK)** from HACS and restart Home Assistant.
+[![Open your Home Assistant instance and open this repository.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=danielmsorensen&repository=ha-mer&category=integration)
+
+The button opens the repository in the Marketplace (Home Assistant 2026.11+) or HACS
+(older). If it isn't listed yet, accept the offer to add it as a custom repository.
+Then install **Mer EV Charging (UK)**.
+
+- **2026.11+:** no restart needed to install; an update asks for a restart with a repair.
+- **Older, HACS:** restart Home Assistant after installing or updating.
+
+Without the button: **Settings → Marketplace** (or HACS) **→ ⋮ → Custom repositories**,
+add this repository's URL with category **Integration**.
 
 ## Setup
+
+[![Open your Home Assistant instance and start setting up Mer.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=mer)
 
 **Settings → Devices & services → Add integration → Mer** asks only for the e-mail and
 password of your Mer app account. That creates the account device; chargers come next.
@@ -317,5 +328,7 @@ is already running".
 **Brand images** live in `custom_components/mer/brand/`, where Home Assistant serves them
 directly. `scripts/generate_brand_icon.py` rebuilds them from the logo on Mer's website.
 
-**HACS updates.** HACS checks custom repositories for new releases every few hours.
-**Update information** on the repository's HACS page checks now.
+**Updates.** The Marketplace (or HACS) offers each new GitHub release as an update.
+Releases need the manifest `version` to match the tag; CI checks it. Blueprints aren't
+in the Marketplace: users re-import them from the README link, so never rename an input
+and give new inputs a default.

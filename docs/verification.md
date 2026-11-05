@@ -5,7 +5,7 @@ account before relying on the integration. Section 3 needs you at a real charger
 
 ## 1. Set up
 
-1. Install through HACS ([README](../README.md#installation)), add the integration and
+1. Install through the Marketplace or HACS ([README](../README.md#installation)), add the integration and
    sign in.
 2. **Add charger**: search for your site and tick your chargers.
 
