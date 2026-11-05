@@ -161,11 +161,28 @@ def test_socket_status_attributes() -> None:
         "socket_id": 11242,
         "start_button": "button.start_11242",
         "my_session": True,
+        "held_back": False,
+        "own_start": False,
         "max_power_kw": 7.0,
         "connector": "TYPE_2_MENNEKES",
     }
     other = attributes(data, station, data.socket(6041, 11241), button)
     assert other["my_session"] is False
+
+
+def test_socket_status_held_back_and_own_start() -> None:
+    """From the tracker's state in the snapshot; held back never while a session runs."""
+    ended = EndedSession(session(), ENDED_AT, held_back=frozenset({11241}))
+    data = snapshot(last_session_end=ended, own_starts=frozenset({11242}))
+    attributes = described(SOCKET_SENSORS, "status").attributes_fn
+    station = data.station(6041)
+    assert station is not None
+    left = attributes(data, station, data.socket(6041, 11241), button)
+    right = attributes(data, station, data.socket(6041, 11242), button)
+    assert (left["held_back"], left["own_start"]) == (True, False)
+    assert (right["held_back"], right["own_start"]) == (False, True)
+    charging = replace(data, active=session())
+    assert attributes(charging, station, charging.socket(6041, 11241), button)["held_back"] is False
 
 
 # ----- account sensors ---------------------------------------------------
@@ -224,20 +241,17 @@ def test_charging_attributes_while_charging() -> None:
         "station_id": 6041,
         "socket_id": 11242,
         "ended_at": None,
-        "socket_reused_at": None,
     }
 
 
 def test_charging_attributes_after_an_end_seen() -> None:
-    reused = ENDED_AT + timedelta(minutes=30)
-    ended = EndedSession(session(), ENDED_AT, freed=True, reused_at=reused)
+    ended = EndedSession(session(), ENDED_AT, freed=True, reused=True)
     assert charging_attributes(snapshot(last_session_end=ended)) == {
         "charger": "Riverside - Bay 4 - Charger B",
         "socket": "Right",
         "station_id": 6041,
         "socket_id": 11242,
         "ended_at": ENDED_AT.isoformat(),
-        "socket_reused_at": reused.isoformat(),
     }
 
 
@@ -250,7 +264,6 @@ def test_charging_attributes_fall_back_to_history() -> None:
         "station_id": 6041,
         "socket_id": None,
         "ended_at": data.last_transaction.stopped_at.isoformat(),
-        "socket_reused_at": None,
     }
     assert charging_attributes(snapshot(last_transaction=None))["charger"] is None
 

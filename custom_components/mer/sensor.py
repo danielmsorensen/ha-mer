@@ -66,11 +66,14 @@ def _socket_status_attributes(
 
     The status alone says "charging" for anyone's car; `my_session` says it is yours.
     `charger`, `socket` and `start_button` let an automation or blueprint work from this
-    sensor alone, without knowing how entities are named.
+    sensor alone, without knowing how entities are named. `held_back` and `own_start` are
+    what the free charger blueprint needs from your session; see CONTEXT.md.
     """
     return {
         **socket_view(station, socket, start_button),
         "my_session": data.session_on_socket(socket.id) is not None,
+        "held_back": data.held_back(socket.id),
+        "own_start": socket.id in data.own_starts,
         "max_power_kw": socket.max_power_kw,
         "connector": socket.socket_type,
     }
@@ -387,6 +390,8 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
                 "method": data.last_command.method,
                 "charger": data.last_command.station_name,
                 "socket": data.last_command.socket_name,
+                "station_id": data.last_command.station_id,
+                "socket_id": data.last_command.socket_id,
                 "requested_at": data.last_command.requested_at.isoformat(),
                 "finished_at": data.last_command.finished_at.isoformat(),
                 "message": data.last_command.message,

@@ -150,5 +150,6 @@ async def test_charging_says_where_and_then_where_it_ended(
     assert charging().state == STATE_OFF
     assert (attrs["socket"], attrs["station_id"], attrs["socket_id"]) == ("Right", 6041, 11242)
     assert attrs["ended_at"] is not None
+    assert "socket_reused_at" not in attrs  # the socket status sensors say what is held back
     # The history is re-read in the same poll, so "Last session" catches up at once.
     assert len(portal.calls["find_transactions"]) == history_reads + 1

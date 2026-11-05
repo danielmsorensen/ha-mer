@@ -100,10 +100,17 @@ class MerData:
     last_command: CommandResult | None = None
     # Your last session after it ended; see SessionTracker.
     last_session_end: EndedSession | None = None
+    # Sockets with an own start, as of this snapshot.
+    own_starts: frozenset[int] = frozenset()
     push_connected: bool = False
     push_connected_since: datetime | None = None
     # Last successful poll (skipped cycles do not count).
     last_poll_at: datetime | None = None
+
+    def held_back(self, socket_id: int) -> bool:
+        """Free, but held back since your last session ended; never while a session runs."""
+        ended = self.last_session_end
+        return self.active is None and ended is not None and socket_id in ended.held_back
 
     def station(self, station_id: int) -> Station | None:
         """The station with detail fields and live statuses merged."""
@@ -283,6 +290,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             customer_id=self._customer_id,
             last_command=self._last_command,
             last_session_end=self._tracker.last_end,
+            own_starts=self._tracker.own_starts(dt_util.utcnow()),
             push_connected=self._push_connected,
             push_connected_since=self._push_connected_since,
             last_poll_at=self._last_poll_at,
@@ -574,7 +582,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
     ) -> CommandResult:
         """Run a command, telling the tracker, then record its outcome and raise a failure."""
         requested_at = dt_util.utcnow()
-        self._observe(CommandStarted())
+        self._observe(CommandStarted(command, socket_id, requested_at))
         rejected = False
         try:
             outcome = await run

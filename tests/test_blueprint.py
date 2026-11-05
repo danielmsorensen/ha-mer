@@ -451,46 +451,40 @@ async def stop_charging_on_charger_b_right(
     return sent, poll
 
 
-async def test_after_you_stop_only_sockets_freed_later_are_offered(
+async def test_after_you_stop_held_back_sockets_are_not_offered(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     portal: FakePortal,
 ) -> None:
     """Seen live on 2026-10-12: stopping to go home offered a charger already free.
 
-    After your charge ends, sockets already free are not offered, nor is the socket you
-    left until someone else has used it.
+    The sockets' `held_back` decides; its rules are tested on the session tracker.
     """
     sent, poll = await stop_charging_on_charger_b_right(hass, mock_config_entry, portal)
     await run_by_hand(hass)  # Charger A was already free; Right is the one you left
     assert [n["title"] for n in sent] == ["No Mer charger free"]
     sent.clear()
 
+    portal.free(11241)  # Charger B Left frees up: not held back
+    await poll()
+    (offer,) = sent
+    assert offer["message"] == "Riverside - Bay 4 - Charger B"
+    assert offer["data"]["actions"][0]["title"] == "Start Left"
+
+
+async def test_a_held_back_socket_taken_changes_nothing(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    portal: FakePortal,
+) -> None:
+    """Never on offer, so taking it isn't news. `held_back` is read from before it was taken,
+    which releases it (2026-10-15)."""
+    sent, poll = await stop_charging_on_charger_b_right(hass, mock_config_entry, portal)
     portal.take(11243)  # one already free is taken
     await poll()
     portal.take(11242)  # and someone takes yours
     await poll()
     assert sent == []
-
-    portal.free(11242)  # they finish: yours frees again
-    await poll()
-    (offer,) = sent
-    assert offer["message"] == "Riverside - Bay 4 - Charger B"
-    assert offer["data"]["actions"][0]["title"] == "Start Right"
-
-
-async def test_after_you_stop_another_socket_freeing_up_is_offered(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    portal: FakePortal,
-) -> None:
-    """Stopping early for someone else: you can top up when another socket frees."""
-    sent, poll = await stop_charging_on_charger_b_right(hass, mock_config_entry, portal)
-    portal.free(11241)  # Charger B Left frees up
-    await poll()
-    (offer,) = sent
-    assert offer["message"] == "Riverside - Bay 4 - Charger B"
-    assert offer["data"]["actions"][0]["title"] == "Start Left"
 
 
 async def test_your_conditions_gate_real_offers_but_not_a_preview(

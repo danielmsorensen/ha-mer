@@ -232,6 +232,39 @@ async def test_account_sensors_charging(
         )
 
 
+async def test_socket_status_says_what_is_held_back_after_your_session(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
+) -> None:
+    """Free since before your session ended, or the socket you left: held back (2026-11-05)."""
+    portal.charge(11242)  # Charger B Left in use by someone else; Charger A free
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    coordinator = mock_config_entry.runtime_data
+
+    def held(socket_id: int) -> bool:
+        return state_by_unique_id(hass, "sensor", f"{eid}_socket_{socket_id}_status").attributes[
+            "held_back"
+        ]
+
+    async def poll() -> None:
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    assert [held(s) for s in (11243, 11244, 11241, 11242)] == [False] * 4  # charging
+    portal.stop(11242)  # you stop
+    await poll()
+    assert [held(s) for s in (11243, 11244, 11241, 11242)] == [True, True, False, False]
+    portal.free(11242)  # and unplug
+    await poll()
+    assert held(11242) is True
+    portal.take(11242, status="PREPARING")  # both taken
+    portal.take(11243)
+    await poll()
+    portal.free(11242, 11243)  # and freed again
+    await poll()
+    assert [held(s) for s in (11243, 11244, 11242)] == [False, True, False]
+
+
 async def test_price_from_tariff_without_kwh_component(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
 ) -> None:

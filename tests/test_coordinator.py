@@ -348,6 +348,7 @@ async def test_a_command_is_recorded_published_and_fired(
     assert last.attributes["method"] == "start"
     assert last.attributes["charger"] == "Riverside - Bay 3 - Charger A"
     assert last.attributes["socket"] == "Left"
+    assert (last.attributes["station_id"], last.attributes["socket_id"]) == (6042, 11243)
     assert [(e["command"], e["result"], e["method"]) for e in events] == [
         ("start", "charging", "start")
     ]

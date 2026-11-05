@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN
 from homeassistant.components.button import SERVICE_PRESS
@@ -255,3 +257,30 @@ async def test_refresh_now_rereads_start_capabilities(
     await press(hass, entity_id_for(hass, f"{eid}_account_refresh"))
     await hass.async_block_till_done()
     assert hass.states.get(entity_id_for(hass, uid)).state != "unavailable"
+
+
+async def test_socket_status_says_your_own_start(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    portal: FakePortal,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A start of yours there, running or in the last 10 minutes: its charging is yours."""
+    await setup_integration(hass, mock_config_entry)
+    fast_commands(mock_config_entry)
+    eid = mock_config_entry.entry_id
+
+    def status(socket_id: int):
+        return state_by_unique_id(hass, "sensor", f"{eid}_socket_{socket_id}_status")
+
+    assert status(11243).attributes["own_start"] is False
+    portal.charge(11243)  # the charger starts at once; the next poll sees it
+    await press(hass, entity_id_for(hass, f"{eid}_socket_11243_start_charge"))
+    await hass.async_block_till_done()
+    assert status(11243).attributes["own_start"] is True
+    assert status(11244).attributes["own_start"] is False
+
+    freezer.tick(timedelta(minutes=10))
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert status(11243).attributes["own_start"] is False

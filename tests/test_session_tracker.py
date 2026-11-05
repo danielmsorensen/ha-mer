@@ -15,7 +15,6 @@ from custom_components.mer.session_tracker import (
     ActiveSession,
     CommandFinished,
     CommandStarted,
-    EndedSession,
     EstimatePushed,
     Observation,
     Polled,
@@ -86,7 +85,7 @@ def estimate(socket_id: int = RIGHT_B, **kw: object) -> EstimatePushed:
 
 def own_start(socket_id: int = RIGHT_B, rejected: bool = False, at_s: float = 0) -> list[Step]:
     return [
-        Step(CommandStarted(), at_s),
+        Step(CommandStarted("start", socket_id, at(at_s)), at_s),
         Step(CommandFinished("start", socket_id, rejected, at(at_s)), at_s),
     ]
 
@@ -219,7 +218,11 @@ CASES: list[tuple[str, list[Step], tuple[object, ...], int | None]] = [
     ),
     (
         "a command is running: it polls for itself",
-        [Step(Polled(None, IDLE)), Step(CommandStarted()), Step(pushed(RIGHT_B, "CHARGING", IDLE))],
+        [
+            Step(Polled(None, IDLE)),
+            Step(CommandStarted("start", RIGHT_B, at(0))),
+            Step(pushed(RIGHT_B, "CHARGING", IDLE)),
+        ],
         (),
         None,
     ),
@@ -268,7 +271,7 @@ CASES: list[tuple[str, list[Step], tuple[object, ...], int | None]] = [
         "a stop is not a start: one poll",
         [
             Step(Polled(None, IDLE)),
-            Step(CommandStarted()),
+            Step(CommandStarted("stop", RIGHT_B, at(0))),
             Step(CommandFinished("stop", RIGHT_B, False, at(0))),
             Step(pushed(RIGHT_B, "CHARGING", IDLE), 40),
         ],
@@ -280,7 +283,7 @@ CASES: list[tuple[str, list[Step], tuple[object, ...], int | None]] = [
         [
             Step(Polled(None, IDLE)),
             *own_start(),
-            Step(CommandStarted(), 20),
+            Step(CommandStarted("stop", RIGHT_B, at(20)), 20),
             Step(CommandFinished("stop", RIGHT_B, False, at(20)), 20),
             Step(pushed(RIGHT_B, "CHARGING", IDLE), 40),
         ],
@@ -320,7 +323,8 @@ def test_end_is_recorded_once_with_when_it_was_seen() -> None:
             Step(Polled(None, chargers(RIGHT_B="FINISHING")), 60),
         ]
     )
-    assert tracker.last_end == EndedSession(session(), at(6))
+    assert tracker.last_end is not None
+    assert (tracker.last_end.session, tracker.last_end.ended_at) == (session(), at(6))
 
 
 def test_no_end_without_a_session() -> None:
@@ -328,42 +332,94 @@ def test_no_end_without_a_session() -> None:
     assert tracker.last_end is None
 
 
-@pytest.mark.parametrize(
-    ("statuses", "freed", "reused_at"),
-    [
-        (["FINISHING"], False, None),  # stopped, still plugged in
-        (["FINISHING", "AVAILABLE"], True, None),  # unplugged
-        (["FINISHING", "AVAILABLE", "PREPARING"], True, 3),  # someone else plugs in
-        (["FINISHING", "AVAILABLE", "PREPARING", "AVAILABLE"], True, 3),  # and leaves
-        (["FINISHING", "OCCUPIED"], False, None),  # in use, but never freed since you left
-        (["AVAILABLE", "FAULTED"], True, None),  # not a use
-    ],
-    ids=["finishing", "freed", "reused", "reused-kept", "never-freed", "faulted"],
-)
-def test_left_socket_by_poll(statuses: list[str], freed: bool, reused_at: int | None) -> None:
-    """2026-10-15: when the socket you left frees up, then when someone else uses it."""
+def polls(*snapshots: dict[int, Station]) -> list[Step]:
+    """Charging on Charger B Right, then a poll per snapshot with no session."""
     steps = [Step(Polled(session(), CHARGING_B))]
-    steps += [Step(Polled(None, chargers(RIGHT_B=s)), i + 1) for i, s in enumerate(statuses)]
-    tracker, _ = run(steps)
-    assert tracker.last_end is not None
-    assert tracker.last_end.freed is freed
-    assert tracker.last_end.reused_at == (at(reused_at) if reused_at else None)
+    return steps + [Step(Polled(None, s), i + 1) for i, s in enumerate(snapshots)]
 
 
-def test_left_socket_by_push() -> None:
-    tracker, _ = run(
+OTHERS = {LEFT_A, RIGHT_A, LEFT_B}
+
+# (case, steps, held back after them). 2026-10-15: after your session ends, sockets already
+# free are held back until they are next taken, and the left socket until someone else used it.
+HELD_BACK: list[tuple[str, list[Step], set[int]]] = [
+    ("already free when it ended", polls(chargers(RIGHT_B="FINISHING")), OTHERS),
+    (
+        "taken since",
+        polls(chargers(RIGHT_B="FINISHING"), chargers(RIGHT_B="FINISHING", LEFT_A="OCCUPIED")),
+        {RIGHT_A, LEFT_B},
+    ),
+    (
+        "taken and freed again",
+        polls(
+            chargers(RIGHT_B="FINISHING"),
+            chargers(RIGHT_B="FINISHING", LEFT_A="OCCUPIED"),
+            chargers(RIGHT_B="FINISHING"),
+        ),
+        {RIGHT_A, LEFT_B},
+    ),
+    (
+        "freed in the poll that saw the end",
+        [
+            Step(Polled(session(), chargers(RIGHT_B="CHARGING", LEFT_A="OCCUPIED"))),
+            Step(Polled(None, chargers(RIGHT_B="FINISHING")), 1),
+        ],
+        {RIGHT_A, LEFT_B},
+    ),
+    ("left socket unplugged", polls(chargers(RIGHT_B="FINISHING"), chargers()), {RIGHT_B, *OTHERS}),
+    (
+        "left socket reused",
+        polls(chargers(), chargers(RIGHT_B="PREPARING")),
+        OTHERS,
+    ),
+    (
+        "left socket freed after reuse",
+        polls(chargers(), chargers(RIGHT_B="PREPARING"), chargers()),
+        OTHERS,
+    ),
+    (
+        "left socket in use without freeing: still you",
+        polls(chargers(RIGHT_B="FINISHING"), chargers(RIGHT_B="OCCUPIED"), chargers()),
+        {RIGHT_B, *OTHERS},
+    ),
+    (
+        "left socket faulted: not a use",
+        polls(chargers(), chargers(RIGHT_B="FAULTED"), chargers()),
+        {RIGHT_B, *OTHERS},
+    ),
+    (
+        "left socket by push",
+        [
+            Step(Polled(session(), CHARGING_B)),
+            Step(pushed(RIGHT_B, "AVAILABLE", CHARGING_B), 1),
+        ],
+        {RIGHT_B, *OTHERS},
+    ),
+    (
+        "left socket reused, by push",
         [
             Step(Polled(session(), CHARGING_B)),
             Step(pushed(RIGHT_B, "AVAILABLE", CHARGING_B), 1),
             Step(pushed(RIGHT_B, "PREPARING", IDLE), 2),
-        ]
-    )
-    assert tracker.last_end == EndedSession(session(), at(1), freed=True, reused_at=at(2))
+            Step(pushed(RIGHT_B, "AVAILABLE", chargers(RIGHT_B="PREPARING")), 3),
+        ],
+        OTHERS,
+    ),
+    (
+        "on a charger not polled",
+        [Step(Polled(session(15028, 17886), IDLE)), Step(Polled(None, IDLE), 1)],
+        {LEFT_A, RIGHT_A, LEFT_B, RIGHT_B},
+    ),
+]
 
 
-def test_left_socket_on_a_charger_not_polled() -> None:
-    tracker, _ = run([Step(Polled(session(15028, 17886), IDLE)), Step(Polled(None, IDLE), 1)])
-    assert tracker.last_end == EndedSession(session(15028, 17886), at(1))
+@pytest.mark.parametrize(
+    ("steps", "held_back"), [c[1:] for c in HELD_BACK], ids=[c[0] for c in HELD_BACK]
+)
+def test_held_back(steps: list[Step], held_back: set[int]) -> None:
+    tracker, _ = run(steps)
+    assert tracker.last_end is not None
+    assert tracker.last_end.held_back == held_back
 
 
 def test_estimate_updates_your_session_keeping_what_it_lacks() -> None:
@@ -376,3 +432,38 @@ def test_estimate_updates_your_session_keeping_what_it_lacks() -> None:
     assert tracker.active == session(
         energy_kwh=3.27, rate_kw=6.55, billing_plan="PAYG", tariff="flat"
     )
+
+
+# (case, steps, seconds after T0 to ask at, own starts then)
+OWN_STARTS: list[tuple[str, list[Step], float, set[int]]] = [
+    ("running", [Step(CommandStarted("start", RIGHT_B, at(0)))], 30, {RIGHT_B}),
+    ("finished", own_start(), 30, {RIGHT_B}),
+    ("rejected", own_start(rejected=True), 30, set()),
+    ("too long ago", own_start(), WINDOW, set()),
+    (
+        "stopped since",
+        [
+            *own_start(),
+            Step(CommandStarted("stop", RIGHT_B, at(20)), 20),
+            Step(CommandFinished("stop", RIGHT_B, False, at(20)), 20),
+        ],
+        30,
+        set(),
+    ),
+    ("a stop running", [Step(CommandStarted("stop", RIGHT_B, at(0)))], 30, set()),
+    (
+        "running on one socket, finished on another",
+        [*own_start(LEFT_A), Step(CommandStarted("start", RIGHT_B, at(10)), 10)],
+        30,
+        {LEFT_A, RIGHT_B},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("steps", "seconds", "sockets"), [c[1:] for c in OWN_STARTS], ids=[c[0] for c in OWN_STARTS]
+)
+def test_own_starts(steps: list[Step], seconds: float, sockets: set[int]) -> None:
+    """Your start on a socket, running or recent and not rejected: its charging is yours."""
+    tracker, _ = run(steps)
+    assert tracker.own_starts(at(seconds)) == sockets

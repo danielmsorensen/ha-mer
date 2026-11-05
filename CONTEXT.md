@@ -52,8 +52,12 @@ The left socket has been available since your session ended.
 Someone else started using the left socket after it freed.
 _Avoid_: taken (blueprint wording for any socket)
 
+**Held back**:
+A free socket not to be offered since your session ended: free since before it ended, or the left socket until reused. Never while a session of yours runs.
+_Avoid_: excluded, skipped
+
 **Own start**:
-A start command of yours on a socket, recent and not rejected; its charging is expected to be your session.
+A start command of yours on a socket, running, or recent and not rejected; its charging is expected to be your session.
 
 **Session watch**:
 Repeatedly asking the portal for your session after an own start begins charging, until it appears.

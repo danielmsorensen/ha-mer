@@ -66,7 +66,7 @@ Each socket (often "Left" and "Right") adds:
 
 | Entity | Meaning |
 | --- | --- |
-| *Socket* status | The socket's status, whoever is using it. Attributes: `charger`, `socket`, `station_id`, `socket_id`, `start_button`, `my_session`, `max_power_kw`, `connector` |
+| *Socket* status | The socket's status, whoever is using it. Attributes: `charger`, `socket`, `station_id`, `socket_id`, `start_button`, `my_session`, `max_power_kw`, `connector`; `held_back` (free, but not offered since your last session ended: free since before it ended, or the socket you left until someone else has used it) and `own_start` (a start of yours there running, or in the last 10 minutes and not rejected) |
 | *Socket* price | Your tariff's price per kWh; billing plan, fixed price, per-minute rate and transaction fee as attributes |
 | *Socket* start charge | Starts a charge; greyed out unless the socket is free (or plugged in and waiting) and the portal allows you a start on it |
 
@@ -76,7 +76,7 @@ Each socket (often "Left" and "Right") adds:
 | --- | --- |
 | Available sockets | Free sockets on your chargers. Attributes: `available_sockets` (each with `charger`, `socket`, `station_id`, `socket_id`, `start_button`, in charger order), `total_sockets`, `chargers` |
 | Sockets in use | Sockets on your chargers in any in-use state |
-| Charging | On while you have an active session anywhere. Attributes `charger`, `socket`, `station_id` and `socket_id` say where it runs, or where your last session ran once it has ended, with `ended_at` and `socket_reused_at` (when someone else started using the socket you left) |
+| Charging | On while you have an active session anywhere. Attributes `charger`, `socket`, `station_id` and `socket_id` say where it runs, or where your last session ran once it has ended, with `ended_at` |
 | Active session | Where it is running, as *charger socket*, with ids as attributes |
 | Active session started, energy, cost, duration | As named; unavailable while not charging |
 | Active session charging rate | The portal's estimated rate in kW at the charger, refreshed with each meter reading (the car sees roughly 10% less) |
@@ -92,7 +92,7 @@ Diagnostic entities on the account device:
 | Live status | On while the portal's push channel is connected; `connected_since` attribute |
 | Last poll | Last successful poll; the attributes give the poll interval, whether the last poll succeeded, and its error |
 | Portal requests remaining | The portal's rate-limit headroom after the last request. Disabled by default: the portal stopped reporting it on 6 October 2026, so it shows unknown; it fills in again if that changes |
-| Last command | Outcome of the last start or stop, with charger, socket, method, times and any error |
+| Last command | Outcome of the last start or stop, with charger, socket (names and ids), method, times and any error |
 | Refresh now | Polls the portal immediately |
 
 Session durations are in hours. Nothing pushes them, so they change on each poll; for a
