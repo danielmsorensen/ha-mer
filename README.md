@@ -170,6 +170,8 @@ for an offer already showing.
 - The notification stays when tapped, and clears once you are charging or leave the
   zone. Coming back into the zone within 2 minutes of leaving isn't an arrival: phone
   locations often bounce across the zone's edge as you drive off.
+- Restarts, reloads and portal outages don't count: entities coming back from unavailable
+  aren't a charge starting, a socket freed or one taken.
 - **Preview:** choose **Run actions** from the automation's ⋮ menu. It sends what
   arriving would send right now, skipping the zone and charging checks. If nothing is
   free it sends **No Mer charger free** even when that option is off. Its Start button

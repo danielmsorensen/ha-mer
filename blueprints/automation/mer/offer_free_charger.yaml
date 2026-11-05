@@ -206,6 +206,8 @@ triggers:
     id: charging_started
     entity_id: !input charging
     to: "on"
+    # Back from a restart, reload or portal outage isn't a charge starting.
+    not_from: ["unavailable", "unknown"]
 
 variables:
   sockets: !input sockets
@@ -267,6 +269,15 @@ variables:
     title: !input none_title
     message: !input none_message
     data: "{{ delivery }}"
+
+conditions:
+  # A restart, reload or portal outage makes the socket sensors unavailable, without their
+  # attributes; going into that isn't a socket taken, nor coming back one freed. A socket
+  # whose own status is "unavailable" (out of service) keeps them, so it still counts.
+  - >-
+    {{ run not in ['freed', 'taken']
+       or (trigger.from_state.attributes.socket_id is defined
+           and trigger.to_state.attributes.socket_id is defined) }}
 
 actions:
   - choose:

@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.mer.const import DOMAIN
+from custom_components.mer.driivz.exceptions import ApiError
 from tests.conftest import make_config_entry
 from tests.fake_portal import FakePortal
 from tests.helpers import fast_commands, setup_integration
@@ -681,3 +682,64 @@ async def test_bouncing_back_into_the_zone_is_not_an_arrival(
     hass.states.async_set("person.driver", "Work", WORK)
     await hass.async_block_till_done()
     assert [n["message"] for n in sent] == ["clear_notification"]  # leaving; no offer
+
+
+async def blip_unavailable(hass: HomeAssistant, entry: MockConfigEntry, portal: FakePortal) -> None:
+    """A failed poll makes every entity unavailable, as a restart or reload does; then back."""
+    coordinator = entry.runtime_data
+    portal.fail("find_stations_by_ids", ApiError("DOWN"))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    portal.clear("find_stations_by_ids")
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+
+async def test_coming_back_from_unavailable_is_not_a_charge_starting(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
+) -> None:
+    """Seen live on 2026-11-05: each restart during a charge ran the "when charging" actions."""
+    hooked: list[ServiceCall] = []
+
+    async def hook(call: ServiceCall) -> None:
+        hooked.append(call)
+
+    hass.services.async_register("test", "charging_hook", hook)
+    portal.charge(11242)
+    await setup_blueprint(
+        hass, mock_config_entry, [11242], when_charging=[{"action": "test.charging_hook"}]
+    )
+    charging = "binary_sensor.mer_account_charging"
+    portal.fail("find_stations_by_ids", ApiError("DOWN"))
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(charging).state == "unavailable"
+    await blip_unavailable(hass, mock_config_entry, portal)
+    assert hass.states.get(charging).state == "on"
+    assert hooked == []
+
+
+async def test_coming_back_from_unavailable_changes_no_offer(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
+) -> None:
+    """Unavailable isn't taken, and back isn't freed: no rewrite, no second alert."""
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    await run_by_hand(hass)
+    await blip_unavailable(hass, mock_config_entry, portal)
+    assert len(sent) == 1
+
+
+async def test_a_charger_back_in_service_is_offered(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
+) -> None:
+    """The portal's own UNAVAILABLE status (out of service) is a real state: back is freed."""
+    portal.take(11243, status="UNAVAILABLE")
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    assert hass.states.get(socket_status_entity(hass, mock_config_entry.entry_id, 11243)).state == (
+        "unavailable"
+    )
+    portal.free(11243)
+    await mock_config_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    (offer,) = sent
+    assert offer["message"] == "Riverside - Bay 3 - Charger A"

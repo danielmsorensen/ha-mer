@@ -639,3 +639,17 @@ the update that has the socket taken. `trigger.from_state` holds the value befor
 - "Already free" is tracked by the integration: free in the snapshot before the end and since.
   A socket's sensor going unavailable no longer restarts its free spell.
 - After a restart nothing is held back; the blueprint's `last_changed` comparison did the same.
+
+## 2026-11-05: coming back from unavailable is not a change
+
+**What happened.** Read from a live instance. Two restarts during a charge turned Charging
+`unavailable → on`; each ran the blueprint's "When charging starts" actions.
+
+**Decision.** The blueprint ignores entity-unavailable transitions:
+- Charging started: `not_from` unavailable/unknown.
+- Freed/taken: skipped when either side lacks `socket_id`. HA drops an unavailable entity's
+  own attributes; a socket whose portal status is `UNAVAILABLE` (out of service) keeps them,
+  so a charger back in service is still freed.
+
+**Cost if wrong.** A socket freed, or a charge started, while Home Assistant is down isn't
+announced until its next change.
