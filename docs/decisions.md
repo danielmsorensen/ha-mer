@@ -556,3 +556,32 @@ its result from `self.data` could overwrite a notify toggle landing mid-poll, th
 
 **Cost if wrong.** Entity ids, unique ids, attribute names and values unchanged; only the
 status sensor's attribute order moved. Reverting is internal.
+
+## 2026-11-05: one commands module owns start/stop and its outcome
+
+**Decision.**
+- `commands.Commands`: `start(station, socket, status_before)` / `stop(station, socket)` →
+  `Outcome` (result, method, message, error, capabilities read). No Home Assistant imports.
+  Inside: start method from capabilities, send, wait, pure outcome rules.
+- Waits on a `Changes` port: `pushed(timeout)` (a view after a pushed change, else None) and
+  `poll()` (fetch, publish, view). Policy (push first, rate floor, failed poll skips) in the
+  module; mechanics in the coordinator's adapter. The Driivz client is the portal port.
+- Capability rules on `SocketCapabilities`: `start_method`, `start_refusal`,
+  `refuses_start_whatever_the_state`. `MerData.start_allowed` delegates.
+- `Cadence(interval_seconds, max_polls)` injected; `commands.cadence` public. `COMMAND_*` in
+  const.py gone; `RATE_LIMIT_FLOOR` lives in commands.py. Unconfirmed message's seconds come
+  from the cadence.
+- Coordinator keeps the HA side: tracker started/finished, merges capabilities read, records
+  Last command, fires the event, raises `DriivzError` / `CommandUnconfirmed`.
+
+**Why.** `_run_command` took closures (`done`, `send`, `method_of` over a `nonlocal`), and
+`_await_outcome` mixed push-vs-poll, the floor and publishing. Capability rules were split
+between start and availability. Tests patched constants and drove presses for every outcome;
+outcomes are now table tests of the module, buttons test only the error mapping.
+
+**Consequences.**
+- Outcomes, methods, messages and the event unchanged (ADR 09-24, 09-28, 10-05).
+- Capabilities read at a press are kept when the command finishes, not before sending. A
+  refused start's are kept at once, as before.
+
+**Cost if wrong.** Internal only; reverting restores the closures in the coordinator.
