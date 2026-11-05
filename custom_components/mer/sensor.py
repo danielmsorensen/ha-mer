@@ -19,7 +19,6 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
-from .const import DOMAIN
 from .coordinator import (
     COMMAND_RESULTS,
     ActiveSession,
@@ -29,12 +28,16 @@ from .coordinator import (
 )
 from .driivz.models import Socket, Station, Transaction
 from .entity import (
+    START_CHARGE_KEY,
     STATUS_OPTIONS,
     MerAccountEntity,
     MerSocketEntity,
     MerStationEntity,
-    session_place,
-    socket_label,
+    StartButton,
+    registry_start_button,
+    session_view,
+    socket_unique_id,
+    socket_view,
     status_option,
 )
 
@@ -53,10 +56,12 @@ class MerSocketSensorDescription(SensorEntityDescription):
 
     value_fn: Callable[[Socket], StateType]
     unit_fn: Callable[[Socket], str | None] | None = None
-    attributes_fn: Callable[[MerSocketSensor, Socket], dict[str, Any]] | None = None
+    attributes_fn: Callable[[MerData, Station, Socket, StartButton], dict[str, Any]] | None = None
 
 
-def _socket_status_attributes(entity: MerSocketSensor, socket: Socket) -> dict[str, Any]:
+def _socket_status_attributes(
+    data: MerData, station: Station, socket: Socket, start_button: StartButton
+) -> dict[str, Any]:
     """Name the socket, point at its start button, and say whether it is your session.
 
     The status alone says "charging" for anyone's car; `my_session` says it is yours.
@@ -64,25 +69,19 @@ def _socket_status_attributes(entity: MerSocketSensor, socket: Socket) -> dict[s
     sensor alone, without knowing how entities are named. `held_back` and `own_start` are
     what the free charger blueprint needs from your session; see CONTEXT.md.
     """
-    station = entity.station
-    data = entity.coordinator.data
     return {
-        "charger": station.display_name if station else None,
-        "socket": socket_label(socket),
-        "start_button": er.async_get(entity.hass).async_get_entity_id(
-            "button", DOMAIN, f"{entity.entry_id}_socket_{socket.id}_start_charge"
-        ),
+        **socket_view(station, socket, start_button),
         "my_session": data.session_on_socket(socket.id) is not None,
         "held_back": data.held_back(socket.id),
         "own_start": socket.id in data.own_starts,
-        "station_id": entity.station_id,
-        "socket_id": socket.id,
         "max_power_kw": socket.max_power_kw,
         "connector": socket.socket_type,
     }
 
 
-def _socket_price_attributes(_entity: MerSocketSensor, socket: Socket) -> dict[str, Any]:
+def _socket_price_attributes(
+    _data: MerData, _station: Station, socket: Socket, _start_button: StartButton
+) -> dict[str, Any]:
     """The rest of the driver's tariff on this socket, beside the per-kWh price."""
     if not socket.prices:
         return {}
@@ -140,22 +139,31 @@ SOCKET_SENSORS: tuple[MerSocketSensorDescription, ...] = (
 
 @dataclass(frozen=True, kw_only=True)
 class MerAccountSensorDescription(SensorEntityDescription):
-    """Sensor reading coordinator-wide data."""
+    """Sensor reading the account-wide snapshot."""
 
-    value_fn: Callable[[MerCoordinator, MerData], StateType | datetime]
+    value_fn: Callable[[MerData], StateType | datetime]
     unit_fn: Callable[[MerData], str | None] | None = None
-    attributes_fn: Callable[[MerCoordinator, MerData], dict[str, Any]] | None = None
+    attributes_fn: Callable[[MerData, StartButton], dict[str, Any]] | None = None
     # Describes the active session: unavailable, not unknown, while there is none.
     requires_session: bool = False
-    # Stays available when polls fail: it is how you find out that they are failing.
-    always_available: bool = False
 
 
-def _count_sockets(coordinator: MerCoordinator, predicate: Callable[[Socket], bool]) -> int:
+@dataclass(frozen=True, kw_only=True)
+class MerCoordinatorSensorDescription(SensorEntityDescription):
+    """Sensor reporting on the coordinator itself, not the portal's state.
+
+    Stays available when polls fail: it is how you find out that they are failing.
+    """
+
+    value_fn: Callable[[MerCoordinator], StateType | datetime]
+    attributes_fn: Callable[[MerCoordinator], dict[str, Any]] | None = None
+
+
+def _count_sockets(data: MerData, predicate: Callable[[Socket], bool]) -> int:
     """Count sockets across every configured charger that satisfy the predicate."""
     return sum(
         1
-        for station in coordinator.configured_stations()
+        for station in data.configured_stations()
         for socket in station.sockets
         if predicate(socket)
     )
@@ -163,31 +171,20 @@ def _count_sockets(coordinator: MerCoordinator, predicate: Callable[[Socket], bo
 
 # Aggregates over the chargers you added, on the account device: the "is anything free
 # at work" view this integration exists for.
-def _free_sockets(coordinator: MerCoordinator, _data: MerData) -> dict[str, Any]:
+def _free_sockets(data: MerData, start_button: StartButton) -> dict[str, Any]:
     """Every free socket, in charger order, with the entity id of its start button.
 
     Enough for an automation to name the free sockets or press the first one's
     button without knowing any entity names, plus the totals the count is out of.
     """
-    registry = er.async_get(coordinator.hass)
-    entry_id = coordinator.config_entry.entry_id
-    stations = coordinator.configured_stations()
-    free: list[dict[str, Any]] = [
-        {
-            "charger": station.display_name,
-            "socket": socket_label(socket),
-            "station_id": station.id,
-            "socket_id": socket.id,
-            "start_button": registry.async_get_entity_id(
-                "button", DOMAIN, f"{entry_id}_socket_{socket.id}_start_charge"
-            ),
-        }
-        for station in stations
-        for socket in station.sockets
-        if socket.is_available
-    ]
+    stations = data.configured_stations()
     return {
-        "available_sockets": free,
+        "available_sockets": [
+            socket_view(station, socket, start_button)
+            for station in stations
+            for socket in station.sockets
+            if socket.is_available
+        ],
         "total_sockets": sum(len(station.sockets) for station in stations),
         "chargers": len(stations),
     }
@@ -198,14 +195,14 @@ AGGREGATE_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         key="available_sockets",
         translation_key="account_available_sockets",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda coordinator, _d: _count_sockets(coordinator, lambda s: s.is_available),
+        value_fn=lambda data: _count_sockets(data, lambda s: s.is_available),
         attributes_fn=_free_sockets,
     ),
     MerAccountSensorDescription(
         key="sockets_in_use",
         translation_key="account_sockets_in_use",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda coordinator, _d: _count_sockets(coordinator, lambda s: s.is_in_use),
+        value_fn=lambda data: _count_sockets(data, lambda s: s.is_in_use),
     ),
 )
 
@@ -218,16 +215,16 @@ class MerStationSessionSensorDescription(SensorEntityDescription):
     unit_fn: Callable[[ActiveSession | None, MerData], str | None] | None = None
 
 
-def _active_session_name(coordinator: MerCoordinator, data: MerData) -> str | None:
+def _active_session_name(data: MerData) -> str | None:
     """Where the session is running, as "<charger> <socket>"."""
     if data.active is None:
         return None
-    place = session_place(coordinator, data.active)
+    place = session_view(data, data.active)
     return f"{place['charger']} {place['socket']}" if place["charger"] else place["socket"]
 
 
-def _active_attributes(coordinator: MerCoordinator, data: MerData) -> dict[str, Any]:
-    return session_place(coordinator, data.active) if data.active else {}
+def _active_attributes(data: MerData, _start_button: StartButton) -> dict[str, Any]:
+    return session_view(data, data.active) if data.active else {}
 
 
 def _last(data: MerData) -> Transaction | None:
@@ -242,13 +239,8 @@ def _currency(data: MerData) -> str:
     return "GBP"
 
 
-def _active_session_for(data: MerData, station_id: int) -> ActiveSession | None:
-    """Return your session running on this station, if any."""
-    return data.session_on_station(station_id)
-
-
 # The account sensors read `data.active` unconditionally; the charger-device sensors read
-# `_active_session_for(data, station_id)`, which is `None` unless the session belongs to that
+# `data.session_on_station(station_id)`, which is `None` unless the session belongs to that
 # station. Both variants then share these five functions to pull a value out of whichever
 # session (or `None`) they were handed, so the two sensor families never duplicate the logic
 # for what a field means -- only how the session is looked up differs.
@@ -313,7 +305,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         requires_session=True,
         translation_key="active_started",
         device_class=SensorDeviceClass.TIMESTAMP,
-        value_fn=lambda _c, data: _session_started(data.active),
+        value_fn=lambda data: _session_started(data.active),
     ),
     MerAccountSensorDescription(
         key="active_energy",
@@ -322,7 +314,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=2,
-        value_fn=lambda _c, data: _session_energy(data.active),
+        value_fn=lambda data: _session_energy(data.active),
     ),
     MerAccountSensorDescription(
         key="active_cost",
@@ -330,7 +322,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         translation_key="active_cost",
         device_class=SensorDeviceClass.MONETARY,
         suggested_display_precision=2,
-        value_fn=lambda _c, data: _session_cost(data.active),
+        value_fn=lambda data: _session_cost(data.active),
         unit_fn=lambda data: _session_currency(data.active, data),
     ),
     MerAccountSensorDescription(
@@ -342,16 +334,16 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         # Shown in hours by default; HA converts, and users can still pick another unit.
         # No display precision, so the frontend's duration formatting shows h and min.
         suggested_unit_of_measurement=UnitOfTime.HOURS,
-        value_fn=lambda _c, data: _session_duration(data.active),
+        value_fn=lambda data: _session_duration(data.active),
     ),
     MerAccountSensorDescription(
         key="active_price",
         requires_session=True,
         translation_key="active_price",
         suggested_display_precision=2,
-        value_fn=lambda _c, data: _session_price_per_kwh(data.active),
+        value_fn=lambda data: _session_price_per_kwh(data.active),
         unit_fn=lambda data: _session_price_unit(data.active, data),
-        attributes_fn=lambda _c, data: _session_tariff_attributes(data.active),
+        attributes_fn=lambda data, _b: _session_tariff_attributes(data.active),
     ),
     MerAccountSensorDescription(
         key="active_rate",
@@ -360,7 +352,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         suggested_display_precision=2,
-        value_fn=lambda _c, data: _session_rate(data.active),
+        value_fn=lambda data: _session_rate(data.active),
     ),
     MerAccountSensorDescription(
         key="last_energy",
@@ -368,22 +360,22 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=2,
-        value_fn=lambda _c, data: _last(data).energy_kwh if _last(data) else None,
+        value_fn=lambda data: _last(data).energy_kwh if _last(data) else None,
     ),
     MerAccountSensorDescription(
         key="last_cost",
         translation_key="last_cost",
         device_class=SensorDeviceClass.MONETARY,
         suggested_display_precision=2,
-        value_fn=lambda _c, data: _last(data).cost if _last(data) else None,
+        value_fn=lambda data: _last(data).cost if _last(data) else None,
         unit_fn=_currency,
     ),
     MerAccountSensorDescription(
         key="last_started",
         translation_key="last_started",
         device_class=SensorDeviceClass.TIMESTAMP,
-        value_fn=lambda _c, data: _last(data).started_at if _last(data) else None,
-        attributes_fn=lambda _c, data: {"station": _last(data).display_name} if _last(data) else {},
+        value_fn=lambda data: _last(data).started_at if _last(data) else None,
+        attributes_fn=lambda data, _b: {"station": _last(data).display_name} if _last(data) else {},
     ),
     MerAccountSensorDescription(
         key="last_command",
@@ -391,8 +383,8 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         device_class=SensorDeviceClass.ENUM,
         entity_category=EntityCategory.DIAGNOSTIC,
         options=list(COMMAND_RESULTS),
-        value_fn=lambda _c, data: data.last_command.result if data.last_command else None,
-        attributes_fn=lambda _c, data: (
+        value_fn=lambda data: data.last_command.result if data.last_command else None,
+        attributes_fn=lambda data, _b: (
             {
                 "command": data.last_command.command,
                 "method": data.last_command.method,
@@ -409,13 +401,24 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         ),
     ),
     MerAccountSensorDescription(
+        key="wallet_balance",
+        translation_key="wallet_balance",
+        device_class=SensorDeviceClass.MONETARY,
+        suggested_display_precision=2,
+        value_fn=lambda data: data.wallet.balance if data.wallet else None,
+        unit_fn=_currency,
+    ),
+)
+
+
+COORDINATOR_SENSORS: tuple[MerCoordinatorSensorDescription, ...] = (
+    MerCoordinatorSensorDescription(
         key="last_poll",
         translation_key="last_poll",
         device_class=SensorDeviceClass.TIMESTAMP,
         entity_category=EntityCategory.DIAGNOSTIC,
-        always_available=True,
-        value_fn=lambda coordinator, _d: coordinator.last_poll_at,
-        attributes_fn=lambda coordinator, _d: {
+        value_fn=lambda coordinator: coordinator.data.last_poll_at,
+        attributes_fn=lambda coordinator: {
             "poll_interval_seconds": (
                 int(coordinator.update_interval.total_seconds())
                 if coordinator.update_interval
@@ -429,7 +432,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
             ),
         },
     ),
-    MerAccountSensorDescription(
+    MerCoordinatorSensorDescription(
         key="requests_remaining",
         translation_key="requests_remaining",
         state_class=SensorStateClass.MEASUREMENT,
@@ -437,16 +440,7 @@ ACCOUNT_SENSORS: tuple[MerAccountSensorDescription, ...] = (
         # The portal stopped sending the header on 2026-10-06; off for new installs so it
         # doesn't sit at "unknown". It fills in again if the header comes back.
         entity_registry_enabled_default=False,
-        always_available=True,
-        value_fn=lambda coordinator, _d: coordinator.client.rate_limit_remaining,
-    ),
-    MerAccountSensorDescription(
-        key="wallet_balance",
-        translation_key="wallet_balance",
-        device_class=SensorDeviceClass.MONETARY,
-        suggested_display_precision=2,
-        value_fn=lambda _c, data: data.wallet.balance if data.wallet else None,
-        unit_fn=_currency,
+        value_fn=lambda coordinator: coordinator.client.rate_limit_remaining,
     ),
 )
 
@@ -517,8 +511,16 @@ async def async_setup_entry(
             )
         async_add_entities(entities, config_subentry_id=subentry.subentry_id)
     async_add_entities(
-        MerAccountSensor(coordinator, description)
-        for description in (*AGGREGATE_SENSORS, *ACCOUNT_SENSORS)
+        [
+            *(
+                MerAccountSensor(coordinator, description)
+                for description in (*AGGREGATE_SENSORS, *ACCOUNT_SENSORS)
+            ),
+            *(
+                MerCoordinatorSensor(coordinator, description)
+                for description in COORDINATOR_SENSORS
+            ),
+        ]
     )
 
 
@@ -559,7 +561,7 @@ class MerStationSessionSensor(MerStationEntity, SensorEntity):
         super().__init__(coordinator, station_id, description)
 
     def _session(self) -> ActiveSession | None:
-        return _active_session_for(self.coordinator.data, self.station_id)
+        return self.coordinator.data.session_on_station(self.station_id)
 
     @property
     def available(self) -> bool:
@@ -594,6 +596,7 @@ class MerSocketSensor(MerSocketEntity, SensorEntity):
         description: MerSocketSensorDescription,
     ) -> None:
         super().__init__(coordinator, station_id, socket_id, description)
+        self._start_button = registry_start_button(coordinator.hass, self.entry_id)
 
     async def async_added_to_hass(self) -> None:
         """Rewrite the status's `start_button` once the button is registered or renamed.
@@ -606,7 +609,7 @@ class MerSocketSensor(MerSocketEntity, SensorEntity):
         await super().async_added_to_hass()
         if self.entity_description.attributes_fn is not _socket_status_attributes:
             return
-        button_unique_id = f"{self.entry_id}_socket_{self.socket_id}_start_charge"
+        button_unique_id = socket_unique_id(self.entry_id, self.socket_id, START_CHARGE_KEY)
         registry = er.async_get(self.hass)
 
         @callback
@@ -640,10 +643,12 @@ class MerSocketSensor(MerSocketEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        socket = self.socket
-        if self.entity_description.attributes_fn is None or socket is None:
+        station, socket = self.station, self.socket
+        if self.entity_description.attributes_fn is None or station is None or socket is None:
             return None
-        return self.entity_description.attributes_fn(self, socket)
+        return self.entity_description.attributes_fn(
+            self.coordinator.data, station, socket, self._start_button
+        )
 
 
 class MerAccountSensor(MerAccountEntity, SensorEntity):
@@ -651,10 +656,14 @@ class MerAccountSensor(MerAccountEntity, SensorEntity):
 
     entity_description: MerAccountSensorDescription
 
+    def __init__(
+        self, coordinator: MerCoordinator, description: MerAccountSensorDescription
+    ) -> None:
+        super().__init__(coordinator, description)
+        self._start_button = registry_start_button(coordinator.hass, self.entry_id)
+
     @property
     def available(self) -> bool:
-        if self.entity_description.always_available:
-            return self.coordinator.data is not None
         if not super().available:
             return False
         return (
@@ -663,7 +672,7 @@ class MerAccountSensor(MerAccountEntity, SensorEntity):
 
     @property
     def native_value(self) -> StateType | datetime:
-        return self.entity_description.value_fn(self.coordinator, self.coordinator.data)
+        return self.entity_description.value_fn(self.coordinator.data)
 
     @property
     def native_unit_of_measurement(self) -> str | None:
@@ -672,7 +681,27 @@ class MerAccountSensor(MerAccountEntity, SensorEntity):
         return self.entity_description.native_unit_of_measurement
 
     @property
-    def extra_state_attributes(self) -> dict[str, str] | None:
+    def extra_state_attributes(self) -> dict[str, Any] | None:
         if self.entity_description.attributes_fn is None:
             return None
-        return self.entity_description.attributes_fn(self.coordinator, self.coordinator.data)
+        return self.entity_description.attributes_fn(self.coordinator.data, self._start_button)
+
+
+class MerCoordinatorSensor(MerAccountEntity, SensorEntity):
+    """A diagnostic sensor about the coordinator; available whenever there is data."""
+
+    entity_description: MerCoordinatorSensorDescription
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.data is not None
+
+    @property
+    def native_value(self) -> StateType | datetime:
+        return self.entity_description.value_fn(self.coordinator)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.entity_description.attributes_fn is None:
+            return None
+        return self.entity_description.attributes_fn(self.coordinator)

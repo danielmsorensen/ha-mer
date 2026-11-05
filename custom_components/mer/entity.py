@@ -1,20 +1,29 @@
-"""Base entities and device helpers for Mer."""
+"""Base entities, device helpers and the views entities compose from a MerData snapshot."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import ActiveSession, MerCoordinator
+from .coordinator import ActiveSession, MerCoordinator, MerData
 from .driivz.const import STATUS_UNKNOWN, STATUSES
 from .driivz.models import Socket, Station, clean_caption
 
 STATUS_OPTIONS: list[str] = [status.lower() for status in STATUSES]
+
+# The start button's entity description key; part of its unique id.
+START_CHARGE_KEY = "start_charge"
+
+# Socket id -> entity id of its start button, or None if not registered (yet).
+type StartButton = Callable[[int], str | None]
 
 
 def status_option(status: str | None) -> str:
@@ -32,15 +41,39 @@ def socket_label(socket: Socket) -> str:
     return f"Socket {socket.id}"
 
 
-def session_place(coordinator: MerCoordinator, session: ActiveSession) -> dict[str, Any]:
+def socket_unique_id(entry_id: str, socket_id: int, key: str) -> str:
+    """Unique id of a socket's entity. Users' automations depend on it: never change."""
+    return f"{entry_id}_socket_{socket_id}_{key}"
+
+
+def registry_start_button(hass: HomeAssistant, entry_id: str) -> StartButton:
+    """Look start buttons up in the entity registry."""
+    registry = er.async_get(hass)
+    return lambda socket_id: registry.async_get_entity_id(
+        "button", DOMAIN, socket_unique_id(entry_id, socket_id, START_CHARGE_KEY)
+    )
+
+
+def socket_view(station: Station, socket: Socket, start_button: StartButton) -> dict[str, Any]:
+    """A socket as automations see it: names, ids and its start button."""
+    return {
+        "charger": station.display_name,
+        "socket": socket_label(socket),
+        "station_id": station.id,
+        "socket_id": socket.id,
+        "start_button": start_button(socket.id),
+    }
+
+
+def session_view(data: MerData, session: ActiveSession) -> dict[str, Any]:
     """Where a session runs: the charger and socket names, and their ids."""
     charger = clean_caption(session.station_caption) if session.station_caption else None
     socket = None
     if session.station_id is not None:
-        station = coordinator.get_station(session.station_id)
+        station = data.station(session.station_id)
         if charger is None and station is not None:
             charger = station.display_name
-        socket = coordinator.get_socket(session.station_id, session.socket_id)
+        socket = data.socket(session.station_id, session.socket_id)
     return {
         "charger": charger,
         "socket": socket_label(socket)
@@ -91,7 +124,7 @@ class MerStationEntity(MerEntity):
         super().__init__(coordinator, description)
         self.station_id = station_id
         self._attr_unique_id = f"{self.entry_id}_station_{station_id}_{description.key}"
-        station = coordinator.get_station(station_id)
+        station = coordinator.data.station(station_id)
         account_device = dr.async_get(coordinator.hass).async_get_device_by_identifier(
             self.account_identifier(), self.entry_id
         )
@@ -108,7 +141,7 @@ class MerStationEntity(MerEntity):
 
     @property
     def station(self) -> Station | None:
-        return self.coordinator.get_station(self.station_id)
+        return self.coordinator.data.station(self.station_id)
 
     @property
     def available(self) -> bool:
@@ -127,14 +160,14 @@ class MerSocketEntity(MerStationEntity):
     ) -> None:
         super().__init__(coordinator, station_id, description)
         self.socket_id = socket_id
-        self._attr_unique_id = f"{self.entry_id}_socket_{socket_id}_{description.key}"
-        socket = coordinator.get_socket(station_id, socket_id)
+        self._attr_unique_id = socket_unique_id(self.entry_id, socket_id, description.key)
+        socket = coordinator.data.socket(station_id, socket_id)
         label = socket_label(socket) if socket else f"Socket {socket_id}"
         self._attr_translation_placeholders = {"socket": label}
 
     @property
     def socket(self) -> Socket | None:
-        return self.coordinator.get_socket(self.station_id, self.socket_id)
+        return self.coordinator.data.socket(self.station_id, self.socket_id)
 
     @property
     def available(self) -> bool:

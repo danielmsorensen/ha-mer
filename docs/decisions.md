@@ -534,6 +534,31 @@ now table tests of the tracker; a few coordinator tests prove the intents run.
   a session found by a poll it triggered. Intents still run after publishing, so stations
   aren't overwritten either.
 
+## 2026-11-05: entities read one snapshot; views composed once
+
+**Decision.**
+- `MerData` is the only state entities read, frozen. It now also holds capabilities, live-status
+  connection, last poll and configured order, plus the lookups (`station`, `socket`,
+  `configured_stations`, `start_allowed`).
+- The coordinator keeps one private field per item and builds `MerData` in `_snapshot()` only.
+  Every change is a field write then `_publish()`. No `replace(self.data, ...)`, no mirrors.
+- `socket_view` / `session_view` (entity.py) build the names/ids/start-button dicts. Socket
+  unique-id format defined once (`socket_unique_id`).
+- `active` and `last_session_end` come from the session tracker (entry above) via `_snapshot()`.
+- Stay off the snapshot: `last_push_at` (diagnostics, no publish), HA's `last_update_success`/`last_exception`/`update_interval`, and
+  `client.rate_limit_remaining`. "Last poll" attributes and "Requests remaining" read the coordinator.
+
+**Why.** State was split between `MerData` and coordinator attributes, mirrored state was written
+twice, capability reads republished unchanged data, and the socket dict was built four ways.
+Attribute logic is now pure functions of a snapshot and tested without Home Assistant.
+
+**Rejected.** `MerData` as the only store (`replace(self.data, ...)` everywhere): a poll building
+its result from `self.data` could overwrite a notify toggle landing mid-poll, the race
+`_notify_lock` exists for.
+
+**Cost if wrong.** Entity ids, unique ids, attribute names and values unchanged; only the
+status sensor's attribute order moved. Reverting is internal.
+
 ## 2026-11-05: socket status sensors say what the blueprint used to work out
 
 **Decision.** Socket status sensors gain `held_back` and `own_start` (terms in CONTEXT.md), from

@@ -16,31 +16,32 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import MerConfigEntry, MerCoordinator, MerData
-from .entity import MerAccountEntity, MerStationEntity, session_place, socket_label
+from .entity import MerAccountEntity, MerStationEntity, session_view, socket_label
 
 
 @dataclass(frozen=True, kw_only=True)
 class MerAccountBinaryDescription(BinarySensorEntityDescription):
-    is_on_fn: Callable[[MerCoordinator, MerData], bool]
-    attributes_fn: Callable[[MerCoordinator, MerData], dict[str, Any]] | None = None
+    is_on_fn: Callable[[MerData], bool]
+    attributes_fn: Callable[[MerData], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
 class MerStationBinaryDescription(BinarySensorEntityDescription):
     is_on_fn: Callable[[MerData, int], bool]
+    attributes_fn: Callable[[MerData, int], dict[str, Any]] | None = None
 
 
-def _charging_attributes(coordinator: MerCoordinator, data: MerData) -> dict[str, Any]:
+def _charging_attributes(data: MerData) -> dict[str, Any]:
     """Where your session is running; once it ends, where it ran and when it ended.
 
     The end is the moment the integration saw it; after a restart, the charge history's last
     session stands in (without its socket, which the history does not record).
     """
     if data.active is not None:
-        return {**session_place(coordinator, data.active), "ended_at": None}
+        return {**session_view(data, data.active), "ended_at": None}
     ended = data.last_session_end
     if ended is not None:
-        return {**session_place(coordinator, ended.session), "ended_at": ended.ended_at.isoformat()}
+        return {**session_view(data, ended.session), "ended_at": ended.ended_at.isoformat()}
     last = data.last_transaction
     return {
         "charger": last.display_name if last else None,
@@ -51,13 +52,22 @@ def _charging_attributes(coordinator: MerCoordinator, data: MerData) -> dict[str
     }
 
 
+def _session_here_attributes(data: MerData, station_id: int) -> dict[str, Any]:
+    """Which of this charger's sockets your session is on."""
+    active = data.session_on_station(station_id)
+    if active is None:
+        return {"socket": None}
+    socket = data.socket(station_id, active.socket_id)
+    return {"socket": socket_label(socket) if socket else active.socket_name}
+
+
 ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
     MerAccountBinaryDescription(
         key="charging",
         translation_key="account_charging",
         device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
-        is_on_fn=lambda _c, data: data.active is not None,
-        attributes_fn=lambda coordinator, data: _charging_attributes(coordinator, data),
+        is_on_fn=lambda data: data.active is not None,
+        attributes_fn=_charging_attributes,
     ),
     # Whether the portal's push channel is connected. It carries charger and socket
     # status and session estimates the moment they change; everything else is polled.
@@ -67,12 +77,10 @@ ACCOUNT_BINARY_SENSORS: tuple[MerAccountBinaryDescription, ...] = (
         translation_key="account_live_status",
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
-        is_on_fn=lambda coordinator, _d: coordinator.push_connected,
-        attributes_fn=lambda coordinator, _d: {
+        is_on_fn=lambda data: data.push_connected,
+        attributes_fn=lambda data: {
             "connected_since": (
-                coordinator.push_connected_since.isoformat()
-                if coordinator.push_connected_since
-                else None
+                data.push_connected_since.isoformat() if data.push_connected_since else None
             ),
         },
     ),
@@ -84,6 +92,7 @@ STATION_BINARY_SENSORS: tuple[MerStationBinaryDescription, ...] = (
         translation_key="station_session_here",
         device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
         is_on_fn=lambda data, station_id: data.session_on_station(station_id) is not None,
+        attributes_fn=_session_here_attributes,
     ),
 )
 
@@ -107,13 +116,13 @@ class MerAccountBinarySensor(MerAccountEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
-        return self.entity_description.is_on_fn(self.coordinator, self.coordinator.data)
+        return self.entity_description.is_on_fn(self.coordinator.data)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         if self.entity_description.attributes_fn is None:
             return None
-        return self.entity_description.attributes_fn(self.coordinator, self.coordinator.data)
+        return self.entity_description.attributes_fn(self.coordinator.data)
 
 
 class MerStationBinarySensor(MerStationEntity, BinarySensorEntity):
@@ -135,9 +144,6 @@ class MerStationBinarySensor(MerStationEntity, BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Which of this charger's sockets your session is on."""
-        active = self.coordinator.data.session_on_station(self.station_id)
-        if active is None:
-            return {"socket": None}
-        socket = self.coordinator.get_socket(self.station_id, active.socket_id)
-        return {"socket": socket_label(socket) if socket else active.socket_name}
+        if self.entity_description.attributes_fn is None:
+            return None
+        return self.entity_description.attributes_fn(self.coordinator.data, self.station_id)
