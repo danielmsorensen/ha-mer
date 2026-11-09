@@ -423,6 +423,12 @@ actions:
       # ---- Left the zone: the offer is moot -----------------------------------------
       - conditions:
           - "{{ run == 'leave' }}"
+          # Out of the zone within 2 minutes of entering it is the location bouncing at
+          # the zone's edge, not leaving (seen live on 2026-11-09, 10 ms after arriving,
+          # when it cleared the arrival's notification).
+          - >-
+            {{ trigger.from_state is none
+               or now() - trigger.from_state.last_changed > timedelta(minutes=2) }}
         sequence:
           - action: "{{ notify_service }}"
             data:

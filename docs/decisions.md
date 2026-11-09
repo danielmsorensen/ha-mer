@@ -666,3 +666,15 @@ session (`NOT_AN_END`). Polls, and a later `FINISHING`/`AVAILABLE` push, still d
 
 **Cost if wrong.** A session that a fault really ends shows as charging until the next poll
 (up to the poll interval).
+
+## 2026-11-09: a bounce on arrival isn't a leave
+
+**What happened.** Read from a live instance. Arriving, the phone reported in the zone, out
+10 ms later, and in again 11 s later. The arrival sent "No Mer charger free"; the "leave"
+cleared it; the re-entry fell in the 2-minute bounce window, so nothing replaced it.
+
+**Decision.** The bounce rule is symmetric: a leave within 2 minutes of entering is ignored,
+as an arrival within 2 minutes of leaving already was.
+
+**Cost if wrong.** Driving in and out within 2 minutes leaves the notification showing
+until the next leave.

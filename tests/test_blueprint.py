@@ -102,7 +102,8 @@ async def setup_blueprint(
 async def leave_and_arrive(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory, tracker: str = "person.driver"
 ) -> None:
-    """Leave the zone and come back after the 2-minute bounce window."""
+    """Leave the zone and come back, each after the 2-minute bounce window."""
+    freezer.tick(timedelta(minutes=3))
     hass.states.async_set(tracker, "not_home", AWAY)
     await hass.async_block_till_done()
     freezer.tick(timedelta(minutes=3))
@@ -157,6 +158,7 @@ async def test_socket_freeing_up_only_notifies_in_the_zone(
     sent = await setup_blueprint(hass, mock_config_entry, [11243])
     coordinator = mock_config_entry.runtime_data
 
+    freezer.tick(timedelta(minutes=3))
     hass.states.async_set("person.driver", "not_home", AWAY)
     await hass.async_block_till_done()
     assert [n["message"] for n in sent] == ["clear_notification"]  # leaving clears it
@@ -676,12 +678,37 @@ async def test_bouncing_back_into_the_zone_is_not_an_arrival(
     """Seen live on 2026-11-02: leaving after a stop, the location bounced back into the
     zone for 10 s and the "arrival" offered the socket just unplugged."""
     sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    freezer.tick(timedelta(minutes=3))
     hass.states.async_set("person.driver", "not_home", AWAY)
     await hass.async_block_till_done()
     freezer.tick(timedelta(seconds=10))
     hass.states.async_set("person.driver", "Work", WORK)
     await hass.async_block_till_done()
     assert [n["message"] for n in sent] == ["clear_notification"]  # leaving; no offer
+
+
+async def test_bouncing_out_of_the_zone_on_arrival_keeps_the_notification(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    portal: FakePortal,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Seen live on 2026-11-09: arriving, the phone reported in, out 10 ms later, and back in
+    11 s later. The "leave" cleared the arrival notification; the re-entry was a bounce."""
+    portal.take(11241, 11242, 11243, 11244)
+    sent = await setup_blueprint(hass, mock_config_entry, [11243])
+    hass.states.async_set("person.driver", "not_home", AWAY)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(hours=12))
+    sent.clear()
+    hass.states.async_set("person.driver", "Work", WORK)
+    await hass.async_block_till_done()
+    hass.states.async_set("person.driver", "not_home", AWAY)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(seconds=11))
+    hass.states.async_set("person.driver", "Work", WORK)
+    await hass.async_block_till_done()
+    assert [n["title"] for n in sent] == ["No Mer charger free"]  # not cleared
 
 
 async def blip_unavailable(hass: HomeAssistant, entry: MockConfigEntry, portal: FakePortal) -> None:

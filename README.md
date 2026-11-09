@@ -166,8 +166,8 @@ for an offer already showing.
   confirmed it yet) or **Couldn't start** with the reason. If the socket has been taken it
   says **Too late**.
 - The notification stays when tapped, and clears once you are charging or leave the
-  zone. Coming back into the zone within 2 minutes of leaving isn't an arrival: phone
-  locations often bounce across the zone's edge as you drive off.
+  zone. Crossing the zone's edge within 2 minutes of the last crossing isn't an arrival
+  or a leave: phone locations often bounce across it as you drive in or off.
 - Restarts, reloads and portal outages don't count: entities coming back from unavailable
   aren't a charge starting, a socket freed or one taken.
 - **Preview:** choose **Run actions** from the automation's ⋮ menu. It sends what
