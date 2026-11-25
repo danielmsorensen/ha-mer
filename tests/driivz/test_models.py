@@ -12,6 +12,7 @@ from custom_components.mer.driivz.models import (
     Socket,
     SocketCapabilities,
     Station,
+    StatusPush,
     Transaction,
     Wallet,
     clean_caption,
@@ -136,6 +137,31 @@ def test_station_short_from_dict_defaults() -> None:
     assert station.sockets[0].status == "UNKNOWN"
     assert station.sockets[0].name is None
     assert station.sockets[0].price_per_kwh is None
+
+
+def test_socket_customer_id_only_while_in_use() -> None:
+    sockets = Station.from_dict(load_json_fixture("station_6041.json")["data"]).sockets
+    assert [(s.status, s.customer_id) for s in sockets] == [
+        ("CHARGING", "100001"),
+        ("AVAILABLE", None),
+    ]
+    assert Socket.from_dict({"id": 1, "customerIdentifier": ""}).customer_id is None
+
+
+def test_status_push_customer_ids() -> None:
+    def push(ids: object) -> StatusPush:
+        return StatusPush.from_dict(
+            {"stationId": 6041, "stationSocketId": 11241, "chargingCustomerIdentifiers": ids}
+        )
+
+    assert push({"11241": "100001", "11242": 100002}).customer_ids == {
+        11241: "100001",
+        11242: "100002",
+    }
+    # Often empty or absent; junk is dropped rather than failing the push.
+    assert push({}).customer_ids == {}
+    assert push(None).customer_ids == {}
+    assert push({"x": "1", "11242": None, "11243": ""}).customer_ids == {}
 
 
 def test_station_with_live_merges_status() -> None:

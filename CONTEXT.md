@@ -60,6 +60,10 @@ _Avoid_: excluded, skipped
 **Own start**:
 A start command of yours on a socket, running, or recent and not rejected; its charging is expected to be your session.
 
+**Driver**:
+The account charging on a socket, known by its customer id (the portal's `customerIdentifier`); a **known driver** is one you named.
+_Avoid_: user, customer (alone), owner
+
 **Session watch**:
 Repeatedly asking the portal for your session after an own start begins charging, until it appears.
 

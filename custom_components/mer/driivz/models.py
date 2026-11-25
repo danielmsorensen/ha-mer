@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 import re
 from typing import Any, ClassVar
@@ -182,6 +182,9 @@ class Socket:
     voltage_type: str | None = None
     station_caption: str | None = None
     prices: tuple[SocketPrice, ...] = ()
+    # The account charging on it (findStationById only, and only while in use): an
+    # anonymous customer id, the same one this account's own wallet reports for itself.
+    customer_id: str | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Socket:
@@ -197,6 +200,7 @@ class Socket:
             # Only findLastActiveChargeSocket's superset payload carries this.
             station_caption=_str(data.get("stationCaption")),
             prices=tuple(SocketPrice.from_dict(p) for p in data.get("socketPrices") or []),
+            customer_id=_str(data.get("customerIdentifier")) or None,
         )
 
     @property
@@ -294,11 +298,20 @@ class StatusPush:
     socket_status: str | None
     start_pending: bool
     stop_pending: bool
+    # Customer id per socket id, for some of the station's sessions. Often empty mid-session,
+    # so an absent socket says nothing about who, if anyone, is charging on it.
+    customer_ids: Mapping[int, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> StatusPush:
         station = data.get("stationStatusDto") or {}
         socket = data.get("stationSocketStatusDto") or {}
+        pushed_ids = data.get("chargingCustomerIdentifiers")
+        customer_ids = {
+            socket_id: str(customer_id)
+            for key, customer_id in (pushed_ids.items() if isinstance(pushed_ids, Mapping) else ())
+            if (socket_id := _int(key)) is not None and customer_id not in (None, "")
+        }
         return cls(
             station_id=int(data["stationId"]),
             station_status=_str(station.get("stationStatus")),
@@ -306,6 +319,7 @@ class StatusPush:
             socket_status=_str(socket.get("socketStatus")),
             start_pending=bool(socket.get("approveStartChargePending", False)),
             stop_pending=bool(socket.get("stopChargePending", False)),
+            customer_ids=customer_ids,
         )
 
 

@@ -30,12 +30,19 @@
   "options": {
     "step": {
       "init": {
-        "title": "Poll interval",
+        "title": "Options",
         "description": "Chargers are added and removed on the integration's page, not here.",
         "data": {
-          "scan_interval": "Seconds between updates"
+          "scan_interval": "Seconds between updates",
+          "known_drivers": "Known drivers"
+        },
+        "data_description": {
+          "known_drivers": "One per line, `customer id: name`. A socket in use shows its driver's customer id in its status sensor's `driver_id` attribute, and the name you give here in `driver`."
         }
       }
+    },
+    "error": {
+      "invalid_known_drivers": "Each line needs a numeric customer id, a colon and a name: {line}"
     }
   },
   "config_subentries": {

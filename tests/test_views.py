@@ -163,11 +163,25 @@ def test_socket_status_attributes() -> None:
         "my_session": True,
         "held_back": False,
         "own_start": False,
+        "driver_id": None,
+        "driver": None,
         "max_power_kw": 7.0,
         "connector": "TYPE_2_MENNEKES",
     }
     other = attributes(data, station, data.socket(6041, 11241), button)
     assert other["my_session"] is False
+
+
+def test_socket_status_driver() -> None:
+    """Whoever is charging, by customer id, and the name you gave them if any."""
+    data = snapshot(drivers={11241: "100001", 11242: "100002"}, known_drivers={"100001": "Sam"})
+    attributes = described(SOCKET_SENSORS, "status").attributes_fn
+    station = data.station(6041)
+    assert station is not None
+    named = attributes(data, station, data.socket(6041, 11241), button)
+    assert (named["driver_id"], named["driver"]) == ("100001", "Sam")
+    unnamed = attributes(data, station, data.socket(6041, 11242), button)
+    assert (unnamed["driver_id"], unnamed["driver"]) == ("100002", None)
 
 
 def test_socket_status_held_back_and_own_start() -> None:

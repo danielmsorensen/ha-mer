@@ -41,8 +41,9 @@ A site's menu has **Change chargers** (untick to stop monitoring one) and **Dele
 The account device sits under Home Assistant's "Devices that don't belong to a
 sub-entry", since it belongs to the whole integration.
 
-**Configure** has one option, the poll interval: 30–600 seconds, default 60. If your
-password changes, Home Assistant prompts you to re-authenticate.
+**Configure** has the poll interval (30–600 seconds, default 60) and **Known drivers**
+(see [Who is charging](#who-is-charging)). If your password changes, Home Assistant
+prompts you to re-authenticate.
 
 ## Entities
 
@@ -64,7 +65,7 @@ Each socket (often "Left" and "Right") adds:
 
 | Entity | Meaning |
 | --- | --- |
-| *Socket* status | The socket's status, whoever is using it. Attributes: `charger`, `socket`, `station_id`, `socket_id`, `start_button`, `my_session`, `max_power_kw`, `connector`; `held_back` (free, but not offered since your last session ended: free since before it ended, or the socket you left until someone else has used it) and `own_start` (a start of yours there running, or in the last 10 minutes and not rejected) |
+| *Socket* status | The socket's status, whoever is using it. Attributes: `charger`, `socket`, `station_id`, `socket_id`, `start_button`, `my_session`, `max_power_kw`, `connector`; `held_back` (free, but not offered since your last session ended: free since before it ended, or the socket you left until someone else has used it) and `own_start` (a start of yours there running, or in the last 10 minutes and not rejected); `driver_id` and `driver` (who is charging there; see [Who is charging](#who-is-charging)) |
 | *Socket* price | Your tariff's price per kWh; billing plan, fixed price, per-minute rate and transaction fee as attributes |
 | *Socket* start charge | Starts a charge; greyed out unless the socket is free (or plugged in and waiting) and the portal allows you a start on it |
 
@@ -234,6 +235,30 @@ not added, such as a public one, the account's session sensors, price and **Stop
 all still work. If you run two charges at once, the integration follows the most recently
 started one; the other socket still shows **Charging**, but not as yours.
 
+## Who is charging
+
+The portal gives each socket in use the charging account's customer id: a number, the
+same every time that account charges, with no name, card or car. A socket status
+sensor shows it as `driver_id` (yours too, when it's your session), and empty while
+the socket is free.
+
+To put names to them, **Configure → Known drivers**, one per line:
+
+```text
+123456: Sam
+234567: Alex
+```
+
+The sensor's `driver` attribute then shows the name. To learn an id, look at
+`driver_id` (or its history) while someone you know is charging.
+
+- **When it shows:** often in the push as the session starts; otherwise from the
+  charger's details, read once per session at the next poll (up to 5 minutes).
+- **When it clears:** when the socket is free. A fault or out of service mid-session
+  keeps it.
+- **Privacy:** these are other Mer customers' account ids. They stay in your Home
+  Assistant; diagnostics redact them and your names for them.
+
 ## Live status and polling
 
 The integration keeps open the websocket the Mer web app uses. While it is connected,
@@ -254,6 +279,7 @@ Pushes do not count against the portal's rate limit.
 | Session started time and duration | No | Every poll |
 | Wallet, last session | No | Every 15 minutes |
 | Socket names, tariffs, model, notify-me state | No | Hourly, one charger per poll |
+| Who is charging (`driver_id`) | Sometimes, as a session starts | Once per session if not pushed, and hourly |
 | Which start a socket allows | No | A few seconds after a socket on the charger changes, and on **Refresh now** |
 
 Extra polls run after a start or stop resolves, when the channel drops, on **Refresh

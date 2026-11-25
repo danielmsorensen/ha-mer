@@ -32,6 +32,7 @@ from .commands import (
 )
 from .const import (
     CAPABILITY_REFRESH_DELAY_SECONDS,
+    CONF_KNOWN_DRIVERS,
     CONF_SCAN_INTERVAL,
     CONF_STATION_IDS,
     DEFAULT_SCAN_INTERVAL,
@@ -49,6 +50,7 @@ from .const import (
     WALLET_REFRESH,
 )
 from .driivz.client import DriivzDriverClient
+from .driivz.const import IN_USE_STATUSES, STATUS_AVAILABLE, STATUS_PREPARING
 from .driivz.exceptions import AuthError, DriivzError, RateLimitError
 from .driivz.models import (
     EstimatePush,
@@ -106,6 +108,19 @@ class MerData:
     push_connected_since: datetime | None = None
     # Last successful poll (skipped cycles do not count).
     last_poll_at: datetime | None = None
+    # Who is charging on the configured chargers' sockets: socket id -> customer id.
+    drivers: Mapping[int, str] = field(default_factory=dict)
+    # The names you gave customer ids (the Known drivers option): customer id -> name.
+    known_drivers: Mapping[str, str] = field(default_factory=dict)
+
+    def driver_id(self, socket_id: int) -> str | None:
+        """The customer id charging on the socket, when the portal has said."""
+        return self.drivers.get(socket_id)
+
+    def driver_name(self, socket_id: int) -> str | None:
+        """Your name for whoever is charging on the socket, if you gave one."""
+        customer_id = self.drivers.get(socket_id)
+        return self.known_drivers.get(customer_id) if customer_id else None
 
     def held_back(self, socket_id: int) -> bool:
         """Free, but held back since your last session ended; never while a session runs."""
@@ -200,6 +215,11 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         self._wallet: Wallet | None = None
         self._last_transaction: Transaction | None = None
         self._customer_id: int | None = None
+        # Who is charging on each socket of the configured chargers; see `_learn_drivers`.
+        self._drivers: dict[int, str] = {}
+        # In-use sockets whose charger detail was read this session, found or not.
+        self._drivers_looked_up: set[int] = set()
+        self.known_drivers: dict[str, str] = dict(entry.options.get(CONF_KNOWN_DRIVERS, {}))
         self._last_command: CommandResult | None = None
         self._push_connected = False
         self._push_connected_since: datetime | None = None
@@ -250,12 +270,13 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             if self.station_ids:
                 found = await self.client.find_stations_by_ids(self.station_ids)
                 stations = {s.id: s for s in found}
+                self._forget_drivers(_free_sockets(stations))
             # Observed before the account refresh, so an end re-reads the history this cycle.
             self._execute(self._observe(Polled(await self._fetch_active(), stations)))
             if self._due(self._wallet_refreshed, WALLET_REFRESH, now):
                 await self._refresh_optional("account", self._refresh_account(now))
                 self._wallet_refreshed = now
-            for station_id in self._stations_due(now):
+            for station_id in self._stations_due(now, stations):
                 await self._refresh_optional(
                     f"charger {station_id} detail", self._refresh_station(station_id)
                 )
@@ -294,6 +315,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             push_connected=self._push_connected,
             push_connected_since=self._push_connected_since,
             last_poll_at=self._last_poll_at,
+            drivers=self._drivers,
+            known_drivers=self.known_drivers,
         )
 
     @staticmethod
@@ -385,7 +408,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
                 err,
             )
 
-    def _stations_due(self, now: datetime) -> list[int]:
+    def _stations_due(self, now: datetime, stations: Mapping[int, Station]) -> list[int]:
         """Which chargers' hourly detail refresh should run this cycle.
 
         The first cycle primes every configured charger. Entity names, device models,
@@ -400,13 +423,44 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         at 9 at rest and a refill window nobody has measured. One per cycle keeps the
         steady-state worst case a constant 8 however many chargers are selected, and each
         charger is still refreshed once an hour -- just not all in the same tick.
+
+        A charger with a session whose driver is still unknown goes first, once per
+        session: the detail is where its customer id is read when no push carried it.
         """
         due = [
             station_id
             for station_id in self.station_ids
             if self._due(self._station_refreshed.get(station_id), DETAIL_REFRESH, now)
         ]
-        return due if not self._station_refreshed else due[:1]
+        if not self._station_refreshed:
+            return due
+        lookups = [
+            station_id
+            for station_id in self.station_ids
+            if station_id in stations and self._driver_unknown(stations[station_id])
+        ]
+        return [*lookups, *(s for s in due if s not in lookups)][:1]
+
+    def _driver_unknown(self, station: Station) -> bool:
+        """Whether a session on the charger has no known driver and no lookup yet."""
+        return any(
+            _in_session(s) and s.id not in self._drivers and s.id not in self._drivers_looked_up
+            for s in station.sockets
+        )
+
+    def _learn_drivers(self, customer_ids: Mapping[int, str]) -> None:
+        """Record who is charging where; detail and pushes both report it."""
+        if customer_ids:
+            self._drivers = {**self._drivers, **customer_ids}
+
+    def _forget_drivers(self, socket_ids: set[int]) -> None:
+        """A free socket's session is over, and the next one may be anyone's.
+
+        Only free counts: a fault or out of service mid-session keeps its driver.
+        """
+        if socket_ids & self._drivers.keys():
+            self._drivers = {k: v for k, v in self._drivers.items() if k not in socket_ids}
+        self._drivers_looked_up -= socket_ids
 
     async def _refresh_account(self, now: datetime) -> None:
         """Fetch wallet and history, then commit both atomically.
@@ -454,6 +508,11 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             subscribed = await self.client.is_subscribed_to_availability(station_id)
             self._notify = {**self._notify, station_id: subscribed}
         self._details = {**self._details, station_id: detail}
+        self._forget_drivers({s.id for s in detail.sockets if s.status == STATUS_AVAILABLE})
+        self._learn_drivers(
+            {s.id: s.customer_id for s in detail.sockets if s.customer_id and s.is_in_use}
+        )
+        self._drivers_looked_up |= {s.id for s in detail.sockets if _in_session(s)}
 
     def _check_rate_limit(self, now: datetime) -> None:
         remaining = self.client.rate_limit_remaining
@@ -791,6 +850,10 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             stations[push.station_id] = before.with_push(push)
             if _socket_statuses(before) != _socket_statuses(stations[push.station_id]):
                 self._schedule_capabilities(push.station_id)
+            ours = {s.id for s in before.sockets}
+            self._learn_drivers({k: v for k, v in push.customer_ids.items() if k in ours})
+            if push.socket_status == STATUS_AVAILABLE and push.socket_id is not None:
+                self._forget_drivers({push.socket_id})
         intents = self._observe(StatusPushed(push, before, stations))
         self._stations = stations
         self._publish()
@@ -838,6 +901,15 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             self._publish()
             self._push_event.set()
         self._execute(intents)
+
+
+def _in_session(socket: Socket) -> bool:
+    """In use past preparing: a driver has authenticated, so the portal can say who."""
+    return socket.status in IN_USE_STATUSES - {STATUS_PREPARING}
+
+
+def _free_sockets(stations: Mapping[int, Station]) -> set[int]:
+    return {s.id for station in stations.values() for s in station.sockets if s.is_available}
 
 
 def _socket_statuses(station: Station) -> tuple[tuple[int, str], ...]:

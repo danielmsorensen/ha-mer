@@ -67,13 +67,16 @@ def _socket_status_attributes(
     The status alone says "charging" for anyone's car; `my_session` says it is yours.
     `charger`, `socket` and `start_button` let an automation or blueprint work from this
     sensor alone, without knowing how entities are named. `held_back` and `own_start` are
-    what the free charger blueprint needs from your session; see CONTEXT.md.
+    what the free charger blueprint needs from your session; see CONTEXT.md. `driver_id`
+    is whoever is charging on it, and `driver` your name for them (Known drivers option).
     """
     return {
         **socket_view(station, socket, start_button),
         "my_session": data.session_on_socket(socket.id) is not None,
         "held_back": data.held_back(socket.id),
         "own_start": socket.id in data.own_starts,
+        "driver_id": data.driver_id(socket.id),
+        "driver": data.driver_name(socket.id),
         "max_power_kw": socket.max_power_kw,
         "connector": socket.socket_type,
     }

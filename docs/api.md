@@ -70,7 +70,7 @@ history, wallet, and starting or stopping a charge.
 | Sites in map bounds | `POST stationFacade/findSitesInBounds` | JSON `{"filterByBounds": {"northEastLat","northEastLng","southWestLat","southWestLng"}, "filterByIsManaged": true}` | Whole-UK bounds works in one call. Site DTO: `id`, `dn` (name), `ss` (status), `ns` (socket count), `sal` (access level), `latitude`, `longitude`, `scs` (speed), `im` (managed) |
 | Stations in map bounds | `POST stationFacade/findStationsInBounds` | JSON, same `queryInfo` shape; optional `filterByStationStatuses`, `filterBySocketTypes`, `filterByChargingSpeeds`, `filterBySiteAccessLevels`, `filterByBillingPlanIds` (observed as non-restrictive) | Short station DTO: `id`, `caption`, `latitude`, `longitude`, `stationStatusId`, `comingSoon`, `isManaged`, `stationSockets[{id}]` |
 | Stations by id | `POST stationFacade/findStationsByIds` | JSON `{"filterByIds": [ids]}` | Same DTO as above but includes `stationSockets[].socketStatusId` and `maximumPower`. This is the integration's primary polling call. |
-| Station detail | `GET stationFacade/findStationById?stationId=&billingPlanId=` | query string | Full DTO: address, `identityKey`, `siteId`, `siteName`, `stationModelName`, `stationOwnerName`, `siteStationAccessLevel`, `stationSockets[]` with `id`, `name` (e.g. Left/Right), `identityKey`, `socketStatusId`, `maximumPower`, `stationModelSocketSocketTypeId`, `stationModelSocketVoltageType`, `socketPrices[{billingPlanId, billingPlanCode, kwhPrice, plugInMinuteRate, transactionFee, currency}]` |
+| Station detail | `GET stationFacade/findStationById?stationId=&billingPlanId=` | query string | Full DTO: address, `identityKey`, `siteId`, `siteName`, `stationModelName`, `stationOwnerName`, `siteStationAccessLevel`, `stationSockets[]` with `id`, `name` (e.g. Left/Right), `identityKey`, `socketStatusId`, `customerIdentifier` (in-use sockets only; see [Who is charging](#who-is-charging)), `maximumPower`, `stationModelSocketSocketTypeId`, `stationModelSocketVoltageType`, `socketPrices[{billingPlanId, billingPlanCode, kwhPrice, plugInMinuteRate, transactionFee, currency}]` |
 | Charging cards | `GET stationFacade/findCustomerCardsBySocketId?stationSocketId=` | query string | `data.cards[{number, type}]`: the account's cards usable on that socket (one `VIRTUAL` card on a typical app account) |
 | Start capabilities | `POST stationFacade/getStationCapabilitiesAndValidate` | form `stationId`, `stationSocketId`, `socketStatus` | `allowedSocketOperations` / `denySocketOperations` (with reasons) for every socket on the charger. `START_CHARGE_FROM_SERVER` permits the normal start, `START_CHARGE_NOW` "Charge now"; `STOP_CHARGE_FROM_SERVER` is allowed only on your own session. The app's virtual card is denied `START_CHARGE_NOW` with `INVALID_CARD` |
 | Start charge | `POST stationFacade/approveStartCharge` | form `stationSocketId`, `cardNumber` (the first card; omitted when there is none) | The web app's normal "connect and swipe" start. Success is `data.operationStatus == "PENDING"`; the charger then waits for the cable. Used live since 2026-10-12 |
@@ -160,6 +160,29 @@ The integration exposes `rateEstimation` as the session "charging rate" sensors.
 snapshots are not differenced: the whole-session average (29.4 kWh over 5.5 h, about
 5.3 kW) is the only difference that held up.
 
+## Who is charging
+
+Probed read-only on 2026-11-25, on a charger pair with all four sockets in use, one
+of them by this account:
+
+- **`findStationById`**: each in-use socket carries `customerIdentifier`, a 5–6 digit
+  string. On this account's socket it equals the wallet's `customerDetailId`; the
+  others differ from it and from each other. So it is the charging account's customer
+  id: anonymous, but the same across that account's sessions. A free socket has no
+  such field. `findStationsByIds` (the poll) doesn't carry it.
+- **Push**: `StationStatusSummaryDtoImp.chargingCustomerIdentifiers` maps socket id
+  (as a string key) to customer id. It is often empty mid-session (seen on
+  charging→paused) and empty on preparing before the driver authenticates, so an
+  absent socket says nothing.
+- **Nothing else** says who: on someone else's socket
+  `findCurrentTransactionStartTime` returns only `boostEnabled` (no `transactionId`),
+  `findCurrentTransactionBillingChargingEstimation` returns no `data`, and
+  `getStationCapabilitiesAndValidate` denies `STOP_CHARGE_FROM_SERVER` with
+  `TRANSACTION_DOES_NOT_BELONG_TO_CUSTOMER`. No name, card, vehicle or e-mail is
+  returned anywhere.
+
+The integration shows it as the socket status sensor's `driver_id`; see the README.
+
 ## What the portal does not expose
 
 The capabilities and the account's permissions also name operator operations:
@@ -193,7 +216,8 @@ Observed live from 2026-09-24:
 - **`StationStatusSummaryDtoImp`** is broadcast for the whole network: 84 messages in
   90 s across 33 chargers. Each carries `stationId`, `stationSocketId`,
   `stationSocketStatusDto.socketStatus`, the previous status, and the flags
-  `approveStartChargePending` / `stopChargePending`.
+  `approveStartChargePending` / `stopChargePending`. Also
+  `chargingCustomerIdentifiers`: see [Who is charging](#who-is-charging).
 - **`BillingChargingEstimationMessageImp`** is sent only to the account, roughly every
   45 s while charging. It has the same fields as the polled estimate (see above).
 - **`CustomerDetailChargeEventDtoImp`** is also seen, but not used.

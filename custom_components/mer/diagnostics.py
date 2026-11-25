@@ -20,6 +20,9 @@ TO_REDACT = {
     "account_number",
     "unique_id",
     "transaction_id",
+    # Other people's customer ids, and your names for them (Socket.customer_id is
+    # covered by "customer_id").
+    "known_drivers",
 }
 
 

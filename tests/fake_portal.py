@@ -65,7 +65,13 @@ class FakeWebSocket:
         self.queue.put_nowait(None)
 
 
-def status_push(station_id: int, socket_id: int, status: str, **flags: bool) -> dict[str, Any]:
+def status_push(
+    station_id: int,
+    socket_id: int,
+    status: str,
+    drivers: dict[int, str] | None = None,
+    **flags: bool,
+) -> dict[str, Any]:
     """A StationStatusSummary message shaped like the live capture in docs/api.md."""
     return {
         "@c": "StationStatusSummaryDtoImp",
@@ -79,6 +85,7 @@ def status_push(station_id: int, socket_id: int, status: str, **flags: bool) -> 
         },
         "socketStatuses": {},
         "allSocketStatus": [],
+        "chargingCustomerIdentifiers": {str(k): v for k, v in (drivers or {}).items()},
     }
 
 
@@ -122,6 +129,8 @@ class FakePortal:
         }
         self.sites = [Site.from_dict(s) for s in load_json_fixture("sites_in_bounds.json")["data"]]
         self.stations_in_bounds = stations_from_fixture("stations_in_bounds.json")
+        # Who is charging where (customer ids): the detail reports it for in-use sockets.
+        self.drivers: dict[int, str] = {11241: "100001"}
         # Unknown by default, so availability falls back to the socket status.
         self.capabilities: dict[int, SocketCapabilities] = {}
         # Like the real account: 6042 is subscribed via the Mer app, 6041 is not.
@@ -197,13 +206,24 @@ class FakePortal:
     def free(self, *socket_ids: int) -> None:
         """The sockets are free; your session ends if it ran on one."""
         for socket_id in socket_ids:
+            self.drivers.pop(socket_id, None)
             self._set(socket_id, "AVAILABLE")
             self._end(socket_id)
 
-    def take(self, *socket_ids: int, status: str = "OCCUPIED") -> None:
-        """Someone else uses these sockets."""
+    def take(
+        self,
+        *socket_ids: int,
+        status: str = "OCCUPIED",
+        driver: str | None = None,
+        pushed: bool = True,
+    ) -> None:
+        """Someone else uses these sockets: `driver` is their customer id, `pushed` whether
+        the status push says so (it often doesn't)."""
         for socket_id in socket_ids:
-            self._set(socket_id, status)
+            if driver is not None:
+                self.drivers[socket_id] = driver
+            pushed_driver = {socket_id: driver} if driver is not None and pushed else None
+            self._set(socket_id, status, pushed_driver)
 
     def _end(self, socket_id: int) -> None:
         if self.session is not None and self.session.id == socket_id:
@@ -214,7 +234,7 @@ class FakePortal:
             st for st in self.stations.values() if any(s.id == socket_id for s in st.sockets)
         )
 
-    def _set(self, socket_id: int, status: str) -> None:
+    def _set(self, socket_id: int, status: str, drivers: dict[int, str] | None = None) -> None:
         # The charger takes the socket's status, as status pushes report it.
         station = self._station_of(socket_id)
         self.stations[station.id] = replace(
@@ -225,7 +245,7 @@ class FakePortal:
             ),
         )
         if self.live and self.websockets:
-            self.push(status_push(station.id, socket_id, status))
+            self.push(status_push(station.id, socket_id, status, drivers))
 
     # ----- the client's interface -----------------------------------------
 
@@ -276,7 +296,14 @@ class FakePortal:
         await self._call("find_station_by_id", station_id, billing_plan_id)
         detail = self.details[station_id]
         live = self.stations.get(station_id)
-        return detail.with_live(live) if live is not None else detail
+        merged = detail.with_live(live) if live is not None else detail
+        return replace(
+            merged,
+            sockets=tuple(
+                replace(s, customer_id=self.drivers.get(s.id) if s.is_in_use else None)
+                for s in merged.sockets
+            ),
+        )
 
     async def find_last_active_charge_socket(self) -> Socket | None:
         await self._call("find_last_active_charge_socket")

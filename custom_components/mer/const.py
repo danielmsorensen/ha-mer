@@ -11,6 +11,8 @@ DOMAIN = "mer"
 CONF_BASE_URL = "base_url"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_SEARCH = "search"
+# Options: your names for the customer ids seen charging, {customer id: name}.
+CONF_KNOWN_DRIVERS = "known_drivers"
 
 # Each charging site with monitored chargers is a config subentry of this type on the
 # account entry, so the integration page groups a site's chargers together. Its data

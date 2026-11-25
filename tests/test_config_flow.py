@@ -9,9 +9,10 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.mer.config_flow import CONF_BACK, SEARCH_AGAIN
+from custom_components.mer.config_flow import CONF_BACK, SEARCH_AGAIN, parse_known_drivers
 from custom_components.mer.const import (
     CONF_BASE_URL,
+    CONF_KNOWN_DRIVERS,
     CONF_SCAN_INTERVAL,
     CONF_SEARCH,
     CONF_SITE_ID,
@@ -25,6 +26,7 @@ from custom_components.mer.driivz.exceptions import AuthError, DriivzConnectionE
 from tests.conftest import SITE_NAME, make_config_entry
 from tests.fake_portal import FakePortal
 from tests.helpers import setup_integration
+from tests.test_sensor import state_by_unique_id
 
 CREDS = {CONF_USERNAME: "user@example.com", CONF_PASSWORD: "secret"}
 
@@ -160,6 +162,51 @@ async def test_options_interval(
     await hass.async_block_till_done()
     assert mock_config_entry.options[CONF_SCAN_INTERVAL] == 120
     assert _charger_station_ids(mock_config_entry) == {6042, 6041}  # untouched
+
+
+async def test_options_known_drivers(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
+) -> None:
+    await setup_integration(hass, mock_config_entry)
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_SCAN_INTERVAL: 60, CONF_KNOWN_DRIVERS: "100001: Sam\nnot an id"},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_KNOWN_DRIVERS: "invalid_known_drivers"}
+    assert result["description_placeholders"]["line"] == "not an id"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_SCAN_INTERVAL: 60, CONF_KNOWN_DRIVERS: "100001: Sam\n\n100002 = Alex Jones"},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert mock_config_entry.options[CONF_KNOWN_DRIVERS] == {
+        "100001": "Sam",
+        "100002": "Alex Jones",
+    }
+    # Reopened, the form shows them as typed, one per line.
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+    schema_keys = {str(key): key for key in result["data_schema"].schema}
+    shown = schema_keys[CONF_KNOWN_DRIVERS].description["suggested_value"]
+    assert shown == "100001: Sam\n100002: Alex Jones"
+    eid = mock_config_entry.entry_id
+    state = state_by_unique_id(hass, "sensor", f"{eid}_socket_11241_status")
+    assert state.attributes["driver"] == "Sam"
+
+
+def test_parse_known_drivers() -> None:
+    assert parse_known_drivers("") == {}
+    assert parse_known_drivers(" 1 : A=B \n2=C: D") == {"1": "A=B", "2": "C: D"}
+    for bad in ("100001", "abc: Sam", "100001:", ": Sam"):
+        try:
+            parse_known_drivers(bad)
+        except ValueError as err:
+            assert str(err) == bad
+        else:
+            raise AssertionError(f"{bad!r} accepted")
 
 
 # ----- add charger subentry flow -------------------------------------------

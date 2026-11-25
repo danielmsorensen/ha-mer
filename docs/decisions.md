@@ -678,3 +678,26 @@ as an arrival within 2 minutes of leaving already was.
 
 **Cost if wrong.** Driving in and out within 2 minutes leaves the notification showing
 until the next leave.
+
+## 2026-11-25: who is charging, by customer id
+
+**What happened.** A read-only probe (docs/api.md, Who is charging) found the charging
+account's customer id on in-use sockets in `findStationById`, and sometimes in the push.
+
+**Decision.** Socket status sensors show it as `driver_id`, with `driver` from a Known
+drivers option (`id: name` lines in Configure). The coordinator keeps socket → customer id:
+
+- **Set** from any push or detail that carries one; an empty push changes nothing, since
+  pushes mostly omit it.
+- **Cleared** only when the socket is free (poll, push or detail), so a mid-session fault
+  keeps it.
+- **Looked up** when a session past preparing has no id: that charger's detail is read at
+  the next poll, once per session found or not, ahead of the hourly refresh in the
+  one-charger-per-poll budget.
+
+Names live in options, not a helper or template, so the attribute carries them and
+diagnostics can redact them.
+
+**Cost if wrong.** A swap between polls with no push in between keeps the previous driver
+until the hourly detail. The ids are other customers'; if Mer drops the field, `driver_id`
+stays empty and nothing else breaks.

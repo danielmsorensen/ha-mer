@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import logging
+import re
 from typing import Any
 
 from homeassistant.config_entries import (
@@ -35,6 +36,7 @@ import voluptuous as vol
 from .api import create_client
 from .const import (
     CONF_BASE_URL,
+    CONF_KNOWN_DRIVERS,
     CONF_SCAN_INTERVAL,
     CONF_SEARCH,
     CONF_SITE_ID,
@@ -58,6 +60,30 @@ MAX_SITE_MATCHES = 25
 SEARCH_AGAIN = "__search_again__"
 # Checkbox on the chargers step that returns to the site list.
 CONF_BACK = "back"
+
+
+_KNOWN_DRIVER_RE = re.compile(r"\s*(?P<id>\d+)\s*[:=]\s*(?P<name>\S.*?)\s*")
+
+
+def parse_known_drivers(text: str) -> dict[str, str]:
+    """Read the Known drivers option: one `customer id: name` per line.
+
+    `=` works in place of `:`; blank lines are skipped. Raises ValueError with the
+    first line that isn't a numeric id and a name.
+    """
+    known: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if (match := _KNOWN_DRIVER_RE.fullmatch(line)) is None:
+            raise ValueError(line.strip())
+        known[match["id"]] = match["name"]
+    return known
+
+
+def format_known_drivers(known: Mapping[str, str]) -> str:
+    return "\n".join(f"{customer_id}: {name}" for customer_id, name in known.items())
+
 
 USER_SCHEMA = vol.Schema(
     {
@@ -190,20 +216,33 @@ class MerConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class MerOptionsFlow(OptionsFlow):
-    """Change the poll interval."""
+    """Change the poll interval and name the drivers you know."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        placeholders = {"line": ""}
+        options = self.config_entry.options
+        interval = options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        drivers_text = format_known_drivers(options.get(CONF_KNOWN_DRIVERS, {}))
         if user_input is not None:
-            return self.async_create_entry(
-                data={
-                    **self.config_entry.options,
-                    CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
-                }
-            )
-        current = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+            interval = int(user_input[CONF_SCAN_INTERVAL])
+            drivers_text = user_input.get(CONF_KNOWN_DRIVERS, "")
+            try:
+                known = parse_known_drivers(drivers_text)
+            except ValueError as err:
+                errors[CONF_KNOWN_DRIVERS] = "invalid_known_drivers"
+                placeholders["line"] = str(err)
+            else:
+                return self.async_create_entry(
+                    data={
+                        **options,
+                        CONF_SCAN_INTERVAL: interval,
+                        CONF_KNOWN_DRIVERS: known,
+                    }
+                )
         schema = vol.Schema(
             {
-                vol.Required(CONF_SCAN_INTERVAL, default=current): NumberSelector(
+                vol.Required(CONF_SCAN_INTERVAL, default=interval): NumberSelector(
                     NumberSelectorConfig(
                         min=MIN_SCAN_INTERVAL,
                         max=MAX_SCAN_INTERVAL,
@@ -211,10 +250,18 @@ class MerOptionsFlow(OptionsFlow):
                         unit_of_measurement="s",
                         mode=NumberSelectorMode.BOX,
                     )
-                )
+                ),
+                vol.Optional(
+                    CONF_KNOWN_DRIVERS, description={"suggested_value": drivers_text}
+                ): TextSelector(TextSelectorConfig(multiline=True)),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders=placeholders,
+        )
 
 
 class MerSiteSubentryFlow(ConfigSubentryFlow):
