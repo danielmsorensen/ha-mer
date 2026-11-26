@@ -6,7 +6,7 @@ import logging
 from types import MappingProxyType
 from typing import Any
 
-from homeassistant.config_entries import ConfigSubentry
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -14,6 +14,7 @@ from homeassistant.helpers import device_registry as dr
 from .api import create_client
 from .const import (
     CONF_BASE_URL,
+    CONF_KNOWN_DRIVERS,
     CONF_SITE_ID,
     CONF_SITE_NAME,
     CONF_STATION_IDS,
@@ -44,6 +45,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: MerConfigEntry) -> bool:
         entry.data.get(CONF_BASE_URL, DEFAULT_BASE_URL),
     )
     coordinator = MerCoordinator(hass, entry, client)
+    coordinator.setup_from = _what_a_reload_reads(entry)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     _async_register_account_device(hass, entry)
@@ -90,8 +92,32 @@ def _async_remove_unmonitored_chargers(
                 break
 
 
+def _what_a_reload_reads(entry: MerConfigEntry) -> dict[str, Any]:
+    """The entry as setup reads it, less the known drivers, which apply in place."""
+    return {
+        "data": dict(entry.data),
+        "options": {k: v for k, v in entry.options.items() if k != CONF_KNOWN_DRIVERS},
+        "subentries": {
+            subentry_id: (s.subentry_type, s.title, dict(s.data))
+            for subentry_id, s in entry.subentries.items()
+        },
+    }
+
+
 async def _async_entry_updated(hass: HomeAssistant, entry: MerConfigEntry) -> None:
-    """Reload when options or the site subentries change."""
+    """Reload when options or the site subentries change.
+
+    A change to the known drivers alone is applied without one: a reload makes every
+    entity unavailable for a moment, which marks the status history each time.
+    """
+    coordinator: MerCoordinator | None = getattr(entry, "runtime_data", None)
+    if (
+        entry.state is ConfigEntryState.LOADED
+        and coordinator is not None
+        and coordinator.setup_from == _what_a_reload_reads(entry)
+    ):
+        coordinator.async_set_known_drivers(entry.options.get(CONF_KNOWN_DRIVERS, {}))
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

@@ -228,6 +228,8 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         # In-use sockets whose charger detail was read this session, found or not.
         self._drivers_looked_up: set[int] = set()
         self.known_drivers: dict[str, str] = dict(entry.options.get(CONF_KNOWN_DRIVERS, {}))
+        # The entry as this setup read it; see `_async_entry_updated` in __init__.
+        self.setup_from: dict[str, Any] | None = None
         self._last_command: CommandResult | None = None
         self._push_connected = False
         self._push_connected_since: datetime | None = None
@@ -679,6 +681,12 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
         station = self._snapshot().station(station_id) if station_id is not None else None
         active = self._tracker.active
         return View(station, active.socket_id if active else None)
+
+    @callback
+    def async_set_known_drivers(self, known: Mapping[str, str]) -> None:
+        """Rename drivers without a reload."""
+        self.known_drivers = dict(known)
+        self._publish()
 
     def _publish(self) -> None:
         """Hand a fresh snapshot to the entities without disturbing the poll schedule.

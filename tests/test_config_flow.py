@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.event import async_track_state_change_event
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mer.config_flow import CONF_BACK, SEARCH_AGAIN, parse_known_drivers
@@ -162,6 +165,8 @@ async def test_options_interval(
     await hass.async_block_till_done()
     assert mock_config_entry.options[CONF_SCAN_INTERVAL] == 120
     assert _charger_station_ids(mock_config_entry) == {6042, 6041}  # untouched
+    # Reloaded, so the new interval is used.
+    assert mock_config_entry.runtime_data.update_interval == timedelta(seconds=120)
 
 
 async def test_options_known_drivers(
@@ -195,6 +200,30 @@ async def test_options_known_drivers(
     eid = mock_config_entry.entry_id
     state = state_by_unique_id(hass, "sensor", f"{eid}_socket_11241_status")
     assert state.attributes["driver"] == "Sam"
+
+
+async def test_renaming_drivers_does_not_reload(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, portal: FakePortal
+) -> None:
+    """A reload blips every entity to unavailable, marking the status history."""
+    await setup_integration(hass, mock_config_entry)
+    eid = mock_config_entry.entry_id
+    coordinator = mock_config_entry.runtime_data
+    entity_id = state_by_unique_id(hass, "sensor", f"{eid}_socket_11241_status").entity_id
+    seen: list[str] = []
+    async_track_state_change_event(
+        hass, entity_id, lambda event: seen.append(event.data["new_state"].state)
+    )
+
+    result = await hass.config_entries.options.async_init(eid)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_SCAN_INTERVAL: 60, CONF_KNOWN_DRIVERS: "100001: Sam"}
+    )
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.runtime_data is coordinator
+    assert "unavailable" not in seen
+    assert hass.states.get(entity_id).attributes["driver"] == "Sam"
 
 
 def test_parse_known_drivers() -> None:

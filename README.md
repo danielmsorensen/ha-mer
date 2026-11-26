@@ -251,7 +251,8 @@ To put names to them, **Configure → Known drivers**, one per line:
 234567: Alex
 ```
 
-The sensor's `driver` attribute then shows the name. To learn an id, look at
+The sensor's `driver` attribute then shows the name, as soon as you save: changing only
+the names doesn't reload the integration. To learn an id, look at
 `driver_id` (or its history) while someone you know is charging.
 
 - **When it shows:** often in the push as the session starts; otherwise from the
