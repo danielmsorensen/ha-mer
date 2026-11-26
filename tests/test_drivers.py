@@ -114,7 +114,7 @@ async def test_unpushed_driver_is_looked_up_once_per_session(
     assert _detail_reads(live, 6042) == reads + 1
 
 
-async def test_a_lookup_that_finds_no_one_is_not_repeated(
+async def test_a_lookup_that_finds_no_one_says_none_and_is_not_repeated(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry, live: FakePortal
 ) -> None:
     await setup_integration(hass, mock_config_entry)
@@ -126,4 +126,13 @@ async def test_a_lookup_that_finds_no_one_is_not_repeated(
     await coordinator.async_refresh()
     await coordinator.async_refresh()
     assert _detail_reads(live, 6042) == reads + 1
+    # Read and not there: started without a Mer account.
+    assert _driver(hass, mock_config_entry, 11243) == ("none", None)
+
+    # A push naming them later still wins; free clears it.
+    live.take(11243, status="CHARGING", driver="100004")
+    await _settle(hass)
+    assert _driver(hass, mock_config_entry, 11243) == ("100004", None)
+    live.free(11243)
+    await _settle(hass)
     assert _driver(hass, mock_config_entry, 11243) == (None, None)

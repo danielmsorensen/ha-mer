@@ -68,7 +68,8 @@ def _socket_status_attributes(
     `charger`, `socket` and `start_button` let an automation or blueprint work from this
     sensor alone, without knowing how entities are named. `held_back` and `own_start` are
     what the free charger blueprint needs from your session; see CONTEXT.md. `driver_id`
-    is whoever is charging on it, and `driver` your name for them (Known drivers option).
+    is whoever is charging on it ("none" when the portal has no account for the
+    session), and `driver` your name for them (Known drivers option).
     """
     return {
         **socket_view(station, socket, start_button),

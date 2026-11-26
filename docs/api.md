@@ -169,7 +169,9 @@ of them by this account:
   string. On this account's socket it equals the wallet's `customerDetailId`; the
   others differ from it and from each other. So it is the charging account's customer
   id: anonymous, but the same across that account's sessions. A free socket has no
-  such field. `findStationsByIds` (the poll) doesn't carry it.
+  such field. `findStationsByIds` (the poll) doesn't carry it. Some sessions have none
+  even while charging (seen 2026-11-26, the portal's other lookups equally empty):
+  presumably started without a Mer account, such as another provider's card.
 - **Push**: `StationStatusSummaryDtoImp.chargingCustomerIdentifiers` maps socket id
   (as a string key) to customer id. It is often empty mid-session (seen on
   charging→paused) and empty on preparing before the driver authenticates, so an

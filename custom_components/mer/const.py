@@ -13,6 +13,9 @@ CONF_SCAN_INTERVAL = "scan_interval"
 CONF_SEARCH = "search"
 # Options: your names for the customer ids seen charging, {customer id: name}.
 CONF_KNOWN_DRIVERS = "known_drivers"
+# A socket's driver_id once its charger's detail was read and had no customer id: the
+# session wasn't started from a Mer account (e.g. another provider's card).
+DRIVER_NONE = "none"
 
 # Each charging site with monitored chargers is a config subentry of this type on the
 # account entry, so the integration page groups a site's chargers together. Its data

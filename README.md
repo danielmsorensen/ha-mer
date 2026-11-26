@@ -240,7 +240,9 @@ started one; the other socket still shows **Charging**, but not as yours.
 The portal gives each socket in use the charging account's customer id: a number, the
 same every time that account charges, with no name, card or car. A socket status
 sensor shows it as `driver_id` (yours too, when it's your session), and empty while
-the socket is free.
+the socket is free or the id isn't known yet. `none` means the charger's details were
+read and Mer has no account for the session: most likely it was started with another
+provider's card.
 
 To put names to them, **Configure → Known drivers**, one per line:
 

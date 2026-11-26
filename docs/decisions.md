@@ -701,3 +701,15 @@ diagnostics can redact them.
 **Cost if wrong.** A swap between polls with no push in between keeps the previous driver
 until the hourly detail. The ids are other customers'; if Mer drops the field, `driver_id`
 stays empty and nothing else breaks.
+
+## 2026-11-26: no customer id shows as none
+
+**What happened.** Read from a live instance. A charging socket's detail had no customer
+id, and nothing else the portal returns named the session; `driver_id` stayed empty, the
+same as "not looked up yet".
+
+**Decision.** Once a session's charger detail has been read without an id, `driver_id` is
+`none` until an id turns up or the socket is free.
+
+**Cost if wrong.** If the portal only adds the id late, `none` shows until the next push
+that carries it or the hourly detail.

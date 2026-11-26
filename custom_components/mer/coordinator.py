@@ -38,6 +38,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DETAIL_REFRESH,
     DOMAIN,
+    DRIVER_NONE,
     EVENT_COMMAND_RESULT,
     HISTORY_LOOKBACK,
     PUSH_POLL_INTERVAL_SECONDS,
@@ -112,10 +113,17 @@ class MerData:
     drivers: Mapping[int, str] = field(default_factory=dict)
     # The names you gave customer ids (the Known drivers option): customer id -> name.
     known_drivers: Mapping[str, str] = field(default_factory=dict)
+    # Sockets in a session whose charger detail was read since it began, found or not.
+    drivers_looked_up: frozenset[int] = frozenset()
 
     def driver_id(self, socket_id: int) -> str | None:
-        """The customer id charging on the socket, when the portal has said."""
-        return self.drivers.get(socket_id)
+        """The customer id charging on the socket; "none" if the portal has none.
+
+        None while it isn't known yet, or the socket isn't in a session.
+        """
+        if (customer_id := self.drivers.get(socket_id)) is not None:
+            return customer_id
+        return DRIVER_NONE if socket_id in self.drivers_looked_up else None
 
     def driver_name(self, socket_id: int) -> str | None:
         """Your name for whoever is charging on the socket, if you gave one."""
@@ -317,6 +325,7 @@ class MerCoordinator(DataUpdateCoordinator[MerData]):
             last_poll_at=self._last_poll_at,
             drivers=self._drivers,
             known_drivers=self.known_drivers,
+            drivers_looked_up=frozenset(self._drivers_looked_up),
         )
 
     @staticmethod
